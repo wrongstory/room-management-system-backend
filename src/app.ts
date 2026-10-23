@@ -1,4 +1,6 @@
 import cors from '@fastify/cors';
+import { randomUUID } from 'node:crypto';
+import { roomPinOperation, roomPinFailureDiagnostic } from './lib/room-pin-diagnostic.js';
 import { RoomPinTransfer } from './modules/rooms/room-pin-transfer.js';
 import { GoogleRoomPinImportSource } from './modules/rooms/google-sheets-pin-import.js';
 import { roomPinImportCredentials } from './modules/rooms/google-sheets-pin.js';
@@ -9,7 +11,7 @@ import rateLimit from '@fastify/rate-limit';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { ZodError } from 'zod';
 import type { AppEnv } from './config/env.js';
-import { loggerOptions } from './config/logger.js';
+import { loggerOptions, safeRequestLog } from './config/logger.js';
 import { type Actor, canManageAccounts } from './domain/actor.js';
 import { AppError } from './lib/app-error.js';
 import { apiTimingEligible, apiTimingHeaders } from './lib/api-timing.js';
@@ -125,8 +127,13 @@ function bearerToken(authorization: string | undefined): string {
 
 export async function buildApp(options: BuildAppOptions): Promise<FastifyInstance> {
   const app = Fastify({
-    logger: options.logger === false ? false : loggerOptions(options.env.LOG_LEVEL),
-    requestIdHeader: 'x-request-id',
+    logger: options.logger === false ? false : { ...loggerOptions(options.env.LOG_LEVEL), serializers: { req: safeRequestLog } },
+    requestIdHeader: false,
+    genReqId: request => {
+      if (roomPinOperation(request.method ?? '', request.url ?? '')) return randomUUID();
+      const supplied = request.headers['x-request-id'];
+      return typeof supplied === 'string' && supplied ? supplied : randomUUID();
+    },
     trustProxy: true
   });
   const requestStarts = new WeakMap<object, number>();
@@ -292,6 +299,14 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   });
 
   app.setErrorHandler((error, request, reply) => {
+    const pinOperation = roomPinOperation(request.method, request.raw.url ?? '');
+    if (pinOperation) {
+      reply.header('Cache-Control', 'no-store');
+      const diagnostic = roomPinFailureDiagnostic(pinOperation, request.id,
+        error instanceof AppError ? error.statusCode : error instanceof ZodError ? 400 : 500,
+        error instanceof AppError ? error.code : 'INTERNAL_SERVER_ERROR');
+      if (diagnostic) app.log.error(diagnostic, 'PIN request failed');
+    }
     if (error instanceof ZodError) {
       return reply.code(400).send({
         error: {
@@ -316,7 +331,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       });
     }
 
-    request.log.error({ err: error }, 'Unhandled request error');
+    if (!pinOperation) request.log.error({ err: error }, 'Unhandled request error');
     return reply.code(500).send({
       error: { code: 'INTERNAL_SERVER_ERROR', message: '서버 오류가 발생했습니다.' },
       requestId: request.id

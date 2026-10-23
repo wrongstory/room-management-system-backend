@@ -4,6 +4,111 @@ import { EdgeError } from "../_shared/runtime.ts";
 import { PhotoError } from "../_shared/photo-binary.ts";
 import type { PhotoService } from "../_shared/photo-service.ts";
 
+Deno.test("#317 PIN 5xx logs correlate server UUID without secrets across all operations", async () => {
+  const paths = [
+    "pins/bootstrap",
+    "room/pin/reveal",
+    "room/pin/generated/confirm",
+    "room/pin-changes/prepare",
+    "room/pin-changes/lease/confirm",
+    "room/pin-changes/lease/rollback",
+  ];
+  const records: unknown[][] = [];
+  const original = console.error;
+  console.error = (...args: unknown[]) => {
+    records.push(args);
+  };
+  const supplied = "10000000-0000-4000-8000-000000000001";
+  try {
+    for (const path of paths) {
+      for (
+        const failure of [
+          new EdgeError(503, "ROOM_PIN_KEY_UNAVAILABLE", "safe"),
+          new Error("synthetic-secret-raw"),
+          new EdgeError(503, "synthetic-secret-code", "safe"),
+        ]
+      ) {
+        const deps: ApiHandlerDependencies = {
+          createClients: () => ({}) as EdgeClients,
+          authenticateRequest: () => Promise.reject(failure),
+        };
+        const before = records.length;
+        const response = await handleApiRequest(
+          new Request(
+            `https://api.example/api/v1/rooms/${path}?pin=synthetic-secret-query`,
+            {
+              method: "POST",
+              headers: {
+                "x-request-id": supplied,
+                authorization: "Bearer synthetic-secret-token",
+                "content-type": "application/json",
+              },
+              body: "{}",
+            },
+          ),
+          deps,
+        );
+        const body = await response.json();
+        assert(
+          response.status === (failure instanceof EdgeError ? 503 : 500),
+          "expected failure",
+        );
+        assert(
+          response.headers.get("cache-control") === "no-store",
+          "no cache",
+        );
+        assert(
+          body.requestId !== supplied &&
+            /^[0-9a-f-]{14}4[0-9a-f-]{21}$/.test(body.requestId),
+          "server UUID",
+        );
+        assert(records.length === before + 1, "exactly one diagnostic");
+        const record = JSON.parse(String(records.at(-1)?.[0]));
+        assert(
+          record.requestId === body.requestId &&
+            record.status === response.status,
+          "response correlation",
+        );
+        assert(
+          Object.keys(record).sort().join(",") ===
+            "code,operation,requestId,status",
+          "closed projection",
+        );
+        assert(
+          record.code ===
+            (failure instanceof EdgeError &&
+                failure.code === "ROOM_PIN_KEY_UNAVAILABLE"
+              ? failure.code
+              : "INTERNAL_SERVER_ERROR"),
+          "allowlist",
+        );
+      }
+    }
+    const before = records.length;
+    const denied = await handleApiRequest(
+      new Request("https://api.example/api/v1/rooms/room/pin/reveal", {
+        method: "POST",
+      }),
+      {
+        createClients: () => ({}) as EdgeClients,
+        authenticateRequest: () =>
+          Promise.reject(new EdgeError(401, "INVALID_ACCESS_TOKEN", "denied")),
+      },
+    );
+    assert(
+      denied.status === 401 && records.length === before,
+      "4xx not logged",
+    );
+    await denied.body?.cancel();
+    assert(
+      !JSON.stringify(records).includes("synthetic-secret"),
+      "no secret canaries in logs",
+    );
+  } finally {
+    console.error = original;
+  }
+});
+
 Deno.test("common timing exposes only fixed duration on successful business responses", async () => {
   const deps: ApiHandlerDependencies = {
     createClients: () =>
