@@ -182,6 +182,49 @@ describe('supplemental default app runtime', () => {
   });
 });
 
+describe('#317 PIN failure correlation', () => {
+  const paths = ['pins/bootstrap', 'room/pin/reveal', 'room/pin/generated/confirm', 'room/pin-changes/prepare', 'room/pin-changes/lease/confirm', 'room/pin-changes/lease/rollback'];
+  it.each(paths)('uses server UUID and closed diagnostic for %s', async (path) => {
+    const service = services();
+    const error = new AppError(503, 'ROOM_PIN_KEY_UNAVAILABLE', 'safe message');
+    vi.mocked(service.auth.authenticate).mockRejectedValue(error);
+    const app = await buildApp({ env, services: service, logger: false });
+    const log = vi.spyOn(app.log, 'error');
+    try {
+      const ids = new Set<string>();
+      for (const supplied of ['spoofed-secret', '10000000-0000-4000-8000-000000000001']) {
+        const response = await app.inject({ method: 'POST', url: `/v1/rooms/${path}?pin=synthetic-secret`, headers: { authorization: 'Bearer synthetic', 'x-request-id': supplied }, payload: {} });
+        expect(response.statusCode).toBe(503);
+        expect(response.headers['cache-control']).toBe('no-store');
+        const id = response.json().requestId;
+        expect(id).toMatch(/^[0-9a-f-]{14}4[0-9a-f-]{21}$/);
+        expect(id).not.toBe(supplied);
+        ids.add(id);
+        const record = log.mock.calls.at(-1)?.[0];
+        expect(record).toMatchObject({ requestId: id, status: 503, code: 'ROOM_PIN_KEY_UNAVAILABLE' });
+        expect(Object.keys(record as object).sort()).toEqual(['code', 'operation', 'requestId', 'status']);
+      }
+      expect(ids.size).toBe(2);
+      expect(log).toHaveBeenCalledTimes(2);
+    } finally { await app.close(); }
+  });
+  it('logs unknown exceptions once without raw message and does not log expected 4xx', async () => {
+    const service = services();
+    vi.mocked(service.auth.authenticate).mockRejectedValueOnce(new Error('synthetic-secret-raw')).mockRejectedValueOnce(new AppError(401, 'INVALID_ACCESS_TOKEN', 'denied'));
+    const app = await buildApp({ env, services: service, logger: false });
+    const log = vi.spyOn(app.log, 'error');
+    try {
+      for (const status of [500, 401]) {
+        const response = await app.inject({ method: 'POST', url: '/v1/rooms/room/pin/reveal', headers: { authorization: 'Bearer synthetic' }, payload: {} });
+        expect(response.statusCode).toBe(status);
+        expect(response.body).not.toContain('synthetic-secret-raw');
+      }
+      expect(log).toHaveBeenCalledTimes(1);
+      expect(JSON.stringify(log.mock.calls)).not.toContain('synthetic-secret-raw');
+    } finally { await app.close(); }
+  });
+});
+
 const env: AppEnv = {
   APP_ENV: 'local',
   NODE_ENV: 'test',

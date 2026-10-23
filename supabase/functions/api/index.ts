@@ -393,14 +393,15 @@ async function handleApiRequestCore(
   request: Request,
   dependencies: ApiHandlerDependencies,
 ): Promise<Response> {
-  const id = requestId(request);
+  let id = requestId(request);
   let corsHeaders: Record<string, string> = {};
   let clients: EdgeClients | undefined;
   let actor: EdgeActor | undefined;
   let path = "/";
   try {
-    corsHeaders = cors(request);
     path = routePath(request.url);
+    if (roomPinOperation(request.method, path)) id = crypto.randomUUID();
+    corsHeaders = cors(request);
     const decodedLimitedPath = path.split("/").map((segment) => {
       try {
         return decodeURIComponent(segment);
@@ -2312,6 +2313,26 @@ async function handleApiRequestCore(
         responseError = activityError;
       }
     }
+    const pinOperation = roomPinOperation(request.method, path);
+    if (pinOperation) {
+      const diagnostic = roomPinFailureDiagnostic(
+        pinOperation,
+        id,
+        responseError instanceof EdgeError ? responseError.status : 500,
+        responseError instanceof EdgeError
+          ? responseError.code
+          : "INTERNAL_SERVER_ERROR",
+      );
+      if (diagnostic) console.error(JSON.stringify(diagnostic));
+      // The generic handler must not emit a second unbounded error record.
+      if (!(responseError instanceof EdgeError)) {
+        responseError = new EdgeError(
+          500,
+          "INTERNAL_SERVER_ERROR",
+          "서버 오류가 발생했습니다.",
+        );
+      }
+    }
     return errorResponse(responseError, id, corsHeaders);
   }
 }
@@ -2320,3 +2341,7 @@ if (import.meta.main) {
   Deno.serve((request) => handleApiRequest(request));
 }
 import { roomPinTransferResponse } from "../_shared/room-pin-transfer-api.ts";
+import {
+  roomPinFailureDiagnostic,
+  roomPinOperation,
+} from "../_shared/room-pin-diagnostic.ts";

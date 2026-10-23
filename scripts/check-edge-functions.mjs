@@ -10,6 +10,7 @@ const sourcePaths = [
   'supabase/functions/_shared/api-timing.ts',
   'supabase/functions/_shared/runtime.ts',
   'src/modules/auth/auth-context.ts',
+  'supabase/functions/_shared/room-pin-diagnostic.ts',
   'supabase/functions/_shared/activity-contract.ts',
   'supabase/functions/_shared/activity-api.ts',
   'supabase/functions/_shared/payroll-remittance-batch.ts',
@@ -251,6 +252,8 @@ export function verifyPostApprovalReportEdgeBundle({ rawSourceDiagnostic = false
 }
 
 function main() {
+const pinDiagnostic = spawnSync(process.execPath, ['scripts/generate-room-pin-diagnostic-edge.mjs', '--check'], { stdio: 'inherit' });
+if (pinDiagnostic.status !== 0) throw new Error('PIN diagnostic generated source verification failed');
 const batch = spawnSync(process.execPath, ['scripts/generate-remittance-batch-edge.mjs', '--check'], { stdio: 'inherit' });
 if (batch.status !== 0) throw new Error('Remittance batch generated source verification failed');
 const timing = spawnSync(process.execPath, ['scripts/generate-api-timing-edge.mjs', '--check'], { stdio: 'inherit' });
