@@ -5,6 +5,39 @@ import { buildApp, type AppServices } from '../src/app.js';
 import type { AppEnv } from '../src/config/env.js';
 
 const require = createRequire(import.meta.url);
+
+describe('#465 development tool security patch', () => {
+  it('pins patched Vite and the complete Vitest family as development-only packages', async () => {
+    const manifest = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
+    const lock = JSON.parse(await readFile(new URL('../package-lock.json', import.meta.url), 'utf8')) as {
+      packages: Record<string, { version?: string; dev?: boolean }>;
+    };
+    expect(manifest.devDependencies.vitest).toBe('4.1.12');
+    expect(manifest.overrides.vite).toBe('8.2.4');
+    expect(manifest.dependencies.vite).toBeUndefined();
+    expect(manifest.dependencies.vitest).toBeUndefined();
+    for (const [name, version] of [['vite', '8.2.4'], ['vitest', '4.1.12'], ['@vitest/mocker', '4.1.12']] as const) {
+      const copies = Object.entries(lock.packages).filter(([path]) =>
+        path === `node_modules/${name}` || path.endsWith(`/node_modules/${name}`));
+      expect(copies.length, name).toBeGreaterThan(0);
+      for (const [, entry] of copies) {
+        expect(entry.version, name).toBe(version);
+        expect(entry.dev, name).toBe(true);
+      }
+      const installed = JSON.parse(await readFile(require.resolve(`${name}/package.json`), 'utf8'));
+      expect(installed.version, name).toBe(version);
+    }
+    for (const [path, entry] of Object.entries(lock.packages)) {
+      if (path.includes('node_modules/@vitest/')) {
+        expect(entry.version, path).toBe('4.1.12');
+        expect(entry.dev, path).toBe(true);
+      }
+    }
+    expect(manifest.scripts.dev).toBe('tsx watch src/server.ts');
+    expect(manifest.scripts.test).toBe('vitest run');
+  });
+});
+
 const env: AppEnv = {
   APP_ENV: 'local', NODE_ENV: 'test', HOST: '127.0.0.1', PORT: 3000, LOG_LEVEL: 'silent',
   CORS_ORIGINS: 'http://127.0.0.1:4173', corsOrigins: ['http://127.0.0.1:4173'],
@@ -46,7 +79,7 @@ describe('#334 dependency security patch', () => {
     expect(manifest.dependencies.fastify).toBe('5.12.5');
     expect(manifest.overrides).toEqual({
       'fast-uri@^3.0.0': '3.1.8', 'fast-uri@^4.0.0': '4.1.5', 'ip-address': '10.7.1',
-      'source-map-js': '1.2.2'
+      'source-map-js': '1.2.2', 'vite': '8.2.4'
     });
     expect(lock.packages['']?.dependencies?.fastify).toBe('5.12.5');
     // Overrides can move copies underneath consumers; do not assume root hoisting.
