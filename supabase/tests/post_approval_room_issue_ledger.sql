@@ -807,5 +807,30 @@ select throws_ok($$select pg_temp.save_late(p_actor=>3,p_client=>8801,p_key=>rep
   '42501','SESSION_REVOKED','expired notified-assignee session cannot replay success');
 select throws_ok($$select public.get_post_approval_room_issue_source(pg_temp.lid(3),pg_temp.lid(206),pg_temp.lid(4002))$$,
   '42501','SESSION_REVOKED','historical assignment does not override source session expiry');
+-- #474: memo-only finalization uses the real draft-created empty collection.
+insert into late_results values('memo-draft',pg_temp.save_late(p_actor=>1,p_client=>8901,p_key=>repeat('ab',32),p_session=>201));
+insert into late_results values('memo-report',public.finalize_post_approval_room_issue_report(
+  pg_temp.lid(1),pg_temp.lid(201),pg_temp.lid(4002),pg_temp.lid(8901),1,0,'synthetic memo','[]',repeat('ac',32),repeat('ad',32)));
+set constraints all immediate;
+select is((select value#>'{report,evidence}' from late_results where label='memo-report'),'[]'::jsonb,
+  'memo-only report returns an empty array, not null');
+select is(public.finalize_post_approval_room_issue_report(
+  pg_temp.lid(1),pg_temp.lid(201),pg_temp.lid(4002),pg_temp.lid(8901),1,0,'synthetic memo','[]',repeat('ac',32),repeat('ad',32)),
+  (select value from late_results where label='memo-report'),'memo-only retry preserves exact immutable result');
+select is((select count(*) from private.post_approval_issue_report_seals where report_id=
+  (select (value#>>'{report,reportId}')::uuid from late_results where label='memo-report')),0::bigint,
+  'memo-only report creates no fictitious photo seal');
+select lives_ok($$select public.close_post_approval_room_issue_report(pg_temp.lid(1),pg_temp.lid(201),pg_temp.lid(4002),
+  (select (value#>>'{report,reportId}')::uuid from late_results where label='memo-report'),0,repeat('ae',32),repeat('af',32))$$,
+  'admin can close memo-only report without a provider object');
+select is(public.get_post_approval_room_issue_report(pg_temp.lid(1),pg_temp.lid(201),pg_temp.lid(4002),
+  (select (value#>>'{report,reportId}')::uuid from late_results where label='memo-report'))#>'{report,evidence}',
+  '[]'::jsonb,'closed memo-only report remains readable');
+select throws_ok($$select public.finalize_post_approval_room_issue_report(pg_temp.lid(1),pg_temp.lid(201),pg_temp.lid(4002),
+  pg_temp.lid(8901),1,1,'synthetic memo','[]',repeat('ba',32),repeat('bb',32))$$,
+  '22023','INVALID_POST_APPROVAL_ROOM_ISSUE','empty evidence cannot claim a positive revision');
+select throws_ok($$select public.finalize_post_approval_room_issue_report(pg_temp.lid(1),pg_temp.lid(201),pg_temp.lid(4002),
+  pg_temp.lid(8901),1,0,' ','[]',repeat('bc',32),repeat('bd',32))$$,
+  '22023','INVALID_POST_APPROVAL_ROOM_ISSUE','empty memo plus no photo is still invalid');
 select * from finish();
 rollback;

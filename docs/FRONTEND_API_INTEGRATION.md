@@ -1,5 +1,13 @@
 # 프론트엔드·Codex API 연동 가이드
 
+## #411 사진 최종 등록 왕복 감소 — 2026-10-22 미배포 후보
+
+최종 등록과 권한 있는 사진 목록 조회를 하나의 내부 RPC로 묶는
+[후속 계약](./PHOTO_FINALIZE_ROUNDTRIPS_411.md)을 준비했다. 공개 API/JSON 변경은 없고
+프런트 DOCS/32의 순차 큐·동일 key/Blob·snapshot/null fallback을 유지한다.
+새 `photo_db_finalize_snapshot` timing은 합친 왕복이며, 개별 finalize/snapshot 수치와 혼합하지 않는다.
+새 SQL 적용은 실행 전 사용자 승인 대상이고 운영 API51에는 아직 포함되지 않았다.
+
 ## #415 후속 상태 — 2026-10-13 운영 미반영
 
 PR453은 최신 CI38361677993 application/manifest PASS와 독립 QA 확인 후

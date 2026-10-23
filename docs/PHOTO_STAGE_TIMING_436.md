@@ -1,5 +1,9 @@
 # #436 업로드 DB·Drive 세부 계측
 
+2026-10-22 미배포 #411 후보: `photo_db_finalize_snapshot`은 opt-in 최종 등록과 목록 조회를
+합친 DB 왕복이다. 정상 후보 경로는 기존 `db_finalize`/`db_snapshot` 대신 이 이름을 쓴다.
+재시도·별도 GET은 기존 이름을 유지한다. [검증·배포 경계](./PHOTO_FINALIZE_ROUNDTRIPS_411.md).
+
 2026-10-10 [v0.9.4/API45 운영 배포 완료](./RELEASE_V0.9.4_DEPLOYED.md).
 #435 Drive ACK 재사용과 #437 세부 계측이 반영됐다. 실사용 성능 개선율은 아직 미측정이다.
 삭제 개발은 보류하고 사진 업로드를 우선한다.

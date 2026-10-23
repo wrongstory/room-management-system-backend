@@ -10,7 +10,7 @@ const object = <T extends Record<string, unknown>>(properties: T) => ({
   type: 'object', additionalProperties: false, required: Object.keys(properties), properties
 } as const);
 const evidenceItem = object({ evidenceId: id, revision: positiveRevision, displayOrder: { type: 'integer', minimum: 0, maximum: 9 } });
-const evidence = { type: 'array', minItems: 1, maxItems: 10, items: evidenceItem,
+const evidence = { type: 'array', minItems: 0, maxItems: 10, items: evidenceItem,
   description: '서로 다른 새 evidenceId만 허용하며 displayOrder는 배열 순서대로 0..n-1이다. 기존 제출 사진은 사용할 수 없다.' } as const;
 const source = object({ sourceSubmissionId: id, originalPerformerProfileId: id,
   sourceStatus: { type: 'string', enum: ['submitted', 'approved', 'rejected', 'superseded'],
@@ -60,9 +60,13 @@ export const postApprovalRoomIssueOpenApiFragment = {
       description: `${common.description} 같은 source의 최신50개를 reportedAt DESC/reportId DESC로 조회한다. client query/cursor/version을 받지 않으며 새 날짜 마감/타 메이드/초안 권한을 만들지 않는다.`,
       responses: { '200': response(object({ source, reports: { type: 'array', maxItems: 50, items: reportRead } }), '같은 원 source의 불변 신고와 현재 종결 상태'), ...errors } },
       post: { ...common, operationId: 'finalizePostApprovalRoomIssueReport', summary: '새 증빙으로 추가 특이사항 신고 확정', parameters: [pathParameter, keyParameter],
-      description: `${common.description} 새 typed accepted evidence의 정확한 CAS·불변 seal·receipt·typed notification/outbox를 하나의 transaction으로 저장한다. 이후 수정본의 운영 반영은 별도 릴리스 절차를 따른다.`,
-      requestBody: { required: true, content: { 'application/json': { schema: object({ clientReportId: id, expectedDraftRevision: positiveRevision,
-        expectedEvidenceRevision: positiveRevision, memo, evidence }) } } },
+      description: `${common.description} 새 typed accepted evidence의 정확한 CAS·불변 seal·receipt·typed notification/outbox를 하나의 transaction으로 저장한다. #474 메모 전용 등록은 미배포 후보다. DB/API 배포 후 사진 없는 초안은 evidence: [], expectedEvidenceRevision: 0으로 확정한다. 사진이 있으면 현재 양수 revision과 전체 목록을 보낸다. 메모는 항상 필수다. 이후 수정본의 운영 반영은 별도 릴리스 절차를 따른다.`,
+      requestBody: { required: true, content: { 'application/json': { schema: { ...object({ clientReportId: id, expectedDraftRevision: positiveRevision,
+        expectedEvidenceRevision: revision, memo, evidence }), oneOf: [
+          { properties: { expectedEvidenceRevision: { const: 0 }, evidence: { maxItems: 0 } } },
+          { properties: { expectedEvidenceRevision: { minimum: 1 }, evidence: { minItems: 1 } } }
+        ] },
+        } } },
       responses: { '201': response(object({ source, report }), 'typed evidence 검증·immutable seal·receipt/outbox commit'), ...errors } } },
     [`${base}/{reportId}`]: { get: { ...common, operationId: 'getPostApprovalRoomIssueReport', summary: '추가 특이사항 신고 상세 조회', parameters: [pathParameter,
       { name: 'reportId', in: 'path', required: true, schema: id }], responses: { '200': response(object({ source, report: reportRead }), '실제 통보 배정 이력이 있는 메이드/관리자의 불변 신고와 현재 종결 상태'), ...errors } } },
