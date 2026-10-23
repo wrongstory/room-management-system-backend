@@ -41,6 +41,23 @@ async function fixture(initial = actor(), result?: unknown, dbError?: unknown) {
 }
 
 describe('#336 isolated HTTP/RPC source slice (synthetic, not DB authorization)', () => {
+  it('finalizes a memo-only report without upload RPCs and returns an empty evidence array', async () => {
+    const payload = { ...finalize, expectedEvidenceRevision: 0, evidence: [] };
+    const f = await fixture(actor('admin'), { source, report: {
+      reportId: id(6), clientReportId: id(4), sourceSubmissionId: id(3),
+      originalPerformerProfileId: id(1), reportedByProfileId: id(1),
+      reportedAt: '2026-10-22T00:00:00Z', memo: payload.memo, evidence: []
+    } });
+    try {
+      const reply = await f.app.inject({ method: 'POST', url: base, headers, payload });
+      expect(reply.statusCode).toBe(201);
+      expect(reply.headers['cache-control']).toBe('no-store');
+      expect(reply.json().report.evidence).toEqual([]);
+      expect(f.calls).toHaveLength(1);
+      expect(f.calls[0]?.name).toBe('finalize_post_approval_room_issue_report');
+      expect(f.calls[0]?.args).toMatchObject({ p_expected_evidence_revision: 0, p_evidence: [], p_memo: payload.memo });
+    } finally { await f.app.close(); }
+  });
   it.each([
     [new AppError(500, 'SESSION_REVOKED', 'private-canary'), 401, 'SESSION_REVOKED'],
     [new AppError(409, 'PRIVATE_CANARY', 'private-canary'), 500, 'POST_APPROVAL_ROOM_ISSUE_COMMAND_FAILED'],

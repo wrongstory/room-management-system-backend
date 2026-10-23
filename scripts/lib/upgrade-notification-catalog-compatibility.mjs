@@ -12,8 +12,12 @@ const catalogTable = 'private.notification_event_catalog';
 const literal = value => `'${value.replaceAll("'", "''")}'`;
 
 function checkExpectedCount(expectedCount) {
-  assert(Number.isSafeInteger(expectedCount) && expectedCount >= 95 && expectedCount <= 112,
-    'Only the audited95..112 upgrade range is supported; index-only112 adds no catalog rows');
+  // 112 indexes; 113 auth read; 114 room aggregate; 115/118 assignment planning;
+  // 116/117 payroll projection; 119 PIN transfer; 120/121 photo commands;
+  // 122 memo-only reports. These sources add no notification catalog rows.
+  // Runtime event dispatch is not permission to mutate historical catalog metadata.
+  assert(Number.isSafeInteger(expectedCount) && expectedCount >= 95 && expectedCount <= 122,
+    'Only the audited95..122 upgrade range is supported; 112..122 add no catalog rows');
 }
 function catalogRows(value) {
   assert(Array.isArray(value), 'An existing baseline notification catalog is required');

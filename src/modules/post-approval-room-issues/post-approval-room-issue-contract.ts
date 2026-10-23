@@ -36,9 +36,9 @@ function orderedEvidence<T extends z.ZodType<{ evidenceId: string; displayOrder:
 }
 const finalizeSchema = draftSchema.extend({
   expectedDraftRevision: positiveRevision,
-  expectedEvidenceRevision: positiveRevision,
-  evidence: orderedEvidence(exactEvidenceSchema)
-}).strict();
+  expectedEvidenceRevision: revision,
+  evidence: orderedEvidence(exactEvidenceSchema, 0)
+}).strict().refine(value => (value.evidence.length === 0) === (value.expectedEvidenceRevision === 0));
 const keySchema = z.string().min(8).max(128).regex(/^[A-Za-z0-9._:-]+$/);
 const closeSchema = z.object({ sourceSubmissionId: id, reportId: id, expectedClosureRevision: z.literal(0) }).strict();
 const closureSchema = z.object({ reportId: id, closureRevision: z.literal(1), closedAt: z.iso.datetime({ offset: true }) });
@@ -73,7 +73,7 @@ const reportProjectionSchema = z.object({
   reportedByProfileId: id,
   reportedAt: z.iso.datetime({ offset: true }),
   memo,
-  evidence: orderedEvidence(z.object(evidenceShape))
+  evidence: orderedEvidence(z.object(evidenceShape), 0)
 });
 // Immutable finalize receipts retain their original projection. GET/list read
 // the current closure separately and fail closed on inconsistent metadata.
