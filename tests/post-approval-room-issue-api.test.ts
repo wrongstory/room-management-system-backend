@@ -191,7 +191,8 @@ describe('#336 isolated HTTP/RPC source slice (synthetic, not DB authorization)'
       expect(operation.responses['503']).toBeDefined();
     }
     const operation = postApprovalRoomIssueOpenApiFragment.paths[base.replace(id(3), '{sourceSubmissionId}')]?.post;
-    expect(operation?.description).toContain('이후 수정본의 운영 반영은 별도 릴리스 절차를 따른다');
+    expect(operation?.description).toContain('메모 전용 등록을 지원한다');
+    expect(operation?.description).not.toContain('미배포 후보');
     expect(operation?.description).not.toContain('source 등록이며');
     expect(operation?.description).toContain('CAS·불변 seal·receipt');
   });

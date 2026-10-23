@@ -863,14 +863,14 @@ export const openApiDocument = {
       "3. `mustChangePassword=true`이면 계정·객실 화면으로 보내지 말고 `POST /v1/auth/password`만 허용합니다.",
       "4. 변경 API에는 사용자 동작별 `Idempotency-Key`를 보내며, 같은 본문 재시도에만 같은 키를 재사용합니다.",
       "5. 실패 처리는 HTTP 상태와 함께 안정적인 `error.code`를 기준으로 분기합니다.",
-      "공통 인증 확인 장애는 503 AUTH_CONTEXT_UNAVAILABLE입니다. 계정 폐기/로그인 만료(401 SESSION_REVOKED)와 다르므로 자동 로그아웃하거나 빈 데이터로 대체하지 마세요. 재시도 UI를 제공하고 변경 요청은 같은 본문·Idempotency-Key를 유지합니다. #442 source 후보이며 운영 적용은 릴리스 기록으로 확인합니다.",
+      "공통 인증 확인 장애는 503 AUTH_CONTEXT_UNAVAILABLE입니다. 계정 폐기/로그인 만료(401 SESSION_REVOKED)와 다르므로 자동 로그아웃하거나 빈 데이터로 대체하지 마세요. 재시도 UI를 제공하고 변경 요청은 같은 본문·Idempotency-Key를 유지합니다.",
       "",
       "## 역할 경계",
       "- `developer`: 계정 관리·운영 상태와 별도의 안전한 객실 기준정보 카탈로그만 관리할 수 있으며 예약·점유·청소·PIN 운영 데이터는 금지됩니다.",
       "- `admin`: 계정 관리와 객실 업무가 가능합니다.",
       "- `maid`: 계정·전체 객실 API는 사용할 수 없고 본인의 주간 가능일만 조회·제출·변경 요청할 수 있습니다.",
       "",
-      "## 성능 계측 (source 후보)",
+      "## 성능 계측",
       "선택 업무 경로의 성공 응답은 Server-Timing: api_total;dur=<ms>를 제공합니다. 허용된 브라우저 Origin에서 응답 헤더를 읽을 수 있습니다. 오류·인증/공개 경로·HEAD/OPTIONS는 제외하며 고정 숫자만 반환합니다. api_total은 handler 시작부터 응답 생성까지이며 전체 업로드/다운로드·렌더링·콜드 시작 시간 또는 DB 단독 시간이 아닙니다. 계약·권한·캐시 정책은 바뀌지 않습니다. 운영 적용 여부와 경로 목록은 docs/API_PERFORMANCE_413.md를 확인하세요.",
       "",
       "프론트 구현 절차와 타입 생성 명령은 저장소의 `docs/FRONTEND_API_INTEGRATION.md`를 참고하세요.",
@@ -10256,7 +10256,7 @@ export const openApiDocument = {
             type: "string",
             format: "date",
             description:
-              "불변 통보/변경 근거의 배정 계획일. 원 serviceDate와 구분하며 메이드 오늘/내일 목록 및 실행일 판정에 사용. #446 미배포 후보.",
+              "불변 통보/변경 근거의 배정 계획일. 원 serviceDate와 구분하며 메이드 오늘/내일 목록 및 실행일 판정에 사용.",
           },
           targetAssignmentVersion: {
             type: "integer",
@@ -10452,7 +10452,7 @@ export const openApiDocument = {
             type: "string",
             format: "date",
             description:
-              "통보/담당 변경 근거의 계획일. 원 serviceDate를 덮어쓰지 않으며 생성일·통보일과 다릅니다. #446 미배포 후보.",
+              "통보/담당 변경 근거의 계획일. 원 serviceDate를 덮어쓰지 않으며 생성일·통보일과 다릅니다.",
           },
           cleaningKind: {
             type: "string",
@@ -15014,7 +15014,7 @@ function prestartRequestSchema(
       type: "string",
       format: "date",
       description:
-        "오늘/내일 배정 탭에서 선택한 KST 계획일. 과거 업무 담당 변경 시 반드시 전달. 생략은 기존 통보 계획일/원 날짜 호환이며 생성일·통보일이 아님. #446 미배포 후보.",
+        "오늘/내일 배정 탭에서 선택한 KST 계획일. 과거 업무 담당 변경 시 반드시 전달. 생략은 기존 통보 계획일/원 날짜 호환이며 생성일·통보일이 아님.",
     };
     properties.maidProfileId = { type: "string", format: "uuid" };
     properties.sequenceNumber = { type: "integer", minimum: 1 };
