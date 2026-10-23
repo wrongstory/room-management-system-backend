@@ -27,6 +27,19 @@ const report = () => ({ reportId: id(5), clientReportId: id(3), sourceSubmission
 const key = 'synthetic-report-key';
 
 describe('post-approval room issue pure contract foundation (no endpoint or DB authorization)', () => {
+  it('accepts memo-only finalization and empty evidence report projections', () => {
+    const input = { ...complete(), expectedEvidenceRevision: 0, evidence: [] };
+    expect(validatePostApprovalRoomIssueFinalization(input).evidence).toEqual([]);
+    const open = { ...report(), evidence: [], closureRevision: 0, closedAt: null, closedByProfileId: null };
+    expect(projectPostApprovalRoomIssueReport(open).evidence).toEqual([]);
+    expect(projectPostApprovalRoomIssueReportList([open])[0]?.evidence).toEqual([]);
+    expect(projectPostApprovalRoomIssueReportRead({ ...open, closureRevision: 1,
+      closedAt: '2000-01-02T00:00:00Z', closedByProfileId: id(9) }).evidence).toEqual([]);
+    expect(() => validatePostApprovalRoomIssueFinalization({ ...input, memo: ' ' })).toThrow(AppError);
+    expect(() => validatePostApprovalRoomIssueFinalization({ ...input, expectedEvidenceRevision: 1 })).toThrow(AppError);
+    expect(preparePostApprovalRoomIssueFinalization(actor(), input, key).requestHash)
+      .toBe(preparePostApprovalRoomIssueFinalization(actor(), input, key).requestHash);
+  });
   it('reads current closure without changing immutable finalize projections', () => {
     const open = { ...report(), closureRevision: 0, closedAt: null, closedByProfileId: null };
     const closed = { ...report(), closureRevision: 1, closedAt: '2000-01-02T00:00:00Z', closedByProfileId: id(9) };
@@ -262,7 +275,7 @@ describe('post-approval room issue pure contract foundation (no endpoint or DB a
 
   it('rejects malformed backend DTOs with safe fixed projection errors rather than false success or raw values', () => {
     for (const value of [null, [], { ...report(), memo: ' ' }, { ...report(), reportedAt: '2000-02-30T00:00:00Z' },
-      { ...report(), evidence: [] }, { ...report(), reportedByProfileId: 'synthetic_secret' }]) {
+      { ...report(), evidence: null }, { ...report(), reportedByProfileId: 'synthetic_secret' }]) {
       expect(() => projectPostApprovalRoomIssueReport(value)).toThrow(expect.objectContaining({
         statusCode: 500, code: 'POST_APPROVAL_ROOM_ISSUE_PROJECTION_INVALID'
       }));

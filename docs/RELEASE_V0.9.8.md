@@ -1,5 +1,23 @@
 # v0.9.8 사진 최종 등록 왕복 최적화
 
+## 2026-10-23 메모 전용 신고 통합
+
+- 사용자 승인으로 PR #475(dev 35db7b2)를 이 릴리스 후보에 포함한다.
+- 사진 최종 등록 최적화와 기존 main 회귀 보완은 유지한다.
+- 후속 migration122 post_approval_memo_only를 포함하며 기존121개 SQL은 변경하지 않는다.
+- catalog 검사 범위는 감사된122까지이며123 이상은 거부한다. 기존 digest/source pin 검사도 보존한다.
+- 메모 필수·사진0~10장 API/Edge/Swagger 계약은 MEMO_ONLY_SUPPLEMENTAL_REPORT.md를 따른다.
+- 이전 CI39723508013의 전체 DB PASS는 사진 최적화 후보만의 결과다.
+  이번 통합 입력의 성공 증거로 재사용하지 않는다.
+- 이번 승인 범위는 통합본의 격리 CI 전체 DB 검증1회다. 실패/취소 후 재실행은 재승인한다.
+  운영 migration·API 배포·태그는 수행하지 않는다.
+- 메모 전용 기록 생성 후 사진 최소1장 제약 또는 비호환 API로 rollback하지 않는다.
+  신규 등록을 중단하는 호환 API로 대응하고 기존 기록을 보존한다.
+- 아래121개/사진 최적화만의 범위 및 검증 수치는 이전 후보의 이력이다.
+- 통합 로컬 검증: ci:quality PASS(125파일3150건·타입·빌드·비밀/OpenAPI),
+  edge:check PASS(후보19,425,469bytes), manifest122/diff PASS.
+  실제 통합 DB 결과는 새 CI run에서 별도로 확인한다.
+
 ## 범위와 통합
 
 - dev5e0b7c1(PR472)에서 시작, main ad1b1a0의 릴리스 문서·SQL/경합 회귀 보완을 보존한다.

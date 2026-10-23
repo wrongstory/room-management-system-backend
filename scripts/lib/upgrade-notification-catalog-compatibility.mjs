@@ -12,12 +12,12 @@ const catalogTable = 'private.notification_event_catalog';
 const literal = value => `'${value.replaceAll("'", "''")}'`;
 
 function checkExpectedCount(expectedCount) {
-  // The runner pins the exact reviewed source before resetting the database.
-  // 113..121 add/patch functions, indexes and a nullable cursor column, but do
-  // not backfill old rows or add notification catalog rows. Keep the sole111
-  // exception and whole-row comparison; never accept an unknown future tail.
-  assert(Number.isSafeInteger(expectedCount) && expectedCount >= 95 && expectedCount <= 121,
-    'Only the audited95..121 upgrade range is supported; 112..121 add no catalog rows');
+  // 112 indexes; 113 auth read; 114 room aggregate; 115/118 assignment planning;
+  // 116/117 payroll projection; 119 PIN transfer; 120/121 photo commands;
+  // 122 memo-only reports. These sources add no notification catalog rows.
+  // Runtime event dispatch is not permission to mutate historical catalog metadata.
+  assert(Number.isSafeInteger(expectedCount) && expectedCount >= 95 && expectedCount <= 122,
+    'Only the audited95..122 upgrade range is supported; 112..122 add no catalog rows');
 }
 function catalogRows(value) {
   assert(Array.isArray(value), 'An existing baseline notification catalog is required');

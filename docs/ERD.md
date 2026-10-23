@@ -1457,6 +1457,11 @@ Scheduler는 null checkout 예약을 자동 checkout하지 않는다.
 
 ## #336 제출·승인 후 독립 특이사항 보고 (source candidate, DB 미적용)
 
+2026-10-22 #474 후속 후보는 메모 필수/사진 0~10장으로 확장한다.
+report의 evidence_count=0과 evidence_revision=0은 함께 성립하고 seal은 0개다.
+기존 draft collection CAS와 권한·불변 이력을 보존하며 신규 테이블은 없다.
+이후 migration `20261022135443_post_approval_memo_only.sql`은 미적용이다.
+
 2026-10-06 사용자 결정은 관리자 공동 업무와 메이드 본인 실제 통보 배정 이력 접근이다.
 이전 original-performer/creator-only 제한을 최종 정책으로 사용하지 않는다. 후보 SQL은 역사
 접근과 신규 신고 상태 검사를 분리한다. 기존 사건의 source/초안 복구/목록/단건/content/
