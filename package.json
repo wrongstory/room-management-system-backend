@@ -38,6 +38,7 @@
     "db:test:concurrency": "node scripts/test-reservation-concurrency.mjs && node scripts/test-complaint-response-attention-concurrency.mjs && node scripts/test-manual-cleaning-cancel-concurrency.mjs && node scripts/test-payroll-adjustment-book-concurrency.mjs && node scripts/test-payroll-work-details-concurrency.mjs && node scripts/test-payroll-remittance-marker-concurrency.mjs && node scripts/test-limited-existing-session-concurrency.mjs && node scripts/test-photo-collection-provider-context-concurrency.mjs && node scripts/test-photo-storage-names-concurrency.mjs && node scripts/test-room-candle-concurrency.mjs && node scripts/test-post-approval-room-issue-concurrency.mjs && node scripts/test-auth-context-concurrency.mjs",
     "db:test:candles": "node scripts/test-room-candle-concurrency.mjs",
     "backup:dry-run": "node scripts/backup-recovery-dry-run.mjs --target local-synthetic",
+    "backup:reservations": "tsx scripts/reservation-backup.ts",
     "backup:dry-run:fresh": "npm run db:verify && npm run backup:dry-run",
     "edge:check": "node scripts/check-edge-functions.mjs",
     "swagger:pages:build": "node scripts/build-swagger-pages.mjs",
