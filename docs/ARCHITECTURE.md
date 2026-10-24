@@ -990,6 +990,9 @@ enrollment와 emitter에서 재검증합니다. 수신자 profile에 추가 역�
 동일 이벤트는 다른 실행 actor·10분 grouping 경계에서도 재생성하지 않습니다. 늦게 활성화된
 관리자의 새 inbox는 허용하지만 원 event 시각과 기존 push 24h TTL을 유지합니다.
 따라서 24시간 뒤 신규 관리자 push의 즉시 만료 가능성은 별도 #345 OPEN입니다.
+#345 source 후보는 신규 outbox에만 수신자 `enrolled_at`을 사용하고 deferred 검사도
+같은 시각을 요구합니다. 과거 event/inbox/outbox는 보존하며 적용·SQL 검증은 승인 대기입니다.
+[후보 및 검증 상태](./CLEANING_OVERDUE_DELIVERY_CLOCK_345.md)를 확인합니다.
 #343 신규 complaint family의 enrollment-clock delivery 보완을 기존 cleaning family 완료로 확대하지 않습니다.
 현장 완료·업로드·검수 대기에 새 SLA를 만들지 않으며 original domain row는 변경하지 않습니다.
 
