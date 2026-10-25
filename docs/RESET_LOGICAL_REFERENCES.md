@@ -1,7 +1,8 @@
 # 초기화 논리 참조의 유한 registry (#396)
 
 `logical-reference-registry.ts`와 `logical-reference-inspector.ts`는 실제 FK 밖의
-참조를 해석하는 Node 내부 검증기다. source135의 영속 receipt 4경로를 포함한 24개 경로만 등록하고 알 수 없는
+참조를 해석하는 Node 내부 검증기다. source135 영속 receipt 4경로와 source136 인계 감사의
+entity_id/before_state/after_state 3경로를 포함한 27개 경로만 등록하고 알 수 없는
 관계·경로·종류·대상·형식은 차단한다. DB/외부 조회, 삭제·rewrite, 공개 API 및 운영 설정은 없다.
 
 ## 세 가지 의미
@@ -39,6 +40,11 @@ observation의 rowToken은 snapshot 안의 비공개 opaque identity다. 실제 
 행에서 이 입력을 구성한다. 원문 보존 검사는 이전 actor가 현재 존재한다거나 영속 receipt의
 과거 event를 다시 실행할 수 있다는 뜻이 아니다. 새 source135의 actor/binding/header/entry는
 모두 역사 자료이며, `events.receipt_id`의 실제 FK는 기존 FK 검사가 담당한다.
+
+source136의 정확한 인계 감사 이벤트도 역사 JSON 전체와 entity_id를 그대로 보존한다.
+같은 capture의 전체 template 목록에서 원본·신규 ID와 등록 사유·내용·시각을 대조하는
+추가 검사는 composition이 소유한다. 누락·변형·삭제 후보 부모는 차단하며 과거 ID를 현재
+pointer로 승격하거나 재연결하지 않는다. source129의 기존 7경로 수집은 그대로 유지한다.
 
 최대 1,000표면·10,000관측·8MiB 입력·12단계 구조를 허용한다. getter, cycle, custom object,
 sparse array, 추가 필드는 거부하고 오류에는 원문을 넣지 않는다. 반환값은 고정 blocker,

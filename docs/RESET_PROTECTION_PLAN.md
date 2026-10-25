@@ -11,7 +11,7 @@
 새 SQL, 수집기, 공개 API, CLI, 저장 위치, 키, 외부 호출이나 삭제 실행기는 추가하지 않는다.
 
 같은 capture의 project/source/catalog/classification/content/snapshot binding과 명시 선택,
-요청 지문, 기존 review의 최종 계획 지문을 함께 묶는다. 정상 검토의 논리 참조 24경로와
+요청 지문, 기존 review의 최종 계획 지문을 함께 묶는다. 정상 검토의 논리 참조 27경로와
 템플릿 7경로 검사는 기존 composition이 소유하며 최종 계획 지문에 포함된다. 이 모듈은
 그 검사를 복제하거나 역사 snapshot을 현재 DB 참조로 다시 해석하지 않는다.
 
