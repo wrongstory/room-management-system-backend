@@ -174,4 +174,21 @@ describe('one-use trusted reset content snapshot builder', () => {
     expect(result.blockers).toEqual(['RESET_SNAPSHOT_TIMEOUT']);
     expect(JSON.stringify(result)).not.toContain('synthetic-private');
   });
+  it.each([
+    ['roomBaseline', 'RESET_ROOM_BASELINE_DISPOSITION_UNRESOLVED'],
+    ['templateSource', 'RESET_TEMPLATE_DISPOSITION_UNRESOLVED'],
+    ['unresolved', 'RESET_ROW_DISPOSITION_UNRESOLVED'],
+  ])('keeps %s undecided after independent content comparison', async (candidate, code) => {
+    const f = fixture(); at(f.rows).disposition = candidate;
+    expect(await run(f)).toMatchObject({ snapshotValid: false, fingerprint: null, counts: null, blockers: [code] });
+    at(at(f.census).contents).values[1] = typed('value', 'drift remains an error before policy waiting');
+    expect((await run(f)).blockers).toContain('CENSUS_CONTENT_MISMATCH');
+  });
+  it('binds PostgreSQL array type identity without converting values to JS arrays', async () => {
+    const f = fixture();
+    for (const table of [at(f.metadata.relations), at(f.expected.relations)]) table.columns[1] = { name: 'value', pgType: 'pg_catalog._uuid' };
+    at(f.rows).values[1] = typed('value', `{${id}}`, 'pg_catalog._uuid');
+    at(at(f.census).contents).values[1] = typed('value', `{${id}}`, 'pg_catalog._uuid');
+    expect((await run(f)).snapshotValid).toBe(true);
+  });
 });

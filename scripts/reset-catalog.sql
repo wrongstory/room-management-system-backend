@@ -20,7 +20,7 @@ WITH app_relations AS (
       JOIN pg_attribute a ON a.attrelid = k.confrelid AND a.attnum = x.attnum ORDER BY x.ord) AS target_columns,
     idx.relname AS target_key, k.confmatchtype::text AS match,
     k.confdeltype::text AS on_delete, k.confupdtype::text AS on_update,
-    k.convalidated AS validated, k.condeferrable AS deferrable, k.condeferred AS initially_deferred
+    k.convalidated AS validated, k.condeferrable AS "deferrable", k.condeferred AS initially_deferred
   FROM pg_constraint k
   JOIN pg_class src ON src.oid = k.conrelid
   JOIN pg_namespace ns ON ns.oid = src.relnamespace
@@ -74,7 +74,7 @@ SELECT jsonb_build_object(
     'source',source,'target',target,'name',name,'definition',definition,
     'sourceColumns',source_columns,'targetColumns',target_columns,'targetKey',target_key,
     'match',match,'onDelete',on_delete,'onUpdate',on_update,'validated',validated,
-    'deferrable',deferrable,'initiallyDeferred',initially_deferred)
+    'deferrable',"deferrable",'initiallyDeferred',initially_deferred)
     ORDER BY source,name) FROM foreign_keys), '[]'::jsonb),
   'triggers', COALESCE((SELECT jsonb_agg(jsonb_build_object(
     'relation',relation,'name',name,'enabled',enabled,
