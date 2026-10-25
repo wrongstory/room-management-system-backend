@@ -17,6 +17,41 @@ def generated_enum_values(path: Path) -> list[str]:
     return ENUM_VALUE_PATTERN.findall(path.read_text(encoding="utf-8"))
 
 
+def check_reset_preview_roundtrip(repository_root: Path, destination: Path) -> None:
+    node = shutil.which("node")
+    if not node:
+        raise RuntimeError("Node is required for actual reset preview projections")
+    cases = subprocess.run(  # noqa: S603
+        [node, "--import", "tsx", "--input-type=module", "-e",
+         "import { resetPreviewContractResponses } from './tests/fixtures/reset-preview.ts';"
+         "process.stdout.write(JSON.stringify(resetPreviewContractResponses()));"],
+        cwd=repository_root, check=True, capture_output=True, text=True, encoding="utf-8",
+    )
+    roundtrip = """\
+import json
+import sys
+sys.path.insert(0, sys.argv[1])
+from generated.models.developer_reset_preview import DeveloperResetPreview
+cases = json.load(sys.stdin)
+if len(cases) != 5 or len({case['name'] for case in cases}) != 5:
+    raise RuntimeError('Expected five actual reset preview projection cases')
+for case in cases:
+    body = case['body']
+    model = DeveloperResetPreview.from_dict(body)
+    if model.to_dict() != body:
+        raise RuntimeError('Reset preview generated model changed response: ' + case['name'])
+    if not hasattr(model, 'operation_gates'):
+        raise RuntimeError('Required nullable operationGates model field is missing')
+    if (model.operation_gates is None) != (body['operationGates'] is None):
+        raise RuntimeError('Null gate evidence was silently omitted or fabricated')
+print('Python reset preview codegen: five actual nullable/state/effect projections roundtrip PASS')
+"""
+    subprocess.run(  # noqa: S603
+        [sys.executable, "-c", roundtrip, str(destination)], input=cases.stdout,
+        text=True, encoding="utf-8", check=True,
+    )
+
+
 def check_post_approval_contract(document: dict[str, Any]) -> None:
     base = "/v1/cleaning-history/submissions/{sourceSubmissionId}/supplemental-room-issues"
     expected = {
@@ -383,6 +418,7 @@ def main() -> None:
             package / "api" / "developer" / "get_developer_reset_preview.py",
             package / "models" / "developer_reset_preview.py",
             package / "models" / "developer_reset_row_impact.py",
+            package / "models" / "developer_operation_gates_type_0.py",
             package / "models" / "developer_reset_candidate_impact.py",
             package / "api" / "photos" / "get_photo_thumbnail.py",
             package / "api" / "photos" / "admit_attempt_photo_collection_batch.py",
@@ -649,6 +685,7 @@ def main() -> None:
             if field not in template_request:
                 raise RuntimeError(f"사진 템플릿 게시 codegen 필드가 누락됐습니다: {field}")
         check_template_permutation_roundtrip(npm, repository_root, destination)
+        check_reset_preview_roundtrip(repository_root, destination)
         batch_roundtrip = """
 import sys
 from datetime import date

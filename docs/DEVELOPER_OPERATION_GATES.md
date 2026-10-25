@@ -46,3 +46,11 @@ Auth 구조 근거: [Supabase Auth MFA schema migration](https://github.com/supa
 2026-10-25 확인 시 운영 head는 122이고 127/128은 어디에도 적용하지 않은 source 후보다. 이에 따라 기존 generator로 127의 후보 목록과 fingerprint만 185→189, preserve 3→7로 재생성한다. 업무 데이터와 적용 migration history는 불변이다. **v1 source 동결 또는 어떤 환경의 실제 적용 이후에는 127을 재생성하지 않는다. 후속 분류 변경은 append migration과 고정된 baseline generator로 전환한다.**
 
 `supabase/tests/developer_operational_safety_gates.sql`은 준비된 SQL 회귀이며 이번 작업에서 NOT RUN이다. 실제 DB 적용/재적용/RLS/AMR/경쟁 검증은 `FINAL_DB_VALIDATION.md`의 실행별 승인 뒤에만 진행한다.
+
+## 공개 계약 재검토
+
+최초 source 128의 단위/전체/Edge 검사와 독립 source QA가 통과한 뒤, 후속 검토에서
+`operationGates`가 strict OpenAPI 응답에 누락된 P2 결함을 발견했다. 배포하지 않은 상태에서
+nullable 필수 필드와 전용 schema를 보완했다. 실제 Node/Edge projection 5종과 Fastify 응답
+전체를 AJV로 검증하고 같은 실제 응답의 Python 생성 모델 roundtrip을 추가했다.
+기존 PASS가 공개 계약 완전성을 증명하지 못했던 검사 공백을 이 회귀로 보완한다.
