@@ -28,10 +28,10 @@ export async function inspectResetNativePostgres(input: unknown, signal?: AbortS
   return inspectNative(input, signal);
 }
 /** Internal review-only entry; uses the identical owned TLS/read-only connection. */
-export function inspectResetNativeReview(input: unknown, request: unknown, signal?: AbortSignal) {
-  return inspectNative(input, signal, request ?? null);
+export function inspectResetNativeReview(input: unknown, request: unknown, signal?: AbortSignal, planCapture?: object) {
+  return inspectNative(input, signal, request ?? null, planCapture);
 }
-async function inspectNative(input: unknown, signal?: AbortSignal, request?: unknown) {
+async function inspectNative(input: unknown, signal?: AbortSignal, request?: unknown, planCapture?: object) {
   let settings: ReturnType<typeof migrationPostgresConnectionInput> | undefined;
   try {
     const parsed = inputSchema.safeParse(input); if (!parsed.success) return unavailable();
@@ -106,7 +106,7 @@ async function inspectNative(input: unknown, signal?: AbortSignal, request?: unk
       } catch { destroy(); throw new Error('RESET_NATIVE_CONNECTION_FAILED'); }
     };
     return await (request === undefined ? inspectResetReadOnlySource(source, open, signal)
-      : inspectResetReadOnlyReview(source, request, open, signal));
+      : inspectResetReadOnlyReview(source, request, open, signal, planCapture));
   } catch { return unavailable(); }
   finally { if (settings) settings.password = null; }
 }

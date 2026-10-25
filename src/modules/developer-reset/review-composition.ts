@@ -7,6 +7,7 @@ import { summarizeOperationGates } from './operation-gates.js';
 import { createResetReceipt, inspectResetReceipt } from './reset-receipt.js';
 import { RESET_TEMPLATE_REFERENCE_PATHS, summarizeResetTemplateEvidence } from './reset-template-evidence.js';
 import { buildTemplateReseedProposal, templateInventoryFingerprint } from './template-plan-builder.js';
+import { captureResetPlanTemplate, resetPlanTemplateDependencies } from './plan-revalidation.js';
 
 const hash = z.string().regex(/^[a-f0-9]{64}$/);
 const surface = z.object({ relation: z.string().max(128), path: z.string().max(160) }).strict();
@@ -66,7 +67,7 @@ const sidecarSchema = z.object({ scopeId: hash, statementId: hash, statementAt: 
 export function composeResetReview(input: { request: ResetReviewRequest; binding: Binding; scopeId: string;
   relations: readonly string[]; rows: ReviewRow[]; independent: { relation: string; key: string }[];
   census: { relation: string; count: number }[]; sidecar: unknown; pending: string[];
-}) {
+}, planCapture?: object) {
   const { request, binding, rows } = input;
   const sidecar = sidecarSchema.parse(input.sidecar);
   if (sidecar.scopeId !== input.scopeId) return fail('RESET_REVIEW_MIXED_SCOPE');
@@ -177,7 +178,8 @@ export function composeResetReview(input: { request: ResetReviewRequest; binding
   const proposal = request.templateSelection && request.developerId ? buildTemplateReseedProposal({ expected: templateBinding,
     developerId: request.developerId, selection: request.templateSelection,
     inventory: { binding: templateBinding, complete: true, referencesComplete: true, templateCount: templates.length,
-      referenceCount: references.length, templates, references } }) : null;
+      referenceCount: references.length, templates, references } }, planCapture ? resetPlanTemplateDependencies(planCapture) : undefined) : null;
+  if (planCapture) captureResetPlanTemplate(planCapture, proposal);
   if (!proposal) blockers.add('RESET_REVIEW_TEMPLATE_SELECTION_REQUIRED');
   for (const code of proposal?.blockers ?? []) blockers.add(code);
 

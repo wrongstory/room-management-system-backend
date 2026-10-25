@@ -45,10 +45,10 @@ export async function inspectResetReadOnlySource(input: unknown, open: OpenReset
 }
 
 /** Same closed transaction with internal composition. No public request or live-proof minting. */
-export function inspectResetReadOnlyReview(input: unknown, request: unknown, open: OpenResetReadClient, signal?: AbortSignal) {
-  return inspect(input, open, signal, request ?? null);
+export function inspectResetReadOnlyReview(input: unknown, request: unknown, open: OpenResetReadClient, signal?: AbortSignal, planCapture?: object) {
+  return inspect(input, open, signal, request ?? null, planCapture);
 }
-async function inspect(input: unknown, open: OpenResetReadClient, signal?: AbortSignal, request?: unknown) {
+async function inspect(input: unknown, open: OpenResetReadClient, signal?: AbortSignal, request?: unknown, planCapture?: object) {
   const reject = (code: string) => ({ ...blocked(code), review: null });
   const parsed = inputSchema.safeParse(input); if (!parsed.success) return reject('RESET_READ_INPUT_INVALID');
   let plan: ReturnType<typeof createResetReadPlan>;
@@ -195,7 +195,7 @@ async function inspect(input: unknown, open: OpenResetReadClient, signal?: Abort
     } catch { if (!sourceFailure) sourceFailure = 'RESET_READ_SOURCE_FAILED'; destroy(); throw new Error(sourceFailure); }
   } };
   try {
-    const result = request === undefined ? { ...await builder.build(source, signal), review: null } : await builder.buildReview(source, request, signal);
+    const result = request === undefined ? { ...await builder.build(source, signal), review: null } : await builder.buildReview(source, request, signal, planCapture);
     return sourceFailure ? reject(sourceFailure) : { ...result, liveDatabaseVerified: false };
   } finally {
     builder.dispose(); if (!closed) destroy(); capturedRows.length = 0;

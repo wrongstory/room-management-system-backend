@@ -11,6 +11,8 @@ import { resetReviewEvidenceSql } from '../src/modules/developer-reset/snapshot-
 import { resetReviewFixture } from './helpers/reset-review.js';
 import { resetReadIdentitySql, resetReadSafetySql } from '../src/modules/developer-reset/snapshot-read-plan.js';
 import { resetCatalog } from './helpers/reset-catalog.js';
+import { createResetPlanRevalidation } from '../src/modules/developer-reset/plan-revalidation.js';
+import { reviewSourceHarness } from './helpers/reset-review-source.js';
 
 vi.mock('pg', () => ({ Client: vi.fn() }));
 const ca = rootCertificates.find(pem => { const cert = new X509Certificate(pem);
@@ -39,7 +41,8 @@ const content = [
 type Query = { text: string; values: string[]; rowMode: string; binary: boolean; query_timeout: number;
   types: { getTypeParser(oid: number, format: string): (s: string) => string } };
 let clients: FakeClient[];
-let scenario: { connect?: (client: FakeClient) => Promise<void>; query?: (client: FakeClient, query: Query) => Promise<void>; end?: () => Promise<void> };
+let scenario: { connect?: (client: FakeClient) => Promise<void>; query?: (client: FakeClient, query: Query) => Promise<void>; end?: () => Promise<void>;
+  result?: (query: Query) => Promise<unknown> };
 class FakeClient extends EventEmitter {
   readonly connection = Object.assign(new EventEmitter(), { stream: new TLSSocket(new Socket()) });
   password: unknown; connectionParameters: { password: unknown }; queries: Query[] = []; ends = 0; nonce = '';
@@ -56,6 +59,7 @@ class FakeClient extends EventEmitter {
   async end() { this.ends++; await scenario.end?.(); this.connection.stream.destroy(); }
   async query(query: Query) {
     this.queries.push(query); await scenario.query?.(this, query); const sql = query.text;
+    if (scenario.result) return scenario.result(query);
     if (sql.startsWith('BEGIN')) return { command: 'BEGIN', rows: [] };
     if (sql.startsWith('LOCK TABLE')) return { command: 'LOCK', rows: [] };
     if (sql === 'ROLLBACK') return { command: 'ROLLBACK', rows: [] };
@@ -81,6 +85,19 @@ beforeEach(() => {
 afterEach(() => { for (const client of clients) client.connection.stream.destroy(); vi.restoreAllMocks(); vi.clearAllMocks(); vi.useRealTimers(); });
 
 describe('native reset connector with hermetic pg module (real DB zero)', () => {
+  it('keeps native revalidation bound to the approved source while excluding credentials from the content commitment', async () => {
+    const h = reviewSourceHarness(); scenario.result = query => h.client.query(query.text);
+    const input = { source: h.source, connection: fixture().connection };
+    const owner = createResetPlanRevalidation({ expiresAt: h.f.request.receipt.expiresAt });
+    try {
+      const prepared = await owner.prepareNative(input, h.f.request); expect(prepared.status).toBe('PREPARED');
+      input.connection.credential.password = 'another-synthetic-transport-password';
+      const checked = await owner.recheckNative(input, h.f.request); expect(checked.status).toBe('MATCHED');
+      expect(checked.summary).toEqual(prepared.summary); expect(Client).toHaveBeenCalledTimes(2);
+      expect(clients.every(client => client.password === null && client.config.password === null)).toBe(true);
+      expect(JSON.stringify(checked)).not.toContain('password');
+    } finally { owner.dispose(); }
+  });
   it('routes review through the owned native transport and refuses a missing bound sidecar', async () => {
     const result = await inspectResetNativeReview(fixture(), resetReviewFixture().request);
     expect(result).toMatchObject({ snapshotValid: false, executionEnabled: false, liveDatabaseVerified: false });
