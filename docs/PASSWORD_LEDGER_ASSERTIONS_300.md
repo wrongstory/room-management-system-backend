@@ -27,6 +27,17 @@ ARCHITECTURE의 private password provenance 계약을 따른다.
 
 ## 검증 및 남은 gate
 
+### 2026-10-25 최신 dev 통합
+
+- `dev@96ec94b`의 백업·보안·회귀 복원 변경을 정상 merge했다. 원 #300 SQL 검사와 제품 계약은 유지한다.
+- 통합본 `npm run ci:quality` PASS: 132 files / 3,266 tests, typecheck/build 포함.
+- `npm run db:manifest:verify` PASS: dev 122건, 신규 migration 없음.
+- **Full DB / 변경 pgTAP SQL NOT RUN.** 최신 최종 1회 검증 정책에 따라 일반 dev PR은
+  source/application/manifest와 독립 QA를 확인해 통합하고, #300은 실제 SQL 증거까지 OPEN으로 유지한다.
+- 최종 릴리스의 승인된 격리 DB 실행에 이 검사를 포함한다. dev 통합은 운영 검증·배포 완료가 아니다.
+
+### 2026-10-24 최초 source 검증 이력
+
 - 기준/수정 후 application: 126 files / 3,133 tests PASS.
 - `npm run ci:quality` PASS (기존 lint warning/info 있음).
 - `npm run db:manifest:verify` PASS, dev manifest 122건 그대로.
@@ -35,6 +46,5 @@ ARCHITECTURE의 private password provenance 계약을 따른다.
   reset/start/migration을 수행하지 않았다. 사용자 승인 후 최종 격리 DB 검증에 포함한다.
 - source PR에서 이슈를 자동 종료하지 않는다. 실제 SQL 검증 증거가 필요하다.
 
-다음 순서는 #345 delivery clock 보완, #273 안전한 실제 복사·복원 실행기,
-#12 Supabase Free 정기 자동 백업이다. 자동 백업은 필수이며 foundation PR이나
-수동 복사 1회만으로 완료 처리하지 않는다.
+후속 #345 delivery clock 검증을 함께 최종 릴리스에 포함한다. #12/#273은 최신 예약 전용
+백업 계약을 따르며 개발 인계와 정기 활성화·첫 예약 실행을 따로 확인한다.
