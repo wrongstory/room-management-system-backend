@@ -1403,3 +1403,11 @@ PIN/사진 worker 및 직접 운영 접근의 전체 coverage를 대신하지 �
 명시된 유한 관측 예산 안에서 acquire→예약 전이→배정 lifecycle→성공 heartbeat→정확한 DB 완료 readback을 수행한다.
 두 immutable command receipt와 동일 request의 heartbeat가 모두 있어야 완료하며 만료/다음 실행/현재 상태로 해제하지 않는다.
 운영 활성화·실제 DB 검증·전체 coverage는 미완료이고 details는 SCHEDULER_OPERATION_ADMISSION.md를 따른다.
+
+### Source135 초기화 관측의 영속 저장
+
+초기화 순수 receipt는 별도 private head/events와 서버 내부 RPC adapter로 저장한다.
+actor/project/key 유일성, 불변 header, append-only event, 최신 version/head CAS 및 정확 readback을 강제한다.
+timeout과 잘린 prefix는 UNKNOWN이며 자동 쓰기 재시도가 없다. 두 신규 관계만 보존 후보로 추가하고
+127/128 source와 129 combined snapshot 계약은 유지한다. 실행 허가·정책·TTL 선택·공개 HTTP는 추가하지 않는다.
+[영속 원장 계약과 실제 SQL 미실행 경계](./RESET_RECEIPT_STORE.md)를 따른다.

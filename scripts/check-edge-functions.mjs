@@ -301,6 +301,8 @@ if (workerAdmission.status !== 0) throw new Error('Worker admission source drift
 if (resetPreview.status !== 0) throw new Error('Reset preview generated source verification failed');
 const resetRows = spawnSync(process.execPath, ['scripts/generate-reset-row-impact.mjs', '--check'], { stdio: 'inherit' });
 if (resetRows.status !== 0) throw new Error('Reset row collector generated source verification failed');
+const resetReceiptStore = spawnSync(process.execPath, ['scripts/generate-reset-receipt-store.mjs', '--check'], { stdio: 'inherit' });
+if (resetReceiptStore.status !== 0) throw new Error('Reset receipt store generated source verification failed');
 const pinDiagnostic = spawnSync(process.execPath, ['scripts/generate-room-pin-diagnostic-edge.mjs', '--check'], { stdio: 'inherit' });
 if (pinDiagnostic.status !== 0) throw new Error('PIN diagnostic generated source verification failed');
 const batch = spawnSync(process.execPath, ['scripts/generate-remittance-batch-edge.mjs', '--check'], { stdio: 'inherit' });

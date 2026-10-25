@@ -55,7 +55,7 @@ describe('reset candidate row policy and aggregate collector evidence', () => {
   });
   it('accepts coherent independent census evidence and still forbids execution', () => {
     const result = summarizeResetPreview(fixture());
-    expect(result.rowImpact).toMatchObject({ available: true, diagnosticComplete: true, referencesValid: true, candidateCounts: { preserve: 189 } });
+    expect(result.rowImpact).toMatchObject({ available: true, diagnosticComplete: true, referencesValid: true, candidateCounts: { preserve: 191 } });
     expect(result.executionEnabled).toBe(false);
     expect(result.blockers).not.toContain('ROW_DISPOSITION_RULES_UNIMPLEMENTED');
     expect(result.blockers).toContain('RESET_RECOVERY_SCOPE_UNDECIDED');

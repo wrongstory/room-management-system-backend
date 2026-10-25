@@ -15,8 +15,8 @@ function first<T>(rows: T[]) { const row = rows[0]; if (!row) throw new Error('m
 describe('read-only developer reset inventory preview', () => {
   it('completes diagnostic collection independently of execution gates and excludes raw names', () => {
     const result = summarizeResetPreview(inventory());
-    expect(result).toMatchObject({ diagnosticComplete: true, executionEnabled: false, readOnly: true, relationCount: 189,
-      candidateImpact: { preserve: { relations: 7, observedRows: 7, exact: true }, mixed: { relations: 10 }, review: { relations: 127 } } });
+    expect(result).toMatchObject({ diagnosticComplete: true, executionEnabled: false, readOnly: true, relationCount: 191,
+      candidateImpact: { preserve: { relations: 9, observedRows: 9, exact: true }, mixed: { relations: 10 }, review: { relations: 127 } } });
     expect(result.blockers).toContain('RESET_RECOVERY_SCOPE_UNDECIDED');
     expect(result.blockers).toContain('PHOTO_DELETION_ON_HOLD');
     expect(JSON.stringify(result)).not.toContain('public.profiles');
@@ -24,7 +24,7 @@ describe('read-only developer reset inventory preview', () => {
   it('marks bounded counts as lower bounds rather than exact totals', () => {
     const value = inventory(); first(value.relations).observedRows = 10001; first(value.relations).exact = false;
     expect(summarizeResetPreview(value)).toMatchObject({ diagnosticComplete: false, truncatedRelations: 1,
-      candidateImpact: { preserve: { exact: false, observedRows: 10007 } } });
+      candidateImpact: { preserve: { exact: false, observedRows: 10009 } } });
   });
   it('does not query or claim counts for foreign/partitioned relations', () => {
     const value = inventory(); const row = first(value.relations); row.kind = 'f'; row.observedRows = null; row.exact = false;

@@ -4,9 +4,11 @@ import { z } from 'zod';
 // Explicit candidate inventory, NOT a deletion allowlist. No wildcard rules.
 // Based on the inspected local111 catalog plus the source-reviewed batch126 metadata.
 // The two batch relations remain photo-HOLD review candidates; no clear permission.
-export const RESET_CLASSIFICATION_VERSION = '396-local111-plus-batch126-review-v2';
+export const RESET_CLASSIFICATION_VERSION = '396-local111-plus-receipt135-review-v3';
 export const RESET_RELATION_GROUPS = Object.freeze({
   preserve: Object.freeze([
+    'private.developer_reset_receipt_heads',
+    'private.developer_reset_receipt_events',
     'private.developer_operation_control',
     'private.developer_operation_reauth',
     'private.developer_operation_admissions',

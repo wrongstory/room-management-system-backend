@@ -55,3 +55,6 @@ NOT_APPLIED는 해당 단계의 확정 실패이며 후속 단계 실행을 열�
 합성 테스트로 전체 전이, 정확 입력 재조회, 13개 결합 필드의 변경, 부분 적용 후 실패,
 응답 유실/UNKNOWN, 만료 후 관측, stale version, header/event 변조, 사후 상태와 외부 종료 검증을 확인한다.
 실제 DB CAS/SQL/Auth/provider/삭제/복구·운영 인계 검증은 NOT RUN이다.
+
+135의 [영속 저장 adapter](./RESET_RECEIPT_STORE.md)가 별도 private head/events와 서버 전용 RPC로
+CAS·append-only·정확 readback을 구현한다. 위 순수 API는 유지하며 실제 DB 검증은 여전히 NOT RUN이다.

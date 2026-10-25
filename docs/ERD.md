@@ -1577,3 +1577,8 @@ command/key digest/hash를 결합한다. 세션/key 원문과 raw 요청은 보�
 133은 같은 admissions.worker_kind/context의 예약 scheduler 형식만 추가한다. 새 relation이나 source127 분류는 없다.
 context에는 actor/invocation bucket/request ID와 command digest만 저장하며 민감 업무 payload를 저장하지 않는다.
 partial unique request ID와 exact immutable command_executions 2개·scheduler heartbeat 연결로 완료를 검증한다.
+
+135는 `private.developer_reset_receipt_heads/events`를 명시 보존 후보로 추가한다.
+head는 actor/project/key UNIQUE와 불변 header, CAS version/hash를 가지며 events의 head FK/sequence PK가
+전체 이력을 보존한다. Auth/profile cascade FK는 없고 직접 table 권한은 닫혀 있다.
+실제 SQL NOT RUN이며 [영속 원장 계약](./RESET_RECEIPT_STORE.md)을 따른다.
