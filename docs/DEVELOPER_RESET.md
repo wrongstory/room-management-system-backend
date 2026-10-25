@@ -283,10 +283,12 @@ unsupported key·PK 부재는 별도 건수로 드러낸다. 기존 고정 로�
 NOT NULL 위반 및 실제 edge와 NULL 증거의 모순을 차단한다. 그래프 FK 대상도 지문에 포함한다.
 
 이 함수는 trusted collector가 아니다. self-reported snapshot ID/count/hash는 진실을 증명하지
-않으며 신뢰되지 않은 요청 본문을 그대로 연결하면 안 된다. 실제 collector는 하나의 READ ONLY
-REPEATABLE READ snapshot에서 independent census를 구하고 SQL의 equality/collation으로
+않으며 신뢰되지 않은 요청 본문을 그대로 연결하면 안 된다. 실제 collector는 동일 STABLE calling
+statement 또는 하나의 READ ONLY REPEATABLE READ snapshot에서 independent census를 구하고 SQL의 equality/collation으로
 대상 행을 해결해야 한다. contentToken에는 실데이터나 저엔트로피 비밀의 재사용 hash를 넣지 않고
-해당 snapshot 전용 keyed digest를 사용해야 한다. 이 token 생성기와 실제 행 수집은 미구현이다.
+해당 snapshot 전용 keyed digest를 사용해야 한다. 내부 token 생성·독립 내용 비교는
+[`snapshot-builder.ts` 계약](./RESET_CONTENT_SNAPSHOT.md)에 추가했다. 실제 SQL 수집 adapter는
+미구현이며 STABLE statement와 REPEATABLE READ를 서로 다른 일관성 종류로 결합한다.
 진단 fingerprint는 TTL/서명/권한/CAS/백업 증명이 아니며 실제 전체 DB 완전성으로 보고하지 않는다.
 
 `reset-review-requirements.mjs`는 기존 mixed10/review125의 **135개 모두**를 명시적으로
