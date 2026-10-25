@@ -345,33 +345,68 @@ export async function beginHttpAdmission(input: {
     p_auth: identity?.authUserId ?? null,
     p_session: identity?.sessionId ?? null,
   };
+  // One reviewed domain adapter. The source130 route remains opaque; only
+  // append137 can bind its three public actions to immutable command receipts.
+  const lifecycle = route.routeId === "manageAttemptLifecycle" &&
+    "completionAdapter" in route &&
+    route.completionAdapter === "LIFECYCLE_V137";
+  const lifecycleBinding = (args: Record<string, unknown>) => {
+    if (
+      args.p_actor_profile_id !== identity?.profileId ||
+      args.p_session_id !== identity?.sessionId ||
+      !["allow_finish", "allow_upload", "interrupt_handover"].includes(
+        typeof args.p_action === "string" ? args.p_action : "",
+      ) || typeof args.p_idempotency_key !== "string" ||
+      !/^[A-Za-z0-9._:-]{8,128}$/.test(args.p_idempotency_key) ||
+      typeof args.p_request_hash !== "string" ||
+      !digest.test(args.p_request_hash)
+    ) {
+      throw new HttpAdmissionError();
+    }
+    return JSON.stringify([
+      args.p_actor_profile_id,
+      args.p_session_id,
+      args.p_action,
+      args.p_idempotency_key,
+      args.p_request_hash,
+    ]);
+  };
   const acquire = async (args?: Record<string, unknown>) => {
-    const data = await call("acquire_operation_http_admission", {
+    const common = {
       p_target: config.target,
       p_version: control.controlVersion,
-      p_route_id: route.routeId,
       ...identityArgs,
       p_nonce: nonce,
       p_deadline: new Date(deadline).toISOString(),
-      p_command_name: route.commandName,
       p_idempotency_key: args?.[route.keyArgument] ?? null,
       p_request_hash: args?.p_request_hash ?? null,
-      p_command_args: route.hashMode === "SQL_AVAILABILITY" && args
-        ? Object.fromEntries(
-          Object.keys(route.hashArgs).map((key) => [key, args[key]]),
-        )
-        : null,
-    });
+    };
+    const data = lifecycle
+      ? await call("acquire_operation_lifecycle_admission", {
+        ...common,
+        p_action: args?.p_action,
+      })
+      : await call("acquire_operation_http_admission", {
+        ...common,
+        p_route_id: route.routeId,
+        p_command_name: route.commandName,
+        p_command_args: route.hashMode === "SQL_AVAILABILITY" && args
+          ? Object.fromEntries(
+            Object.keys(route.hashArgs).map((key) => [key, args[key]]),
+          )
+          : null,
+      });
     if (
       Object.keys(data).sort().join(",") !==
         "admissionId,completionMode,controlVersion" ||
       typeof data.admissionId !== "string" || !uuid.test(data.admissionId) ||
       data.controlVersion !== control.controlVersion ||
-      data.completionMode !== (route.rpc ? "COMMAND_RECEIPT" : "OPAQUE")
+      data.completionMode !==
+        (route.rpc || lifecycle ? "COMMAND_RECEIPT" : "OPAQUE")
     ) throw new HttpAdmissionError();
     return data.admissionId;
   };
-  if (!route.rpc) {
+  if (!route.rpc && !lifecycle) {
     await acquire();
     // Auth session creation/revocation, photo/PIN/provider effects need dedicated
     // reconciliation. HTTP success/error/expiry never completes their lease.
@@ -379,11 +414,13 @@ export async function beginHttpAdmission(input: {
   }
   let used = false;
   const matches = (name: string) =>
+    (lifecycle && name === "manage_cleaning_attempt_lifecycle") ||
     name === route.rpc ||
     (route.rpcAliases as readonly string[]).includes(name);
   return {
     matches,
     async execute(name, args, invoke) {
+      const boundLifecycle = lifecycle ? lifecycleBinding(args) : null;
       const key = args[route.keyArgument];
       if (
         used || !matches(name) ||
@@ -403,6 +440,11 @@ export async function beginHttpAdmission(input: {
       ) throw new HttpAdmissionError();
       used = true;
       const admissionId = await acquire(args);
+      // The lazy SDK builder still owns the actual args. Do not dispatch a
+      // different actor/session/action/key/hash after an asynchronous acquire.
+      if (lifecycle && lifecycleBinding(args) !== boundLifecycle) {
+        throw new HttpAdmissionError();
+      }
       const complete = async () => {
         try {
           // The DB independently finds the exact immutable terminal receipt.
