@@ -1,5 +1,13 @@
 # 객실 PIN Excel 내보내기 / 지정 Drive 가져오기 (#452)
 
+## 2026-10-25 dev 통합 — #485
+
+운영의 마지막 확인 기록은 [v0.9.9 배포](https://github.com/wrongstory/room-management-system-backend/pull/477#issuecomment-6359461664)의 API53 / migration122 / main3e805249다. 아래 과거의 현재·후보·미배포 표현은 각 checkpoint 당시 상태다.
+이번 변경은 main의 검증·문서 보완을 dev로 복원하며 API 계약·운영 runtime·migration 파일을 변경하지 않는다. dev의 #479/#480 보안 의존성과 #481 PIN 오류 진단은 보존하며 아직 운영 반영과 구분한다.
+Full DB/SQL/upgrade/경합 및 운영 migration은 이번 작업에서 NOT RUN이다. 최종 릴리스의 실제 DB 실행 전에 별도 사용자 승인을 받는다. 프런트 코드 변경이나 새 API 연결은 필요하지 않다.
+세부 검증·인계는 [통합 기록](./RELEASE_VALIDATION_BACKPORT_485.md)을 따른다.
+
+
 2026-10-13 사용자 결정. 프런트 연계: makee-ham/room-management-system#220.
 기존 숫자 4~8자리 서버 제한을 폐기한다. 일반/장기숙박 구분 없이 비어 있지 않은 문자열을 보존하고,
 서비스 보호를 위해 UTF-8 128바이트, 제어문자/잘못된 Unicode 금지만 적용한다. 자동 생성은 숫자 4자리다.
@@ -77,7 +85,8 @@ current pointer, entitlement rotation/reveal 폐기, 상태 version, 안전한 �
 합성 Node/Edge 검증은 원본 매칭·오류·선행0·자유 문자열·HMAC 변조·session binding·만료·원본/DB 변경·
 재시도·권한·provider identity·readonly scope·암호화·Excel 문자열을 검사한다.
 supabase/tests/room_pin_transfer.sql은 승인된 최종 DB 검증에서 권한/CAS/rollback/receipt/감사를 검사한다.
-전체 DB 검증은 AGENTS.md/#431에 따라 **Full DB NOT RUN**이며 manifest 검증과 구분한다.
+전체 DB 검증 상태는 각 릴리스 증빙을 따른다. v0.9.6 후보는 AGENTS.md/#431에 따라
+승인된 최종 CI 1회 실행 전이며 manifest 검증과 구분한다.
 위 검증 계획 자체는 운영 DB migration, 원본 Drive 변경, hosted 설정 또는 production 배포 승인이 아니다.
 
 ### 2026-10-14 OAuth 연결 후속 checkpoint
@@ -94,3 +103,11 @@ supabase/tests/room_pin_transfer.sql은 승인된 최종 DB 검증에서 권한/
   preview/apply·DB migration·reset·전체 DB CI는 이번 작업에서 실행하지 않았다.
 - 고정 v0.9.5 릴리스에 이 후속 코드가 자동 포함된 것은 아니다. 일반 dev PR 이후 별도
   릴리스 통합 gate를 따른다. 실행 전 migration 승인 원칙은 그대로다.
+
+### 2026-10-21 후속 checkpoint
+
+- 이전 2단계 인증/API 비활성 차단은 해소됐다. 기존 사진 OAuth로 생성한 새 비공개 빈 시트를
+  실제 가져오기 reader로 읽기 검증했고, 운영 원본/tab 설정만 새 대상으로 전환했다.
+- 진단 함수는 삭제했다. 사진 OAuth scope·credential·사진 provider와 실제 객실 PIN은 변경하지 않았다.
+- PR #462는 dev 병합 완료이며 v0.9.6 통합 후보 검증 중이다. 아직 운영 API 배포 완료가 아니다.
+- 실행 상태와 rollback 경계는 [v0.9.6 기록](./RELEASE_V0.9.6.md), 접근 근거는 #463을 따른다.
