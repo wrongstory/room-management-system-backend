@@ -1,5 +1,21 @@
 # API 구현·Edge 배포·운영 사용 상태 정본
 
+## 2026-10-25 v1.0.0 준비 — 개발과 운영 상태 분리
+
+현재 진행은 [v1.0.0 개발·배포 준비](RELEASE_V1.0.0_READINESS.md)를 따른다.
+아래 2026-10-07 이하 수치는 당시 검증 이력이며 현재 source나 운영 배포 현황을 뜻하지 않는다.
+
+| 구분 | 확인된 상태 |
+| --- | --- |
+| 개발 통합 | 정책값을 고정하지 않는 초기화 진단·작업 진입 제어·템플릿 후보·참조 검사·영속 저장·검토 결합·승인 소비·재관측까지 PR515/dev5b2d8ed에 통합. 전체187파일/5,104 tests 및 독립 QA PASS. 정책별 실행 구현은 별도이며 항목별 PR/CI는 위 준비 기록 참조 |
+| 실제 운영 | 2026-10-25 읽기 확인: migration122, API54, scheduler22, notification-delivery13 |
+| 공개 계약 | 운영 health200/ok, OpenAPI154 paths /166 operations. source는157/169. API54 원본 다운로드 실패로 source 일치 UNKNOWN |
+| 새 DB 검증 | dev의 manifest 검사만 PASS. 신규 SQL·최종 전체 DB·운영 migration NOT RUN |
+| 운영 후속 | 정기 백업·알림 활성화/첫 실행, source와 배포 산출물 일치, 역할별 실제 기기 확인 필요 |
+
+개발 통합을 운영 활성화로 표시하지 않는다. 실행 승인과 미확정 정책은 자동개발 뒤
+현재 진행 채팅의 단일 `USER_DECISIONS.md`로 확인한다.
+
 ## 2026-10-07 #336 정식 source 등록 후보
 
 최신31차: 종결 GET/list 보완 후 Node2,524·SQL5,568·fresh111·실제110→111 upgrade·18경합·
