@@ -8,6 +8,10 @@ export const HISTORY_CODEC_MAX_SQL_BYTES = 2 * 1024 * 1024;
 export const HISTORY_CODEC_MAX_ROWS = 512;
 export const HISTORY_CODEC_MAX_STATEMENTS = 10_000;
 export const HISTORY_CODEC_MAX_TOTAL_BYTES = 32 * 1024 * 1024;
+// Historical comparison only. These byte transforms never authorize SQL execution.
+export const HISTORY_CODEC_HISTORICAL_REPRESENTATIONS = Object.freeze([
+  'SOURCE_EXACT', 'SOURCE_APPEND_CRLF', 'LF_TO_CRLF_APPEND_CRLF',
+]);
 const maxDepth = 64;
 const models = new WeakMap();
 const snapshots = new WeakMap();
@@ -222,7 +226,7 @@ export function isOwnedMigrationHistoryModel(value) { return models.has(value); 
 /** Internal driver material; do not serialize into logs, reports or public API responses. */
 export function migrationHistoryWriteMaterial(model) {
   const row = models.get(model);
-  if (!row || !model.sourceEvidenceBound || !model.parserEvidenceBound) throw new Error('HISTORY_CODEC_EXECUTION_MODEL_REQUIRED');
+  if (!row || model.mode !== 'CLI_HISTORY_SOURCE_MODEL' || !model.sourceEvidenceBound || !model.parserEvidenceBound) throw new Error('HISTORY_CODEC_EXECUTION_MODEL_REQUIRED');
   return { version: row.version, name: row.name, statements: [...row.statements.values] };
 }
 
@@ -261,6 +265,42 @@ export function createMigrationHistoryModel(input) {
   });
 }
 
+/** Exact source-bound whole-file legacy history; never new-apply write material. */
+export function createHistoricalMigrationHistoryModel(input) {
+  return guarded(() => {
+    const value = data(input, ['version', 'name', 'sqlBytes', 'sourceBinding', 'representation', 'statementSha256']);
+    const expectedVersion = version(value.version);
+    const expectedName = string(value.name, 256);
+    const { raw, text } = inputBytes(value.sqlBytes);
+    const binding = sourceBinding(value.sourceBinding, raw, expectedVersion, expectedName);
+    if (!binding || raw.length === 0) fail('HISTORY_CODEC_HISTORICAL_SOURCE_REQUIRED');
+    if (!HISTORY_CODEC_HISTORICAL_REPRESENTATIONS.includes(value.representation)
+      || typeof value.statementSha256 !== 'string' || !/^[a-f0-9]{64}$/u.test(value.statementSha256)) fail('HISTORY_CODEC_HISTORICAL_REPRESENTATION_INVALID');
+    // No normalization of an observed value, trim, comment removal or SQL wrapper.
+    // Nonidentity transforms require LF-only source; mixed/CRLF source is not guessed.
+    let stored = text;
+    if (value.representation !== 'SOURCE_EXACT') {
+      if (text.includes('\r')) fail('HISTORY_CODEC_HISTORICAL_REPRESENTATION_INVALID');
+      if (value.representation === 'LF_TO_CRLF_APPEND_CRLF') stored = text.replaceAll('\n', '\r\n');
+      stored += '\r\n';
+    }
+    if (Buffer.byteLength(stored, 'utf8') > HISTORY_CODEC_MAX_SQL_BYTES) fail('HISTORY_CODEC_SIZE_LIMIT');
+    if (sha256(stored) !== value.statementSha256) fail('HISTORY_CODEC_HISTORICAL_HASH_MISMATCH');
+    const statements = Object.freeze([stored]);
+    const expectedRow = Object.freeze({ version: expectedVersion, name: expectedName, statements: expectedArray(statements) });
+    const result = Object.freeze({ ...flags, mode: 'HISTORICAL_WHOLE_FILE_SOURCE_MODEL',
+      provenance: 'OWNED_LOCAL_SOURCE_BOUND_MODEL', parserEvidenceBound: false, sourceEvidenceBound: true,
+      sourceReviewRequired: true, version: expectedVersion, name: expectedName,
+      sqlSha256: sha256(raw), byteLength: raw.length, logicalStatementCount: null,
+      representation: value.representation, statementSha256: value.statementSha256,
+      storedByteLength: Buffer.byteLength(stored, 'utf8'), storedStatementCount: 1,
+      historyStatementsSha256: digest('cli-history-logical-statements-v1', statements),
+      rowSha256: digest('decoded-pg-history-row-v1', expectedRow), sourceBinding: binding });
+    models.set(result, expectedRow);
+    return result;
+  });
+}
+
 /** Only already-decoded values + independently collected PG dimensions. No coerce/coalesce. */
 export function createDecodedMigrationHistorySnapshot(input) {
   return guarded(() => {
@@ -283,18 +323,26 @@ export function createExpectedMigrationHistorySnapshot(input) {
     const mappings = mapped ? list(value.mappings, HISTORY_CODEC_MAX_ROWS) : [];
     const mappingBySource = new Map();
     for (const item of mappings) {
-      const mapping = data(item, ['sourceVersion', 'historyVersion', 'name', 'sqlSha256', 'statementsSha256']);
+      const historical = Object.hasOwn(item, 'representation');
+      const mapping = data(item, ['sourceVersion', 'historyVersion', 'name', 'sqlSha256', 'statementsSha256',
+        ...(historical ? ['representation', 'statementSha256'] : [])]);
       version(mapping.sourceVersion); version(mapping.historyVersion);
-      if (mapping.sourceVersion === mapping.historyVersion || mappingBySource.has(mapping.sourceVersion)) fail('HISTORY_CODEC_SOURCE_MAPPING_INVALID');
+      if ((!historical && mapping.sourceVersion === mapping.historyVersion) || mappingBySource.has(mapping.sourceVersion)) fail('HISTORY_CODEC_SOURCE_MAPPING_INVALID');
       mappingBySource.set(mapping.sourceVersion, mapping);
     }
     let used = 0;
     const rows = handles.map((handle) => {
       if (!models.has(handle)) fail('HISTORY_CODEC_MODEL_NOT_OWNED');
       const row = models.get(handle); const mapping = mappingBySource.get(row.version);
-      if (!mapping) return row;
+      if (!mapping) {
+        if (handle.mode === 'HISTORICAL_WHOLE_FILE_SOURCE_MODEL') fail('HISTORY_CODEC_SOURCE_MAPPING_INVALID');
+        return row;
+      }
       if (!handle.sourceEvidenceBound || mapping.name !== handle.name || mapping.sqlSha256 !== handle.sqlSha256
         || mapping.statementsSha256 !== handle.historyStatementsSha256) fail('HISTORY_CODEC_SOURCE_MAPPING_INVALID');
+      if (handle.mode === 'HISTORICAL_WHOLE_FILE_SOURCE_MODEL') {
+        if (mapping.representation !== handle.representation || mapping.statementSha256 !== handle.statementSha256) fail('HISTORY_CODEC_SOURCE_MAPPING_INVALID');
+      } else if (Object.hasOwn(mapping, 'representation')) fail('HISTORY_CODEC_SOURCE_MAPPING_INVALID');
       used += 1;
       return Object.freeze({ ...row, version: mapping.historyVersion });
     });

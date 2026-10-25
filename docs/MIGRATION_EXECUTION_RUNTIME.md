@@ -1,6 +1,6 @@
 # #378 실행 경로 후보와 검증 경계
 
-상태: **실제 driver/CLI 구현, source·합성 검증 단계**. 이 변경에서 DB 연결, TLS DB fixture, migration/reset, Docker 실행은 **0회 / NOT RUN**이다. 운영 적용 완료나 #378 전체 완료를 뜻하지 않는다. 이전 정책/AST/history/read-only 문서는 해당 모듈과 당시 단계의 기록이고, 전체 실행 경로의 현재 상태는 이 문서를 따른다.
+상태: **실제 driver/CLI 구현, source·합성 검증 단계**. 이 실행 경로의 DB 연결, TLS DB fixture, migration/reset, Docker 실행은 **0회 / NOT RUN**이다. 별도 기존 history 조사에서는 서버측 hash/count 등 metadata를 읽기전용으로 조회했으며, 원문 SQL·비밀 조회와 DB 변경은 없었다(`MIGRATION_HISTORICAL_REPRESENTATION.md`). 운영 적용 완료나 #378 전체 완료를 뜻하지 않는다. 이전 정책/AST/history/read-only 문서는 해당 모듈과 당시 단계의 기록이고, 전체 실행 경로의 현재 상태는 이 문서를 따른다.
 
 ## 실제 실행 순서
 
@@ -39,7 +39,11 @@ deadline, IPC 손실, 잘못된 메시지, 예상하지 않은 stdout/stderr, SI
 
 `independentReview: PASS`, recovery hash, source body review와 expected post-state는 **사람이 검토한 입력**이다. JSON 문자열이나 digest 자체를 암호학적 QA·복구 증명으로 부르지 않는다. 원격 verifier는 실제 source/보호/CI/full DB proof만 별도로 확인한다. 예상 pre/post 상태는 정확한 대상·범위의 승인된 조사/검증에서 얻어야 하며 현재 DB를 확인하지 않고 채워 넣지 않는다.
 
-기존 운영 도구가 filename과 다른 version을 기록한 경우 `historySourceMappings`의 각 항목은 `{sourceVersion,historyVersion,name,sqlSha256,statementsSha256}`이다. baseline에만 적용하며 local source model 소유권, 원문 hash, logical history tokens hash와 name을 모두 확인한다. version만 바꿔 **예상 비교 모델**을 만든다. 실제 DB history는 수정하지 않는다. 대응표 누락, 중복, 원문 불일치, 순서 불일치, legacy NULL name/statements는 fail-closed다. name만 같은 파일을 자동 추측하지 않는다. 파일 개수나 마지막 migration 번호는 하드코딩하지 않는다.
+기존 운영 도구가 filename과 다른 version을 기록한 경우 `historySourceMappings`의 CLI token 항목은 `{sourceVersion,historyVersion,name,sqlSha256,statementsSha256}`이다. baseline에만 적용하며 local source model 소유권, 원문 hash, logical history tokens hash와 name을 모두 확인한다. version만 바꿔 **예상 비교 모델**을 만든다.
+
+기존 도구가 SQL 파일 전체를 `text[]`의 단일 원소에 기록한 경우에는 같은 항목에 `representation`과 `statementSha256`을 반드시 추가한다. 허용 변환은 `SOURCE_EXACT`, `SOURCE_APPEND_CRLF`, `LF_TO_CRLF_APPEND_CRLF` 세 개뿐이고 마지막 두 변환은 LF-only source를 요구한다. `statementSha256`은 변환 후 **원시 UTF-8 단일 원소**의 SHA256이며, `statementsSha256`은 기존 history codec 도메인의 배열 digest다. 동일 version이어도 whole-file 항목은 명시해야 한다. source/raw hash와 representation을 검증한 후 version/name/단일 원소/배열 차원까지 정확한 예상 비교 모델을 만든다. 세부 계약과 확인 범위는 `MIGRATION_HISTORICAL_REPRESENTATION.md`를 따른다.
+
+어느 mapping도 pending 파일에는 적용할 수 없으며 새로운 apply의 pinned CLI logical token serializer는 그대로다. historical 모델은 parser-owned source를 주더라도 history write material로 사용할 수 없다. 실제 DB history는 수정하지 않는다. 대응표 누락, 중복, 원문·변환 hash 불일치, 미지원 변환, 순서 불일치, legacy NULL name/statements는 fail-closed다. name만 같은 파일을 자동 추측하거나 관측된 DB 값을 normalize하지 않는다. 파일 개수나 마지막 migration 번호는 하드코딩하지 않는다.
 
 ## 1회 승인 receipt
 
