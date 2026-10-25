@@ -145,7 +145,7 @@ select is((select count(*)::int from public.notifications where cleaning_target_
   and category='cleaning_assignment_rolled_over'),1,'midnight emits one typed rollover notification');
 select is((select count(*)::int from private.notification_delivery_outbox outbox join public.notifications notice
   on notice.id=outbox.notification_id where notice.cleaning_target_id=pg_temp.pid(305)
-  and notice.category='cleaning_assignment_rolled_over'),0,'elapsed time emits no rollover push');
+  and notice.category='cleaning_assignment_rolled_over'),1,'midnight enqueues one typed rollover push for the notified maid');
 select ok((select effective_service_date='2037-09-30' and carryover_count=0 from public.cleaning_targets
   where id=pg_temp.pid(306)),'physical upload workflow is excluded from rollover');
 select is((select count(*)::int from public.cleaning_targets
@@ -170,6 +170,9 @@ select is((select count(*)::int from public.cleaning_attempts where cleaning_tar
 select is((select count(*)::int from public.cleaning_target_schedule_revisions
   where cleaning_target_id=pg_temp.pid(304) and reason_code='ROLLED_OVER_UNASSIGNED'),1,
   'retry retains exactly one rollover revision');
+select is((select count(*)::int from private.notification_delivery_outbox outbox join public.notifications notice
+  on notice.id=outbox.notification_id where notice.cleaning_target_id=pg_temp.pid(305)
+  and notice.category='cleaning_assignment_rolled_over'),1,'receipt replay does not duplicate the rollover push');
 select throws_ok($$select public.process_due_assignment_lifecycle(
   pg_temp.pid(1),'2037-10-01 11:00+09','activation-run-today',repeat('b',64)
 )$$,'23505','IDEMPOTENCY_KEY_REUSED','same key with a different hash is rejected');
@@ -426,8 +429,20 @@ insert into run_results values('bounded-next',public.process_due_assignment_life
   pg_temp.pid(1),'2037-10-04 11:01+09','activation-bounded-next',repeat('8',64)));
 select is((select count(*)::int from public.cleaning_attempts where cleaning_target_id=pg_temp.pid(1402)),1,
   'next invocation reaches overdue eligible work despite the blocked older page');
-select ok((select jsonb_array_length(value->'activationResults')<=100 and value->'rolloverResults'='[]'::jsonb
-  from run_results where label='bounded-next'),'wraparound stays bounded and never rolls work over');
+select ok((select jsonb_array_length(value->'activationResults')<=100
+  and jsonb_array_length(value->'rolloverResults') between 1 and 100
+  and (value->>'rolledOverCount')::integer=jsonb_array_length(value->'rolloverResults')
+  from run_results where label='bounded-next'),'wraparound bounds activation and midnight rollover independently');
+select ok(not exists(select 1 from run_results r cross join lateral jsonb_array_elements(r.value->'rolloverResults') item
+  where r.label in ('bounded-first','bounded-next') and (item->>'cleaningTargetId')::uuid in
+    (select pg_temp.pid(300+n) from generate_series(1001,1102) n)),
+  'wraparound never rolls over the current-day page or eligible current-day target');
+select is((select count(*)::integer from public.cleaning_targets t join public.cleaning_assignments a
+  on a.cleaning_target_id=t.id and a.is_current
+  where t.id in (select pg_temp.pid(300+n) from generate_series(1001,1102) n)
+    and t.original_service_date='2037-10-04' and t.effective_service_date='2037-10-04'
+    and t.carryover_count=0 and a.ended_at is null),102,
+  'all current-day assignments and original work dates survive wraparound');
 select ok((select relrowsecurity and relforcerowsecurity from pg_class where oid='private.assignment_activation_scan_cursor'::regclass),
   'operational cursor has forced RLS');
 select ok(not has_table_privilege(role,'private.assignment_activation_scan_cursor','SELECT,INSERT,UPDATE,DELETE'),
