@@ -82,6 +82,7 @@ function boundary(raw, offset) {
 }
 function astInventory(node, declarationSettings) {
   const stack = [node];
+  const visitedDeclarations = new WeakSet();
   let count = 0;
   while (stack.length) {
     const value = stack.pop();
@@ -89,10 +90,33 @@ function astInventory(node, declarationSettings) {
     if (++count > maxAstNodes) fail('SQL_PLAN_AST_LIMIT');
     for (const [key, child] of Object.entries(value)) {
       const declarationSetting = key === 'VariableSetStmt' && declarationSettings.has(value);
+      if (declarationSetting) {
+        // A declaration option cannot also authorize the same object aliased
+        // elsewhere in a supplied AST. Native parser trees do not share nodes.
+        if (visitedDeclarations.has(value)) fail('SQL_PLAN_NESTED_UNSAFE');
+        visitedDeclarations.add(value);
+      }
       if ((!declarationSetting && forbiddenKinds.has(key)) || key === 'TransactionStmt') fail('SQL_PLAN_NESTED_UNSAFE');
       if (child !== null && typeof child === 'object') stack.push(child);
     }
   }
+}
+
+function fixedOutputDeclaration(option, startByte, endByte) {
+  try {
+    const outer = data(option, ['DefElem']);
+    const declaration = data(outer.DefElem, ['defname', 'arg', 'defaction', 'location']);
+    const argument = data(declaration.arg, ['VariableSetStmt']);
+    const setting = data(argument.VariableSetStmt, ['kind', 'name', 'args']);
+    if (declaration.defname !== 'set' || declaration.defaction !== 'DEFELEM_UNSPEC'
+      || setting.kind !== 'VAR_SET_VALUE' || !Array.isArray(setting.args) || setting.args.length !== 1) return false;
+    const constant = data(data(setting.args[0], ['A_Const']).A_Const, ['sval', 'location']);
+    const literal = data(constant.sval, ['sval']).sval;
+    if (![declaration.location, constant.location].every(location => Number.isSafeInteger(location)
+      && location >= startByte && location < endByte) || constant.location <= declaration.location) return false;
+    return setting.name === 'timezone' && literal === 'UTC'
+      || setting.name === 'datestyle' && literal === 'ISO, MDY';
+  } catch { return false; }
 }
 
 /** Untrusted/mock AST codec only: never a parser-owned plan or execution proof. */
@@ -142,11 +166,21 @@ function analyze(raw, parsed, parserMajor) {
       if (kind === 'CreateFunctionStmt' || kind === 'AlterFunctionStmt') {
         // Function-local search_path and positive bounded timeout declarations are not top-level SET.
         // The position and literal are checked; bodies still require source review.
+        const outputNames = new Set();
         for (const option of node.options ?? node.actions ?? []) {
           const argument = option.DefElem?.arg;
           const setting = argument?.VariableSetStmt;
           if (option.DefElem?.defname !== 'set' || setting?.kind !== 'VAR_SET_VALUE') continue;
           if (setting.name === 'search_path') declarationSettings.add(argument);
+          // S1 preserves exact UTC/ISO text from its owned capture. Only these
+          // CREATE FUNCTION declarations are recognized; never session/ALTER
+          // settings, FROM CURRENT, multiple values, or unknown AST structure.
+          if (kind === 'CreateFunctionStmt' && ['timezone', 'datestyle'].includes(setting.name)
+            && fixedOutputDeclaration(option, startByte, endByte)) {
+            if (outputNames.has(setting.name)) fail('SQL_PLAN_NESTED_UNSAFE');
+            outputNames.add(setting.name);
+            declarationSettings.add(argument);
+          }
           if (['statement_timeout', 'lock_timeout'].includes(setting.name) && !setting.is_local
             && setting.args?.length === 1) {
             const literal = setting.args[0].A_Const?.sval?.sval;
