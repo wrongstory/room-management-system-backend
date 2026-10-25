@@ -2,17 +2,17 @@
   "schemaVersion": 1,
   "release": "dev",
   "hashAlgorithm": "sha256-lf-utf8",
-  "totalCount": 125,
+  "totalCount": 126,
   "baseline": {
     "count": 78,
     "head": "reservation_bookability_optional_guest_count"
   },
   "pending": {
-    "count": 47,
+    "count": 48,
     "first": "assignment_unavailability_reassignment",
-    "head": "developer_reset_preview"
+    "head": "photo_collection_upload_batch"
   },
-  "head": "developer_reset_preview",
+  "head": "photo_collection_upload_batch",
   "migrations": [
     {
       "order": 1,
@@ -638,6 +638,11 @@
       "order": 125,
       "name": "developer_reset_preview",
       "sha256": "b9c1f020cbfdcd741980fff1d5a92031a9eab45ee9183fe430f72b1988ed9677"
+    },
+    {
+      "order": 126,
+      "name": "photo_collection_upload_batch",
+      "sha256": "e10388c5745b6e33523a090ccffe6b7d21e1cb9acd54d5386d89d212988ee3d6"
     }
   ]
 }

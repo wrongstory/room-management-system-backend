@@ -2,7 +2,118 @@ import { type ApiHandlerDependencies, handleApiRequest } from "./index.ts";
 import type { EdgeActor, EdgeClients } from "../_shared/runtime.ts";
 import { EdgeError } from "../_shared/runtime.ts";
 import { PhotoError } from "../_shared/photo-binary.ts";
-import type { PhotoService } from "../_shared/photo-service.ts";
+import { PhotoService } from "../_shared/photo-service.ts";
+
+for (const prefix of ["", "/api"]) {
+  Deno.test(`photo batch metadata route ${prefix || "root"} uses limited live session and atomic RPC`, async () => {
+    const uid = (n: number) =>
+      `41100000-0000-4000-8000-${String(n).padStart(12, "0")}`;
+    const payload = {
+      assignmentId: uid(3),
+      assignmentRevision: 2,
+      expectedCollectionRevision: 0,
+      items: [5, 6].map((n) => ({
+        photoItemId: uid(n),
+        expectedItemRevision: 0,
+        idempotencyKey: `photo-key-${n}`,
+      })),
+    };
+    let called = 0;
+    const clients = {
+      publicClient: {
+        auth: {
+          getUser: () =>
+            Promise.resolve({
+              data: { user: { id: actor.authUserId } },
+              error: null,
+            }),
+        },
+      },
+      admin: {
+        from: () => ({
+          select: () => ({
+            eq: () => ({
+              single: () =>
+                Promise.resolve({
+                  data: {
+                    id: actor.profileId,
+                    auth_user_id: actor.authUserId,
+                    display_name: "test",
+                    role: "maid",
+                    status: "upload_only",
+                    must_change_password: false,
+                  },
+                  error: null,
+                }),
+            }),
+          }),
+        }),
+        rpc: (name: string, args: Record<string, unknown>) => {
+          if (name === "is_active_auth_session") {
+            return Promise.resolve({ data: true, error: null });
+          }
+          assert(
+            name === "admit_photo_collection_upload_batch",
+            "one metadata RPC",
+          );
+          assert(
+            args.p_actor_profile_id === actor.profileId &&
+              typeof args.p_session_id === "string",
+            "live actor/session bound",
+          );
+          assert(
+            !JSON.stringify(args).includes("photo-key"),
+            "raw keys not forwarded",
+          );
+          called++;
+          return Promise.resolve({
+            data: {
+              batchId: uid(9),
+              maximumConcurrentTransfers: 2,
+              items: payload.items.map((item) => ({
+                photoItemId: item.photoItemId,
+                expiresAt: "2026-10-25T05:00:00Z",
+                quotaWarning: false,
+              })),
+            },
+            error: null,
+          });
+        },
+      },
+    } as unknown as EdgeClients;
+    const service = new PhotoService(clients.admin, () => {
+      throw new Error("provider forbidden for metadata");
+    }, async () => {
+      throw new Error("decoder forbidden");
+    });
+    const req = request(
+      "POST",
+      `${prefix}/v1/attempts/${uid(7)}/photo-slots/${uid(8)}/upload-batches`,
+      payload,
+    );
+    req.headers.set("idempotency-key", "batch-key-1");
+    const response = await handleApiRequest(req, {
+      createClients: () => clients,
+      photoService: () => service,
+      authenticateRequest: () => {
+        throw new Error("ordinary discovery must not replace limited auth");
+      },
+    });
+    assert(
+      response.status === 200 && called === 1,
+      "atomic metadata route succeeded",
+    );
+    assert(
+      response.headers.get("cache-control") === "no-store",
+      "private response",
+    );
+    const body = await response.json();
+    assert(
+      body.maximumConcurrentTransfers === 2 && body.items.length === 2,
+      "bounded pair only",
+    );
+  });
+}
 
 Deno.test("#411 thumbnail takes ordinary auth and preserves private binary headers", async () => {
   let authentications = 0, reads = 0;

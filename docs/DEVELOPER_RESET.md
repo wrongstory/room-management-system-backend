@@ -386,3 +386,12 @@ backup monitor bundle 91,678 bytes. 진단 bundle은 20,000,000-byte 상한에 �
 실제 `scripts/check-secrets.mjs`는 git ls-files --cached --others --exclude-standard로
 미추적 신규 파일도 검사한다. 출력 문구의 tracked는 정확한 대상 설명이 아니다.
 패턴 기반 검사이며 모든 종류의 민감정보 부재를 증명하지는 않는다.
+
+## 2026-10-25 batch126 metadata 분류 보완
+
+새 `private.photo_upload_batches`와 `private.photo_upload_batch_members`는 사진 HOLD의
+종속 metadata로 review/PHOTO_AND_EVIDENCE에 명시적으로 추가했다. 현재 source 목록은
+185관계(preserve3/mixed10/reseed2/clear43/review127), mixed+review137관계이며 사진 의존성은
+67관계다. 앞선 단계의183/135/65 수치는 해당 checkpoint의 기록이다. 이 추가는 실제
+clear 승인·삭제 구현·사진 purge 활성화가 아니다. 기존125 SQL은 catalog 기반 동적 census이므로
+수정하지 않는다. generated preview 목록만 source에서 재생성하고 운영/DB 검증과 구분한다.

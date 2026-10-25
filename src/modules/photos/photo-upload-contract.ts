@@ -234,6 +234,74 @@ export interface PhotoCollectionUploadBeginInput {
   readonly mime: PhotoMime;
   readonly sizeBytes: number;
 }
+/** Metadata-only atomic reservation; the two existing binary routes retain their keys and CAS input. */
+export async function preparePhotoCollectionBatch(
+  actorProfileId: unknown,
+  input: unknown,
+  rawKey: unknown,
+) {
+  const actor = uuid(actorProfileId);
+  const parsed = exact(input, [
+    "attemptId",
+    "targetSlotId",
+    "assignmentId",
+    "assignmentRevision",
+    "expectedCollectionRevision",
+    "items",
+  ]);
+  if (
+    !Array.isArray(parsed.items) || parsed.items.length !== 2 ||
+    typeof rawKey !== "string" ||
+    !/^[A-Za-z0-9._:-]{8,128}$/.test(rawKey)
+  ) invalid();
+  const items = await Promise.all(parsed.items.map(async (value) => {
+    const item = exact(value, [
+      "photoItemId",
+      "expectedItemRevision",
+      "idempotencyKey",
+    ]);
+    const revision = integer(item.expectedItemRevision, 0);
+    if (revision >= Number.MAX_SAFE_INTEGER) invalid();
+    return {
+      photoItemId: uuid(item.photoItemId),
+      expectedItemRevision: revision,
+      keyDigest: await preparePhotoCollectionUploadKey(
+        actor,
+        item.idempotencyKey,
+      ),
+    };
+  }));
+  if (
+    items[0]?.photoItemId === items[1]?.photoItemId ||
+    items[0]?.keyDigest === items[1]?.keyDigest
+  ) invalid();
+  const assignmentRevision = integer(parsed.assignmentRevision, 1);
+  const expectedCollectionRevision = integer(
+    parsed.expectedCollectionRevision,
+    0,
+  );
+  if (
+    assignmentRevision >= Number.MAX_SAFE_INTEGER ||
+    expectedCollectionRevision > Number.MAX_SAFE_INTEGER - 3
+  ) invalid();
+  const value = {
+    attemptId: uuid(parsed.attemptId),
+    targetSlotId: uuid(parsed.targetSlotId),
+    assignmentId: uuid(parsed.assignmentId),
+    assignmentRevision,
+    expectedCollectionRevision,
+    items,
+  };
+  const scope = {
+    actorProfileId: actor,
+    command: "photo.collection.upload.batch",
+  };
+  return {
+    ...value,
+    idempotencyKeyDigest: await digest({ ...scope, idempotencyKey: rawKey }),
+    requestHash: await digest({ ...scope, ...value }),
+  };
+}
 function validatePhotoCollectionUploadBegin(
   input: unknown,
 ): PhotoCollectionUploadBeginInput {

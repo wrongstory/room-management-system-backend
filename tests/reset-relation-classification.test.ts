@@ -3,11 +3,11 @@ const modulePath = '../scripts/reset-relation-classification.mjs';
 const { classifyResetRelations, RESET_RELATION_NAMES, RESET_RELATION_GROUPS } = await import(modulePath);
 
 describe('explicit reset candidate classification', () => {
-  it('covers the observed 183-table candidate without enabling execution', () => {
+  it('covers the 185-table source candidate without enabling execution', () => {
     expect(classifyResetRelations(RESET_RELATION_NAMES)).toMatchObject({
       inventoryCoverageComplete: true, classificationComplete: false, executionEnabled: false,
       missingRelationCount: 0, unclassifiedRelationCount: 0,
-      dispositionCounts: { preserve: 3, mixed: 10, reseed: 2, clear: 43, review: 125 },
+      dispositionCounts: { preserve: 3, mixed: 10, reseed: 2, clear: 43, review: 127 },
     });
   });
   it('does not classify a new table by prefix or resemblance', () => {
@@ -31,7 +31,7 @@ describe('explicit reset candidate classification', () => {
   });
   it('does not silently approve an empty inventory', () => {
     expect(classifyResetRelations([])).toMatchObject({
-      inventoryCoverageComplete: false, missingRelationCount: 183, executionEnabled: false,
+      inventoryCoverageComplete: false, missingRelationCount: 185, executionEnabled: false,
     });
   });
   it('protects security and developer state from bulk clear classification', () => {

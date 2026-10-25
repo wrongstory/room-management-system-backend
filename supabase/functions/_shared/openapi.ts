@@ -1613,6 +1613,78 @@ export const openApiDocument = {
         },
       },
     },
+    "/v1/attempts/{attemptId}/photo-slots/{slotId}/upload-batches": {
+      post: {
+        ...photoOperation(
+          "admitAttemptPhotoCollectionBatch",
+          "같은 사진 묶음의 두 업로드 원자 예약",
+          "PhotoUploadBatchAdmission",
+        ),
+        description:
+          "정확히 두 개의 서로 다른 item/key를 하나의 transaction에서 예약합니다. 두 binary 업로드는 기존 photos/{photoItemId}/upload에 같은 item key와 원래 collection revision으로 전송합니다. 최대 두 전송만 허용하며 일반 20장/선택 10장·item CAS·권한·quota는 유지합니다. 예약은 사진 저장/제출 성공이 아닙니다. 실패/응답 유실은 동일 key/입력으로만 재시도합니다. 새 binary/멀티파트 형식이나 사진 삭제 권한은 추가하지 않습니다.",
+        parameters: [
+          photoPathId("attemptId"),
+          photoPathId("slotId"),
+          idempotencyHeader,
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                additionalProperties: false,
+                required: [
+                  "assignmentId",
+                  "assignmentRevision",
+                  "expectedCollectionRevision",
+                  "items",
+                ],
+                properties: {
+                  assignmentId: { type: "string", format: "uuid" },
+                  assignmentRevision: {
+                    type: "integer",
+                    minimum: 1,
+                    maximum: 9007199254740990,
+                  },
+                  expectedCollectionRevision: {
+                    type: "integer",
+                    minimum: 0,
+                    maximum: 9007199254740988,
+                  },
+                  items: {
+                    type: "array",
+                    minItems: 2,
+                    maxItems: 2,
+                    items: {
+                      type: "object",
+                      additionalProperties: false,
+                      required: [
+                        "photoItemId",
+                        "expectedItemRevision",
+                        "idempotencyKey",
+                      ],
+                      properties: {
+                        photoItemId: { type: "string", format: "uuid" },
+                        expectedItemRevision: {
+                          type: "integer",
+                          minimum: 0,
+                          maximum: 9007199254740990,
+                        },
+                        idempotencyKey: {
+                          type: "string",
+                          pattern: "^[A-Za-z0-9._:-]{8,128}$",
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
     "/v1/attempts/{attemptId}/photo-slots/{slotId}/photos/{photoItemId}/upload":
       {
         post: {
@@ -7044,6 +7116,30 @@ export const openApiDocument = {
             ],
           },
           ...photoRetentionProperties,
+        },
+      },
+      PhotoUploadBatchAdmission: {
+        type: "object",
+        additionalProperties: false,
+        required: ["batchId", "maximumConcurrentTransfers", "items"],
+        properties: {
+          batchId: { type: "string", format: "uuid" },
+          maximumConcurrentTransfers: { const: 2 },
+          items: {
+            type: "array",
+            minItems: 2,
+            maxItems: 2,
+            items: {
+              type: "object",
+              additionalProperties: false,
+              required: ["photoItemId", "expiresAt", "quotaWarning"],
+              properties: {
+                photoItemId: { type: "string", format: "uuid" },
+                expiresAt: { type: "string", format: "date-time" },
+                quotaWarning: { type: "boolean" },
+              },
+            },
+          },
         },
       },
       PhotoCollectionDeleteResponse: {

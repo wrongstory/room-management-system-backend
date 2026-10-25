@@ -254,8 +254,8 @@ def main() -> None:
     if document.get("info", {}).get("version") != "0.6.0":
         raise RuntimeError("전체 source OpenAPI version이 0.6.0이 아닙니다.")
     paths = document.get("paths")
-    if not isinstance(paths, dict) or len(paths) != 156:
-        raise RuntimeError("전체 source OpenAPI path 수가 156가 아닙니다.")
+    if not isinstance(paths, dict) or len(paths) != 157:
+        raise RuntimeError("전체 source OpenAPI path 수가 157이 아닙니다.")
     methods = {"get", "post", "put", "patch", "delete"}
     operation_count = sum(
         1
@@ -264,8 +264,8 @@ def main() -> None:
         for method in path_item
         if method in methods
     )
-    if operation_count != 168:
-        raise RuntimeError("전체 source OpenAPI operation 수가 168이 아닙니다.")
+    if operation_count != 169:
+        raise RuntimeError("전체 source OpenAPI operation 수가 169가 아닙니다.")
     schemas = document.get("components", {}).get("schemas", {})
     check_post_approval_contract(document)
     discovery_fields = [
@@ -384,6 +384,8 @@ def main() -> None:
             package / "models" / "developer_reset_preview.py",
             package / "models" / "developer_reset_candidate_impact.py",
             package / "api" / "photos" / "get_photo_thumbnail.py",
+            package / "api" / "photos" / "admit_attempt_photo_collection_batch.py",
+            package / "models" / "photo_upload_batch_admission.py",
             *[
                 package / "api" / "post_approval_room_issues" / (name + ".py")
                 for name in [
