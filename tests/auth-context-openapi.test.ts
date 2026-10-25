@@ -8,7 +8,7 @@ describe('#442 authentication availability contract', () => {
     }
     expect(openApiDocument.components.schemas.ErrorCode.enum).toContain('AUTH_CONTEXT_UNAVAILABLE');
     expect(openApiDocument.info.description).toContain('503 AUTH_CONTEXT_UNAVAILABLE');
-    expect(Object.keys(openApiDocument.paths)).toHaveLength(151);
+    expect(Object.keys(openApiDocument.paths)).toHaveLength(154);
   });
   it('documents common-auth photo content but does not inject it on limited identity routes', () => {
     expect(openApiDocument.paths['/v1/photos/{photoId}/content'].get.responses['503']).toBeDefined();

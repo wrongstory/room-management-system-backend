@@ -590,6 +590,7 @@ erDiagram
 - 오늘/내일 계획 배정·통보는 가능하지만 checkout attempt/PIN은 materialized current target과 실제 checkout/access 시각 검증을 통과해야 한다. #28만 attempt 활성화를 소유한다.
 - 실제 checkout은 같은 planned target을 current로 승격한다. 조기 수동 퇴실은 schedule/assignment revision, 미통보 예약 변경은 draft stale로 처리한다. 통보 후 같은 객실의 퇴실 연장은 미착수·PIN/offline lease 미발급일 때만 immutable schedule/assignment replan을 허용하고, 그 외에는 stable conflict로 전체 롤백한다. 취소는 soft cancel/current 종료/회수 알림으로 처리한다.
 - #446: 관리자 오늘·내일 계획 모두 과거 미완료를 포함한다. 요청 계획일의 근무 희망을 검사하되 원 target/assignment 날짜를 재작성하지 않는다. DB 적용 전 후보이며 상세는 `ASSIGNMENT_PLANNING_TABS_446.md`를 따른다.
+- #446 자정 후속: 전일 미착수만 담당을 종료하며 원 날짜/접근 창 대신 감사의 `rolloverFromDate`/`rolloverToDate`로 일별 계획일을 기록한다. target version/carryover_count와 schedule revision은 증가한다. `private.assignment_activation_scan_cursor.last_rollover_target_id`는 회전 조회 위치이며 업무 FK가 아니다. 감사 entity별 partial index와 미착수 target ID partial index를 추가한다. 실제 DB NOT RUN; `ASSIGNMENT_MIDNIGHT_ROLLOVER_446.md` 참조.
 - 작업마다 현재 배정은 최대 한 건이고, 과거 revision은 삭제하지 않는다.
 - 현재 배정의 `(maid, service_date, sequence_number)`는 유일하다. 같은 순서는 메이드나 서비스 날짜가 다를 때만 재사용한다.
 - 배정 revision은 생성 시 target의 `effective_service_date`, `available_from`, `due_at`을 snapshot으로 고정하고 target·maid·순서·revision·snapshot·변경자·생성시각을 이후 수정하지 않는다.
@@ -1456,6 +1457,11 @@ Scheduler는 null checkout 예약을 자동 checkout하지 않는다.
 
 ## #336 제출·승인 후 독립 특이사항 보고 (source candidate, DB 미적용)
 
+2026-10-22 #474 후속 후보는 메모 필수/사진 0~10장으로 확장한다.
+report의 evidence_count=0과 evidence_revision=0은 함께 성립하고 seal은 0개다.
+기존 draft collection CAS와 권한·불변 이력을 보존하며 신규 테이블은 없다.
+이후 migration `20261022135443_post_approval_memo_only.sql`은 미적용이다.
+
 2026-10-06 사용자 결정은 관리자 공동 업무와 메이드 본인 실제 통보 배정 이력 접근이다.
 이전 original-performer/creator-only 제한을 최종 정책으로 사용하지 않는다. 후보 SQL은 역사
 접근과 신규 신고 상태 검사를 분리한다. 기존 사건의 source/초안 복구/목록/단건/content/
@@ -1523,3 +1529,7 @@ old/new 참조를 모두 검사한다. 무인 purge는 service-only typed lease/
 기존 current-assignment/pre-submission notification validator는 완화하지 않는다. memo·evidence ID·provider
 locator·PIN은 audit/notification payload에서 제외한다. 신규 direct #329 caller는 source snapshot1개와
 active-only fresh wrapper1개뿐이며, 선행 실제7/19 chain 뒤 **source 예상8/20**이다. 설치 census는 NOT RUN이다.
+
+## #452 PIN 가져오기
+
+private.room_pin_revisions.source에 sheet_import를 추가한다. 신규 public table 없이 current CAS·기존 nonce/entitlement trigger를 재사용한다. 상세 계약은 [ROOM_PIN_TRANSFER.md](./ROOM_PIN_TRANSFER.md)를 따른다.

@@ -30,6 +30,9 @@ const diagnosticPhases = [
   "OUTPUT_DECODE",
   "OUTPUT_VALIDATE",
   "BUDGET",
+  "PROVIDER_AUTH",
+  "PROVIDER_HTTP",
+  "PROVIDER_RESPONSE",
 ] as const;
 const diagnosticKinds = [
   "REJECTED",
@@ -41,6 +44,10 @@ const diagnosticKinds = [
   "DELEGATE",
   "NATIVE",
   "LIMIT",
+  "NETWORK",
+  "AUTH",
+  "THROTTLED",
+  "UPSTREAM",
 ] as const;
 type PhotoDiagnosticPhase = typeof diagnosticPhases[number];
 interface PhotoDiagnostic {

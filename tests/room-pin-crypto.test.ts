@@ -33,11 +33,14 @@ function flipFirstByte(value: string): string {
 }
 
 describe('room PIN AES-256-GCM envelope', () => {
-  it('preserves leading zero digits and never accepts a client prefix', () => {
+  it('preserves arbitrary bounded passwords and adds the server room prefix', () => {
     expect(canonicalRoomPin('101', '0123')).toBe('101-0123');
-    expect(() => canonicalRoomPin('101', '101-0123')).toThrowError('INVALID_ROOM_PIN');
-    expect(() => canonicalRoomPin('101', '123')).toThrowError('INVALID_ROOM_PIN');
-    expect(() => canonicalRoomPin('101', '123456789')).toThrowError('INVALID_ROOM_PIN');
+    for (const value of ['123', '001234', '123456789', '101-0123', 'A-비번!']) {
+      expect(canonicalRoomPin('101', value)).toBe('101-' + value);
+    }
+    for (const value of ['', '   ', 'a'.repeat(129), '\u0000', '\uD800']) {
+      expect(() => canonicalRoomPin('101', value)).toThrowError('INVALID_ROOM_PIN');
+    }
   });
 
   it('matches the Node and Edge golden vector byte-for-byte', async () => {

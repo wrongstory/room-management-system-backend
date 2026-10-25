@@ -48,6 +48,7 @@ function setup(override: (name: string, args: Record<string, unknown>) => unknow
     if (name === 'reserve_named_photo_provider_identity') { context = { ...context, providerFileId: args.p_provider_file_id, providerFolderId: args.p_provider_folder_id,
       fileName: collectionItemId === null ? null : `${context.uploadDate}_일반방_101_01.jpg` }; data = context; }
     if (name === 'record_admitted_photo_provider_success') data = operation('provider_succeeded', collectionItemId);
+    if (name === 'finalize_photo_upload_with_slots') data = { upload: operation('accepted', collectionItemId), photoSlots: null };
     if (name === 'finalize_admitted_photo_upload' || name === 'get_admitted_photo_upload' || name === 'reconcile_admitted_photo_upload' || name === 'get_photo_upload_receipt_with_session') data = operation('accepted', collectionItemId);
     if (name === 'authorize_photo_read') data = { photoId: id(7), providerFileId: 'provider_file_123', sha256: 'a'.repeat(64), mimeType: 'image/jpeg', sizeBytes: bytes.length, ...retention };
     return { data, error: null };
@@ -55,7 +56,60 @@ function setup(override: (name: string, args: Record<string, unknown>) => unknow
   return { calls, provider, service: new PhotoService(db, () => provider, async () => { calls.push('decode'); }) };
 }
 describe('photo application admission/provider/finalize boundary', () => {
+  it('releases a DB-proven pre-provider failure and retries the same request without compensation', async () => {
+    let claimedArgs: Record<string, unknown> = {};
+    const s = setup((name, args) => {
+      if (name === 'claim_admitted_photo_upload') claimedArgs = args;
+      if (name === 'release_pre_provider_photo_upload') {
+        expect(args).toEqual({ ...claimedArgs, p_lease_version: 1 });
+        return { data: true, error: null };
+      }
+      return undefined;
+    });
+    vi.mocked(s.provider.generateUploadIds).mockRejectedValueOnce(new PhotoError(503, 'PHOTO_PROVIDER_UNAVAILABLE'));
+    await expect(s.service.upload(request(), identity, id(3), id(4))).rejects.toMatchObject({ code: 'PHOTO_PROVIDER_UNAVAILABLE' });
+    expect(s.calls).toContain('release_pre_provider_photo_upload');
+    expect(s.calls).not.toContain('reconcile_admitted_photo_upload');
+    expect(s.provider.upload).not.toHaveBeenCalled();
+    expect(s.provider.remove).not.toHaveBeenCalled();
+    expect(await s.service.upload(request(), identity, id(3), id(4))).toMatchObject({ status: 'accepted' });
+  });
+  it.each([false, null, 'true'])('does not assume pre-provider release from %s', async released => {
+    const s = setup(name => name === 'release_pre_provider_photo_upload' ? { data: released, error: null }
+      : name === 'get_photo_upload_receipt_with_session' ? { data: operation(), error: null } : undefined);
+    vi.mocked(s.provider.generateUploadIds).mockRejectedValueOnce(new PhotoError(503, 'PHOTO_PROVIDER_UNAVAILABLE'));
+    await expect(s.service.upload(request(), identity, id(3), id(4))).rejects.toMatchObject({ code: 'PHOTO_PROVIDER_UNAVAILABLE' });
+    expect(s.calls).not.toContain('reconcile_admitted_photo_upload');
+    expect(s.provider.remove).not.toHaveBeenCalled();
+  });
+  it('keeps the original failure when lease release is unavailable', async () => {
+    const s = setup(name => ['release_pre_provider_photo_upload', 'reconcile_admitted_photo_upload'].includes(name)
+      ? { data: null, error: { message: 'PHOTO_UPLOAD_FENCE_CONFLICT' } }
+      : name === 'get_photo_upload_receipt_with_session' ? { data: operation(), error: null } : undefined);
+    vi.mocked(s.provider.generateUploadIds).mockRejectedValueOnce(new PhotoError(503, 'PHOTO_PROVIDER_UNAVAILABLE'));
+    await expect(s.service.upload(request(), identity, id(3), id(4))).rejects.toMatchObject({ code: 'PHOTO_PROVIDER_UNAVAILABLE' });
+    expect(s.provider.remove).not.toHaveBeenCalled();
+    expect(s.calls).not.toContain('reconcile_admitted_photo_upload');
+  });
+  it('preserves a successfully released operation after the release response is lost', async () => {
+    let releaseCommitted = false;
+    const s = setup(name => {
+      if (name === 'release_pre_provider_photo_upload') {
+        releaseCommitted = true;
+        return Promise.reject(new Error('synthetic response loss'));
+      }
+      if (name === 'get_photo_upload_receipt_with_session') return { data: operation(), error: null };
+      return undefined;
+    });
+    vi.mocked(s.provider.generateUploadIds).mockRejectedValueOnce(new PhotoError(503, 'PHOTO_PROVIDER_UNAVAILABLE'));
+    await expect(s.service.upload(request(), identity, id(3), id(4))).rejects.toMatchObject({ code: 'PHOTO_PROVIDER_UNAVAILABLE' });
+    expect(releaseCommitted).toBe(true);
+    expect(s.calls).not.toContain('reconcile_admitted_photo_upload');
+    expect(await s.service.upload(request(), identity, id(3), id(4))).toMatchObject({ status: 'accepted' });
+    expect(s.provider.remove).not.toHaveBeenCalled();
+  });
   const emptySlots = { attemptId: id(3), assignmentId: id(8), assignmentRevision: 1, slots: [] };
+  const combinedSlots = (photoSlots: unknown, photoItemId: string | null = null) => ({ data: { upload: operation('accepted', photoItemId), photoSlots }, error: null });
   function includedRequest(option = 'true') { const base = request(); return new Request(base.url + '&includePhotoSlots=' + option, base); }
   it('keeps legacy upload response and RPC sequence unchanged without opt-in', async () => {
     const s = setup(); const result = await s.service.upload(request(), identity, id(3), id(4));
@@ -64,16 +118,17 @@ describe('photo application admission/provider/finalize boundary', () => {
   });
   it('adds an authorized projected snapshot after acceptance without leaking private DB fields', async () => {
     const s = setup((name, args) => {
-      if (name !== 'get_attempt_photo_slots') return undefined;
-      expect(args).toEqual({ p_actor_profile_id: id(1), p_session_id: id(2), p_attempt_id: id(3) });
-      return { data: { ...emptySlots, providerFileId: 'private', hash: 'private' }, error: null };
+      if (name !== 'finalize_photo_upload_with_slots') return undefined;
+      expect(args).toEqual({ p_actor_profile_id: id(1), p_session_id: id(2), p_operation_id: id(5), p_lease_version: 1, p_claim_digest: expect.stringMatching(/^[0-9a-f]{64}$/) });
+      return combinedSlots({ ...emptySlots, providerFileId: 'private', hash: 'private' });
     });
     expect(await s.service.upload(includedRequest(), identity, id(3), id(4))).toMatchObject({ status: 'accepted', photoSlots: emptySlots });
-    expect(s.calls.at(-1)).toBe('get_attempt_photo_slots');
-    expect(s.calls.filter(name => name === 'finalize_admitted_photo_upload')).toHaveLength(1);
+    expect(s.calls.at(-1)).toBe('finalize_photo_upload_with_slots');
+    expect(s.calls).not.toContain('get_attempt_photo_slots');
+    expect(s.calls).not.toContain('finalize_admitted_photo_upload');
   });
-  it.each(['SESSION_REVOKED', 'PHOTO_ACCESS_REQUIRED', 'PHOTO_UPLOAD_FAILED'])('preserves accepted receipt when snapshot fails: %s', async code => {
-    const s = setup(name => name === 'get_attempt_photo_slots' ? { data: null, error: { message: code } } : undefined);
+  it('preserves accepted receipt when the wrapper reports an unavailable snapshot', async () => {
+    const s = setup(name => name === 'finalize_photo_upload_with_slots' ? combinedSlots(null) : undefined);
     expect(await s.service.upload(includedRequest(), identity, id(3), id(4))).toMatchObject({ status: 'accepted', photoSlots: null });
     expect(s.provider.remove).not.toHaveBeenCalled();
     expect(s.provider.upload).toHaveBeenCalledOnce();
@@ -83,7 +138,7 @@ describe('photo application admission/provider/finalize boundary', () => {
     { ...emptySlots, attemptId: id(99) }, { ...emptySlots, assignmentId: id(99) },
     { ...emptySlots, assignmentRevision: 2 }, { ...emptySlots, slots: 'invalid' },
   ])('does not attach a changed or malformed snapshot', async snapshot => {
-    const s = setup(name => name === 'get_attempt_photo_slots' ? { data: snapshot, error: null } : undefined);
+    const s = setup(name => name === 'finalize_photo_upload_with_slots' ? combinedSlots(snapshot) : undefined);
     expect(await s.service.upload(includedRequest(), identity, id(3), id(4))).toMatchObject({ status: 'accepted', photoSlots: null });
   });
   it('refreshes the snapshot on accepted replay without new provider writes', async () => {
@@ -91,6 +146,23 @@ describe('photo application admission/provider/finalize boundary', () => {
       : name === 'get_attempt_photo_slots' ? { data: emptySlots, error: null } : undefined);
     expect(await s.service.upload(includedRequest(), identity, id(3), id(4))).toMatchObject({ status: 'accepted', photoSlots: emptySlots });
     expect(s.provider.upload).not.toHaveBeenCalled();
+  });
+  it.each(['PHOTO_ACCESS_REQUIRED', 'PHOTO_UPLOAD_FENCE_CONFLICT'])('does not turn combined finalize rejection into success: %s', async code => {
+    const s = setup(name => name === 'finalize_photo_upload_with_slots' ? { data: null, error: { message: code } }
+      : name === 'get_photo_upload_receipt_with_session' ? { data: operation('provider_succeeded'), error: null } : undefined);
+    vi.spyOn(s.service, 'reconcile').mockResolvedValue(projectPhotoUploadOperation(operation('provider_succeeded')));
+    await expect(s.service.upload(includedRequest(), identity, id(3), id(4))).rejects.toMatchObject({ code });
+    expect(s.provider.remove).not.toHaveBeenCalled();
+    expect(s.calls).not.toContain('get_attempt_photo_slots');
+  });
+  it('recovers a lost combined response with a live-session receipt and separate snapshot, never another upload', async () => {
+    const s = setup(name => name === 'finalize_photo_upload_with_slots' ? Promise.reject(new Error('synthetic response loss'))
+      : name === 'get_attempt_photo_slots' ? { data: emptySlots, error: null } : undefined);
+    expect(await s.service.upload(includedRequest(), identity, id(3), id(4))).toMatchObject({ status: 'accepted', photoSlots: emptySlots });
+    expect(s.provider.upload).toHaveBeenCalledOnce();
+    expect(s.provider.remove).not.toHaveBeenCalled();
+    expect(s.calls).toContain('get_photo_upload_receipt_with_session');
+    expect(s.calls.at(-1)).toBe('get_attempt_photo_slots');
   });
   it.each(['false', '', '1', 'TRUE', 'true&includePhotoSlots=true', 'true&extra=1'])('rejects invalid/duplicate/unknown query before admission: %s', async option => {
     const s = setup();
@@ -101,7 +173,7 @@ describe('photo application admission/provider/finalize boundary', () => {
     const captured: Record<string, unknown>[] = [];
     const make = () => setup((name, args) => {
       if (name === 'begin_admitted_photo_upload') captured.push(args);
-      if (name === 'get_attempt_photo_slots') return { data: emptySlots, error: null };
+      if (name === 'finalize_photo_upload_with_slots') return combinedSlots(emptySlots);
       return undefined;
     });
     const plain = await make().service.upload(request(), identity, id(3), id(4));
@@ -115,7 +187,7 @@ describe('photo application admission/provider/finalize boundary', () => {
     const slots = { ...emptySlots, slots: [{ slotId: id(4), slotKey: 'cleaning-proof', required: true, displayOrder: 0,
       maxPhotos: 20, currentRevision: 0, collectionRevision: 1, photoCount: 1, uploadStatus: 'verified', photoId: null, ...retention,
       photos: [{ photoItemId: id(11), itemRevision: 1, displayOrder: 0, photoId: id(7), photoVersion: 1, uploadStatus: 'verified', ...retention }] }] };
-    const s = setup(name => name === 'get_attempt_photo_slots' ? { data: slots, error: null } : undefined);
+    const s = setup(name => name === 'finalize_photo_upload_with_slots' ? combinedSlots(slots, id(11)) : undefined);
     const req = new Request(`http://local/upload?assignmentId=${id(8)}&assignmentRevision=1&expectedCollectionRevision=0&expectedItemRevision=0&includePhotoSlots=true`, {
       method: 'POST', headers: { 'content-type': 'image/jpeg', 'idempotency-key': 'snapshot-collection-409' }, body: Uint8Array.from(bytes),
     });
@@ -161,25 +233,25 @@ describe('photo application admission/provider/finalize boundary', () => {
     let clock = 0;
     const s = setup(name => {
       clock += 10;
-      return name === 'get_attempt_photo_slots' ? { data: emptySlots, error: null } : undefined;
+      return name === 'finalize_photo_upload_with_slots' ? combinedSlots(emptySlots, collection ? id(11) : null) : undefined;
     });
     const timed = s.service.withTiming(new PhotoTiming(() => clock));
     const req = collection ? new Request(`http://local/upload?assignmentId=${id(8)}&assignmentRevision=1&expectedCollectionRevision=0&expectedItemRevision=0&includePhotoSlots=true`, {
       method: 'POST', headers: { 'content-type': 'image/jpeg', 'idempotency-key': 'timing-collection-436' }, body: Uint8Array.from(bytes),
     }) : includedRequest();
     await timed.upload(req, identity, id(3), id(4), collection ? id(11) : undefined);
-    for (const stage of ['admit', 'begin', 'claim', 'context', 'identity', 'record', 'finalize', 'snapshot']) {
+    for (const stage of ['admit', 'begin', 'claim', 'context', 'identity', 'record', 'finalize_snapshot']) {
       expect(timed.timingHeader()).toContain(`photo_db_${stage};dur=10.0`);
     }
     expect(timed.timingHeader()).toContain('photo_db_folder;dur=20.0');
-    expect(timed.timingHeader()).toContain('photo_db;dur=100.0');
+    expect(timed.timingHeader()).toContain('photo_db;dur=90.0');
     expect(timed.timingHeader()).not.toContain('photo_db_receipt');
     expect(s.calls.filter(n => n !== 'decode')).toEqual([
       collection ? 'admit_photo_collection_upload' : 'admit_photo_upload',
       collection ? 'begin_admitted_photo_collection_upload' : 'begin_admitted_photo_upload',
       'claim_admitted_photo_upload', 'get_photo_provider_context', 'reserve_photo_drive_folder',
       'reserve_photo_drive_folder', 'reserve_named_photo_provider_identity', 'record_admitted_photo_provider_success',
-      'finalize_admitted_photo_upload', 'get_attempt_photo_slots',
+      'finalize_photo_upload_with_slots',
     ]);
     expect(vi.mocked(s.provider.generateUploadIds).mock.calls[0]?.[0]).toBeInstanceOf(PhotoTiming);
     expect(vi.mocked(s.provider.ensureFolder).mock.calls[0]?.[1]).toBeInstanceOf(PhotoTiming);
@@ -198,16 +270,17 @@ describe('photo application admission/provider/finalize boundary', () => {
     expect(timed.timingHeader()).toContain('photo_db_receipt;dur=5.0');
     expect(s.calls.at(-1)).toBe('get_photo_upload_receipt_with_session');
   });
-  it('keeps failed snapshot timing separate without changing accepted/null behavior', async () => {
+  it('labels combined timing without inventing separate snapshot duration', async () => {
     let clock = 0;
     const s = setup(name => {
       clock += 7;
-      if (name === 'get_attempt_photo_slots') return { data: null, error: { message: 'private diagnostic' } };
+      if (name === 'finalize_photo_upload_with_slots') return combinedSlots(null);
       return undefined;
     });
     const timed = s.service.withTiming(new PhotoTiming(() => clock));
     expect(await timed.upload(includedRequest(), identity, id(3), id(4))).toMatchObject({ status: 'accepted', photoSlots: null });
-    expect(timed.timingHeader()).toContain('photo_db_snapshot;dur=7.0');
+    expect(timed.timingHeader()).toContain('photo_db_finalize_snapshot;dur=7.0');
+    expect(timed.timingHeader()).not.toContain('photo_db_snapshot;');
     expect(timed.timingHeader()).not.toContain('private');
   });
   it('groups unlisted read RPCs under db_other without exposing their names or arguments', async () => {

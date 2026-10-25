@@ -52,6 +52,7 @@ const dbTimingStages = {
   claim_admitted_photo_upload: 'db_claim', get_photo_provider_context: 'db_context',
   reserve_photo_drive_folder: 'db_folder', reserve_named_photo_provider_identity: 'db_identity',
   record_admitted_photo_provider_success: 'db_record', finalize_admitted_photo_upload: 'db_finalize',
+  finalize_photo_upload_with_slots: 'db_finalize_snapshot',
   get_photo_upload_receipt_with_session: 'db_receipt', get_attempt_photo_slots: 'db_snapshot',
   refresh_photo_storage_quota: 'db_quota',
 } as const;
@@ -329,6 +330,7 @@ export class PhotoService {
     if (options.length > 1 || options.length === 1 && options[0] !== 'true') invalid();
     const accepted = await this.#upload(request, i, attemptId, slotId, photoItemId);
     if (options.length === 0) return accepted;
+    if (Object.hasOwn(accepted, 'photoSlots')) return accepted;
     let photoSlots: unknown = null;
     if (accepted.status === 'accepted') {
       // Outside upload compensation/reconciliation: a failed read must never retry a saved file.
@@ -589,6 +591,21 @@ export class PhotoService {
           p_uploaded_at: success.uploadedAt,
         });
       }
+      if (params.has('includePhotoSlots')) {
+        const combined = row(await this.#rpc('finalize_photo_upload_with_slots', {
+          ...this.#actor(i), ...worker,
+        }));
+        const accepted = response(projectPhotoUploadOperation(combined.upload));
+        let photoSlots: unknown = null;
+        if (accepted.status === 'accepted') {
+          try {
+            const snapshot = this.#projectSlots(combined.photoSlots, i);
+            if (snapshot.attemptId === common.attemptId && snapshot.assignmentId === common.assignmentId &&
+                snapshot.assignmentRevision === common.assignmentRevision) photoSlots = snapshot;
+          } catch { /* Optional projection failure does not invalidate acceptance. */ }
+        }
+        return { ...accepted, photoSlots };
+      }
       return response(
         projectPhotoUploadOperation(
           await this.#rpc("finalize_admitted_photo_upload", {
@@ -599,6 +616,30 @@ export class PhotoService {
       );
     } catch (error) {
       // Lost finalize response is not rejection. A failed reconciliation NEVER authorizes deletion.
+      // Only DB-proven pre-file failures may relinquish this exact claim immediately.
+      // An identity reservation/uncertain upload must keep its existing recovery fence.
+      let released = false;
+      if (photoError(error).statusCode === 503) {
+        try {
+          released = await this.#rpc("release_pre_provider_photo_upload", {
+            ...this.#actor(i), ...worker,
+          }) === true;
+        } catch {
+          // Missing rollout RPC, revoked session or lost response never bypasses the lease.
+        }
+        if (!released) {
+          // Release may have committed despite response loss. Never convert the
+          // now-unleased pre-file operation into a terminal reconciliation state.
+          // Only a read-only, live-session receipt can turn this failure into success.
+          try {
+            const receipt = projectPhotoUploadOperation(await this.#rpc("get_photo_upload_receipt_with_session", {
+              ...this.#actor(i), p_operation_id: begin.operationId,
+            }));
+            if (receipt.status === "accepted" && receipt.operationId === begin.operationId) return response(receipt);
+          } catch { /* Keep durable state and the original provider diagnostic. */ }
+        }
+        throw photoError(error);
+      }
       let reconciled: PhotoUploadOperationProjection | undefined;
       try {
         reconciled = await this.reconcile(begin.operationId);
@@ -703,12 +744,13 @@ export class PhotoService {
   ): Promise<unknown> {
     this.#uploadActor(i);
     query(request, []);
-    const result = row(
-      await this.#rpc("get_attempt_photo_slots", {
+    return this.#projectSlots(await this.#rpc("get_attempt_photo_slots", {
         ...this.#actor(i),
         p_attempt_id: uuid(attemptId),
-      }),
-    );
+      }), i);
+  }
+  #projectSlots(value: unknown, i: PhotoIdentity) {
+    const result = row(value);
     if (!Array.isArray(result.slots) || result.slots.length > 100) {
       return failed();
     }

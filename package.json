@@ -38,6 +38,7 @@
     "db:test:concurrency": "node scripts/test-reservation-concurrency.mjs && node scripts/test-complaint-response-attention-concurrency.mjs && node scripts/test-manual-cleaning-cancel-concurrency.mjs && node scripts/test-payroll-adjustment-book-concurrency.mjs && node scripts/test-payroll-work-details-concurrency.mjs && node scripts/test-payroll-remittance-marker-concurrency.mjs && node scripts/test-limited-existing-session-concurrency.mjs && node scripts/test-photo-collection-provider-context-concurrency.mjs && node scripts/test-photo-storage-names-concurrency.mjs && node scripts/test-room-candle-concurrency.mjs && node scripts/test-post-approval-room-issue-concurrency.mjs && node scripts/test-auth-context-concurrency.mjs",
     "db:test:candles": "node scripts/test-room-candle-concurrency.mjs",
     "backup:dry-run": "node scripts/backup-recovery-dry-run.mjs --target local-synthetic",
+    "backup:reservations": "tsx scripts/reservation-backup.ts",
     "backup:dry-run:fresh": "npm run db:verify && npm run backup:dry-run",
     "edge:check": "node scripts/check-edge-functions.mjs",
     "swagger:pages:build": "node scripts/build-swagger-pages.mjs",
@@ -54,14 +55,15 @@
     "@imagemagick/magick-wasm": "0.0.43",
     "@supabase/supabase-js": "2.112.4",
     "dotenv": "17.2.3",
-    "fastify": "5.12.5",
-    "zod": "4.4.3"
+    "fastify": "5.12.7",
+    "zod": "4.6.6"
   },
   "overrides": {
     "source-map-js": "1.2.2",
-    "fast-uri@^3.0.0": "3.1.8",
-    "fast-uri@^4.0.0": "4.1.5",
-    "ip-address": "10.7.1"
+    "fast-uri@^3.0.0": "3.1.9",
+    "fast-uri@^4.0.0": "4.2.3",
+    "ip-address": "10.7.4",
+    "vite": "8.2.4"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.10",
@@ -71,6 +73,6 @@
     "supabase": "2.115.0",
     "tsx": "4.23.12",
     "typescript": "7.0.2",
-    "vitest": "4.1.11"
+    "vitest": "4.1.12"
   }
 }

@@ -1,5 +1,6 @@
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import { z } from 'zod';
+import { isValidRoomPin } from './room-pin-crypto.js';
 import { AppError } from '../../lib/app-error.js';
 import {
   ROOM_OPERATION_CURSOR_MAX_LENGTH,
@@ -95,7 +96,7 @@ const pinWorkBinding = {
   attemptId: z.uuid().optional()
 };
 const preparePinChangeSchema = z.object({
-  pinDigits: z.string().regex(/^[0-9]{4,8}$/),
+  pinDigits: z.string().refine(isValidRoomPin),
   expectedPinVersion: z.number().int().nonnegative(),
   reasonCode: z.enum(['ADMIN_INITIAL_PIN', 'ADMIN_PHYSICAL_CHANGE', 'MAID_CLEANING_CHANGE', 'ACTUAL_PIN_REENTRY']),
   ...pinWorkBinding,

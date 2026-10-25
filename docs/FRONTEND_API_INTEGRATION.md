@@ -1,13 +1,35 @@
 # 프론트엔드·Codex API 연동 가이드
 
-## 2026-10-13 #455 병합과 다음 병목
+## 2026-10-25 #415 합성 기준선 통합
 
-#455는 CI38362812640 및 독립 QA 후 devf57132f에 병합했다. 운영 미배포다.
-[합성 비용 기준선](./ASSIGNMENT_HYDRATION_COST_BASELINE.md)을 추가했다.
-계산 구간 개선은 확인했으나 DB·네트워크·실제 화면 속도 측정은 아니다.
-다음 후보는 배정 카드 hydration의 bounded read RPC 통합이며 아직 SQL/API 구현 전이다.
-기존 endpoint/Swagger/프런트 호출을 유지한다. 전체 DB 검증은 최종 릴리스 1회,
-마이그레이션 실행은 사전 승인 후에만 진행한다.
+#453/#455 계산 개선은 v0.9.5 이후 운영에 포함됐다. PR456의
+[합성 CPU 기준선](./ASSIGNMENT_HYDRATION_COST_BASELINE.md)을 최신 dev와 통합한다.
+CPU 비교는 실제 API·DB·네트워크·사용자 대기 시간의 개선율이 아니다.
+신규 bounded hydration RPC와 실제 계측은 후속이며 #415는 OPEN이다.
+기존 endpoint/Swagger/프런트 호출을 유지한다. Full DB는 NOT RUN이며
+최종 릴리스 1회 실행 전에 별도 승인을 받는다.
+
+## 2026-10-25 #487 보안 패치 후보
+
+Zod·fast-uri 및 Edge 생성물 보안을 보완한다. 정상 API 계약과 프런트 연결은 동일하며 운영 미배포다.
+검증·도달 범위·DB 승인 경계는 [보안 기록](./DEPENDENCY_SECURITY_487.md)을 따른다.
+
+
+## 2026-10-25 dev 통합 — #485
+
+운영의 마지막 확인 기록은 [v0.9.9 배포](https://github.com/wrongstory/room-management-system-backend/pull/477#issuecomment-6359461664)의 API53 / migration122 / main3e805249다. 아래 과거의 현재·후보·미배포 표현은 각 checkpoint 당시 상태다.
+이번 변경은 main의 검증·문서 보완을 dev로 복원하며 API 계약·운영 runtime·migration 파일을 변경하지 않는다. dev의 #479/#480 보안 의존성과 #481 PIN 오류 진단은 보존하며 아직 운영 반영과 구분한다.
+Full DB/SQL/upgrade/경합 및 운영 migration은 이번 작업에서 NOT RUN이다. 최종 릴리스의 실제 DB 실행 전에 별도 사용자 승인을 받는다. 프런트 코드 변경이나 새 API 연결은 필요하지 않다.
+세부 검증·인계는 [통합 기록](./RELEASE_VALIDATION_BACKPORT_485.md)을 따른다.
+
+
+## #411 사진 최종 등록 왕복 감소 — 2026-10-22 미배포 후보
+
+최종 등록과 권한 있는 사진 목록 조회를 하나의 내부 RPC로 묶는
+[후속 계약](./PHOTO_FINALIZE_ROUNDTRIPS_411.md)을 준비했다. 공개 API/JSON 변경은 없고
+프런트 DOCS/32의 순차 큐·동일 key/Blob·snapshot/null fallback을 유지한다.
+새 `photo_db_finalize_snapshot` timing은 합친 왕복이며, 개별 finalize/snapshot 수치와 혼합하지 않는다.
+새 SQL 적용은 실행 전 사용자 승인 대상이고 운영 API51에는 아직 포함되지 않았다.
 
 ## #415 후속 상태 — 2026-10-13 운영 미반영
 
@@ -53,6 +75,12 @@ DB/migration 변경은 없다. [범위와 검증 상태](./PAYROLL_CURSOR_PERFOR
 운영 기능이나 측정된 속도 개선으로 안내하지 않는다. [검증 상태와 릴리스 gate](./PAYROLL_BASIS_PERFORMANCE_416.md).
 
 ## #446 오늘·내일 배정 — 미배포 후보
+
+자정 후속 후보는 [KST 00:00 이월 계약](./ASSIGNMENT_MIDNIGHT_ROLLOVER_446.md)을 따른다.
+전날 내일 계획은 담당을 유지하며 오늘로 표시되고, 전일 미착수는 현재 담당이 종료된다.
+선택일 D와 카드 `planningDate`를 사용하고 원 `serviceDate`를 재작성하지 않는다.
+신규 HTTP 경로/필드는 없으며 admin/maid 오늘 목록은 미래 계획을 제외한다.
+실제 DB/운영 적용은 NOT RUN이다. 프런트 #219 연동은 배포 확인 후 진행한다.
 
 2026-10-13: PR #447은 required application/migration CI38357361243 및 독립 통합 QA 후
 dev `8f13d09`에 병합됐다. Node2,987개·독립 통합340개 PASS. 개발 migration 검사는
@@ -116,6 +144,23 @@ CSV 문자열을 전달할 수 있다. 기존 단건 API도 유지한다. 가능
 [프런트 #207 인계](https://github.com/makee-ham/room-management-system/issues/207#issuecomment-6094034492)에
 연결 계약·후속 범위·미검증 항목을 구분했다. 프런트 소스/flag는 변경하지 않았으며 실제 계정
 UAT·사진 snapshot 옵션 활성화·p50/p95는 여전히 후속이다. 공개 smoke PASS와 실사용 검증을 구분한다.
+## 과거 checkpoint — 2026-10-10 v0.9.3 준비
+
+현재 운영은 v0.9.2/API43/history112이며 아래 과거 준비 기록은 보존한다.
+최종 dev85d8d69의 가능일 완전성·공통 timing·송금 묶음 GET·배정 대기 개선은
+dev 병합 완료/운영 미배포다. 후보 Swagger는151 paths/163 operations이며
+현재 운영150/162와 구분한다. [v0.9.3 gate·복구·미검증](./RELEASE_V0.9.3.md)을 따른다.
+운영 배포 확인 전 batch 연결이나 사진 snapshot 옵션 활성화를 요청하는 문서가 아니다.
+GET `/v1/payroll/remittance-markers`의 `maidProfileIds`는 UUID 배열이 아닌
+쉼표로 합친 문자열(1~10명)이다. 기존 단건은 유지하며 오류를 미송금으로 치환하지 않는다.
+
+## 2026-10-09 운영 기준과 #406 패치 준비
+
+운영은 v0.9.0/main d9e053b, API41, migration111 기준이다. 아래 10월7일
+미배포 설명은 당시 source 등록 이력이다. #336의 11개 API는 이미 배포됐으며
+실제 업무 UAT 완료를 의미하지 않는다. #406은 PUT CORS·사진 개수20 schema·
+배포 표기만 정정한다. 사용자 병합/재배포 승인 후 [v0.9.1](./RELEASE_V0.9.1.md)을
+준비 중이고, 이 패치의 운영 반영은 아직 완료하지 않았다.
 
 ## 2026-10-07 #336 정식 source API·Swagger 연결 — 운영 미배포
 

@@ -60,6 +60,9 @@ const envSchema = z.object({
   GOOGLE_SHEETS_SERVICE_ACCOUNT_PRIVATE_KEY: z.string().max(8192).optional(),
   GOOGLE_SHEETS_SPREADSHEET_ID: z.string().max(200).optional(),
   GOOGLE_SHEETS_ROOM_PIN_TAB: z.string().max(100).optional(),
+  ROOM_PIN_IMPORT_SPREADSHEET_ID: z.string().max(200).optional(),
+  ROOM_PIN_IMPORT_SHEET_ID: z.string().max(20).optional(),
+  ROOM_PIN_TRANSFER_HMAC_SECRET: z.string().max(1024).optional(),
   RESERVATION_SCHEDULER_ACTOR_PROFILE_ID: z.preprocess(
     (value) => value === '' ? undefined : value,
     z.uuid().optional()

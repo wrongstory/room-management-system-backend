@@ -863,14 +863,14 @@ export const openApiDocument = {
       "3. `mustChangePassword=true`이면 계정·객실 화면으로 보내지 말고 `POST /v1/auth/password`만 허용합니다.",
       "4. 변경 API에는 사용자 동작별 `Idempotency-Key`를 보내며, 같은 본문 재시도에만 같은 키를 재사용합니다.",
       "5. 실패 처리는 HTTP 상태와 함께 안정적인 `error.code`를 기준으로 분기합니다.",
-      "공통 인증 확인 장애는 503 AUTH_CONTEXT_UNAVAILABLE입니다. 계정 폐기/로그인 만료(401 SESSION_REVOKED)와 다르므로 자동 로그아웃하거나 빈 데이터로 대체하지 마세요. 재시도 UI를 제공하고 변경 요청은 같은 본문·Idempotency-Key를 유지합니다. #442 source 후보이며 운영 적용은 릴리스 기록으로 확인합니다.",
+      "공통 인증 확인 장애는 503 AUTH_CONTEXT_UNAVAILABLE입니다. 계정 폐기/로그인 만료(401 SESSION_REVOKED)와 다르므로 자동 로그아웃하거나 빈 데이터로 대체하지 마세요. 재시도 UI를 제공하고 변경 요청은 같은 본문·Idempotency-Key를 유지합니다.",
       "",
       "## 역할 경계",
       "- `developer`: 계정 관리·운영 상태와 별도의 안전한 객실 기준정보 카탈로그만 관리할 수 있으며 예약·점유·청소·PIN 운영 데이터는 금지됩니다.",
       "- `admin`: 계정 관리와 객실 업무가 가능합니다.",
       "- `maid`: 계정·전체 객실 API는 사용할 수 없고 본인의 주간 가능일만 조회·제출·변경 요청할 수 있습니다.",
       "",
-      "## 성능 계측 (source 후보)",
+      "## 성능 계측",
       "선택 업무 경로의 성공 응답은 Server-Timing: api_total;dur=<ms>를 제공합니다. 허용된 브라우저 Origin에서 응답 헤더를 읽을 수 있습니다. 오류·인증/공개 경로·HEAD/OPTIONS는 제외하며 고정 숫자만 반환합니다. api_total은 handler 시작부터 응답 생성까지이며 전체 업로드/다운로드·렌더링·콜드 시작 시간 또는 DB 단독 시간이 아닙니다. 계약·권한·캐시 정책은 바뀌지 않습니다. 운영 적용 여부와 경로 목록은 docs/API_PERFORMANCE_413.md를 확인하세요.",
       "",
       "프론트 구현 절차와 타입 생성 명령은 저장소의 `docs/FRONTEND_API_INTEGRATION.md`를 참고하세요.",
@@ -966,6 +966,299 @@ export const openApiDocument = {
   ],
   paths: {
     ...postApprovalOpenApiFragment.paths,
+    "/v1/rooms/pins/export": {
+      get: {
+        tags: ["Rooms"],
+        operationId: "exportRoomPins",
+        "x-required-roles": ["admin"],
+        security: [{ bearerAuth: [] }],
+        summary: "객실 번호·비밀번호 Excel 내보내기",
+        description:
+          "active admin 전용. 시트 1의 B/C열에 문자열로 저장합니다. 미설정 PIN은 빈 셀입니다. 현재 저장값이며 도어락 확인을 의미하지 않습니다. no-store 다운로드만 허용하며 원본 Drive에 쓰지 않습니다.",
+        responses: {
+          "200": {
+            description: "Excel 파일",
+            headers: {
+              "Cache-Control": {
+                schema: { type: "string", const: "no-store" },
+              },
+            },
+            content: {
+              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
+                { schema: { type: "string", format: "binary" } },
+            },
+          },
+          "401": {
+            description: "세션 만료",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ErrorEnvelope" },
+              },
+            },
+          },
+          "403": {
+            description: "관리자 권한 필요",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ErrorEnvelope" },
+              },
+            },
+          },
+          "409": {
+            description: "객실 변경 또는 미해결 PIN 변경 lease",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ErrorEnvelope" },
+              },
+            },
+          },
+          "503": {
+            description: "설정 오류",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ErrorEnvelope" },
+              },
+            },
+          },
+        },
+      },
+    },
+    "/v1/rooms/pins/import/preview": {
+      post: {
+        tags: ["Rooms"],
+        operationId: "previewRoomPinImport",
+        "x-required-roles": ["admin"],
+        security: [{ bearerAuth: [] }],
+        summary: "지정 Drive 시트 객실 비밀번호 검증",
+        description:
+          "active admin 전용. 서버 설정의 정확한 시트 1 B2:C1001만 읽습니다. PIN 원문 없이 행 번호·오류 코드·건수 및 5분 유효 previewToken을 반환합니다. 요일·특이사항은 읽지 않습니다. 최대 300실/1000행이며 숫자나 수식 PIN 셀을 거절합니다.",
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: { type: "object", additionalProperties: false },
+            },
+          },
+        },
+        responses: {
+          "200": {
+            description: "no-store 검증 결과",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["preview"],
+                  properties: {
+                    preview: {
+                      type: "object",
+                      additionalProperties: false,
+                      required: [
+                        "valid",
+                        "total",
+                        "changed",
+                        "unchanged",
+                        "ignored",
+                        "issues",
+                        "expiresAt",
+                        "previewToken",
+                      ],
+                      properties: {
+                        valid: { type: "boolean" },
+                        total: { type: "integer", minimum: 0, maximum: 300 },
+                        changed: { type: "integer", minimum: 0, maximum: 300 },
+                        unchanged: {
+                          type: "integer",
+                          minimum: 0,
+                          maximum: 300,
+                        },
+                        ignored: { type: "integer", minimum: 0, maximum: 1000 },
+                        expiresAt: { type: "string", format: "date-time" },
+                        previewToken: {
+                          type: ["string", "null"],
+                          maxLength: 160,
+                        },
+                        issues: {
+                          type: "array",
+                          maxItems: 1000,
+                          items: {
+                            type: "object",
+                            additionalProperties: false,
+                            required: ["row", "code"],
+                            properties: {
+                              row: {
+                                type: "integer",
+                                minimum: 0,
+                                maximum: 1001,
+                              },
+                              code: {
+                                type: "string",
+                                enum: [
+                                  "INVALID_SHEET_HEADER",
+                                  "UNKNOWN_ROOM",
+                                  "DUPLICATE_ROOM",
+                                  "INVALID_ROOM_CREDENTIAL",
+                                  "NO_ROOM_ROWS",
+                                ],
+                              },
+                            },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          "400": {
+            description: "요청 형식 오류",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ErrorEnvelope" },
+              },
+            },
+          },
+          "401": {
+            description: "세션 만료",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ErrorEnvelope" },
+              },
+            },
+          },
+          "403": {
+            description: "관리자 권한 필요",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ErrorEnvelope" },
+              },
+            },
+          },
+          "409": {
+            description: "객실 정보 변경/lease 충돌",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ErrorEnvelope" },
+              },
+            },
+          },
+          "503": {
+            description: "Google 연결·시트 형식·서버 설정 확인 필요",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ErrorEnvelope" },
+              },
+            },
+          },
+        },
+      },
+    },
+    "/v1/rooms/pins/import/apply": {
+      post: {
+        tags: ["Rooms"],
+        operationId: "applyRoomPinImport",
+        "x-required-roles": ["admin"],
+        security: [{ bearerAuth: [] }],
+        summary: "검증한 Drive 비밀번호를 원자 적용",
+        description:
+          "active admin 전용. 동일 actor/session의 previewToken과 Idempotency-Key가 필요합니다. 원본·객실/PIN 버전 변경 또는 5분 만료 시 409로 재검증합니다. 동일 요청 재시도는 receipt를 반환합니다. 변경한 객실은 물리 확인 전 mismatch이며 기존 ACTUAL_PIN_REENTRY 절차로 도어락 확인을 완료합니다. 자동 Sheet 쓰기 없음.",
+        parameters: [{
+          in: "header",
+          name: "Idempotency-Key",
+          required: true,
+          schema: { type: "string", pattern: "^[A-Za-z0-9._:-]{8,128}$" },
+        }],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                additionalProperties: false,
+                required: ["previewToken"],
+                properties: {
+                  previewToken: {
+                    type: "string",
+                    pattern: "^\\d{13}\\.[a-f0-9]{64}\\.[a-f0-9]{64}$",
+                    maxLength: 160,
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          "200": {
+            description: "no-store 적용 결과",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["imported"],
+                  properties: {
+                    imported: {
+                      type: "object",
+                      additionalProperties: false,
+                      required: ["updated", "unchanged"],
+                      properties: {
+                        updated: { type: "integer", minimum: 0, maximum: 300 },
+                        unchanged: {
+                          type: "integer",
+                          minimum: 0,
+                          maximum: 300,
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          "400": {
+            description: "잘못된 token/요청",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ErrorEnvelope" },
+              },
+            },
+          },
+          "401": {
+            description: "세션 만료",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ErrorEnvelope" },
+              },
+            },
+          },
+          "403": {
+            description: "관리자 권한 필요",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ErrorEnvelope" },
+              },
+            },
+          },
+          "409": {
+            description: "미리보기 만료·변경·lease 충돌·멱등키 재사용",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ErrorEnvelope" },
+              },
+            },
+          },
+          "503": {
+            description: "Google 연결/서버 설정 오류",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ErrorEnvelope" },
+              },
+            },
+          },
+        },
+      },
+    },
     "/v1/rooms/{roomId}/reports": {
       get: {
         tags: ["Rooms"],
@@ -5517,7 +5810,7 @@ export const openApiDocument = {
         operationId: "prepareRoomPinChange",
         summary: "물리 도어락 PIN 변경 준비",
         description:
-          "서버가 현재 roomNumber와 4~8자리 pinDigits를 결합해 암호화한 뒤 5분 이하 변경 lease를 만듭니다. current PIN version이 0인 최초 등록에서 admin client가 일반 수정 사유 ADMIN_PHYSICAL_CHANGE를 보내도 서버가 ADMIN_INITIAL_PIN으로 정규화하며, request hash와 감사 사유도 정규화된 값을 사용합니다. 이 단계는 current PIN을 바꾸지 않고 즉시 mismatch로 전환하므로 실제 체크인과 admin 일반 reveal은 차단하지만 현재 통보된 담당 메이드의 일반 reveal과 예약 등록은 차단하지 않습니다. maid mismatch reveal은 authoritative current stored PIN을 반환하며 물리 도어락 일치를 의미하지 않습니다. maid는 본인의 현재 통보 assignment·in_progress attempt·현재 pinVersion의 unrevoked accessLeaseId를 모두 보내야 합니다. 응답 유실 시 같은 Idempotency-Key와 같은 PIN을 재전송하며, 다른 PIN은 IDEMPOTENCY_KEY_REUSED입니다.",
+          "서버가 현재 roomNumber와 128 UTF-8 바이트 이하 pinDigits를 결합해 암호화한 뒤 5분 이하 변경 lease를 만듭니다. current PIN version이 0인 최초 등록에서 admin client가 일반 수정 사유 ADMIN_PHYSICAL_CHANGE를 보내도 서버가 ADMIN_INITIAL_PIN으로 정규화하며, request hash와 감사 사유도 정규화된 값을 사용합니다. 이 단계는 current PIN을 바꾸지 않고 즉시 mismatch로 전환하므로 실제 체크인과 admin 일반 reveal은 차단하지만 현재 통보된 담당 메이드의 일반 reveal과 예약 등록은 차단하지 않습니다. maid mismatch reveal은 authoritative current stored PIN을 반환하며 물리 도어락 일치를 의미하지 않습니다. maid는 본인의 현재 통보 assignment·in_progress attempt·현재 pinVersion의 unrevoked accessLeaseId를 모두 보내야 합니다. 응답 유실 시 같은 Idempotency-Key와 같은 PIN을 재전송하며, 다른 PIN은 IDEMPOTENCY_KEY_REUSED입니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin", "maid"],
         parameters: [roomIdParameter(), idempotencyHeader],
@@ -7841,6 +8134,13 @@ export const openApiDocument = {
             "GUEST_COUNT_EXCEEDS_ROOM_TYPE_CAPACITY",
             "ROOM_OPERATION_NOT_FOUND",
             "INVALID_ROOM_PIN",
+            "INVALID_PIN_TRANSFER_REQUEST",
+            "ROOM_PIN_TRANSFER_NOT_CONFIGURED",
+            "ROOM_PIN_TRANSFER_STALE",
+            "ROOM_PIN_TRANSFER_BUSY",
+            "ROOM_PIN_IMPORT_SOURCE_UNAVAILABLE",
+            "ROOM_PIN_TRANSFER_FAILED",
+
             "INVALID_PIN_BOOTSTRAP_LIMIT",
             "INVALID_PIN_BOOTSTRAP",
             "ROOM_PIN_BOOTSTRAP_CONFIG_INVALID",
@@ -9956,7 +10256,7 @@ export const openApiDocument = {
             type: "string",
             format: "date",
             description:
-              "불변 통보/변경 근거의 배정 계획일. 원 serviceDate와 구분하며 메이드 오늘/내일 목록 및 실행일 판정에 사용. #446 미배포 후보.",
+              "불변 통보/변경 근거의 배정 계획일. 원 serviceDate와 구분하며 메이드 오늘/내일 목록 및 실행일 판정에 사용.",
           },
           targetAssignmentVersion: {
             type: "integer",
@@ -10152,7 +10452,7 @@ export const openApiDocument = {
             type: "string",
             format: "date",
             description:
-              "통보/담당 변경 근거의 계획일. 원 serviceDate를 덮어쓰지 않으며 생성일·통보일과 다릅니다. #446 미배포 후보.",
+              "통보/담당 변경 근거의 계획일. 원 serviceDate를 덮어쓰지 않으며 생성일·통보일과 다릅니다.",
           },
           cleaningKind: {
             type: "string",
@@ -12724,12 +13024,11 @@ export const openApiDocument = {
         properties: {
           pinDigits: {
             type: "string",
-            pattern: "^[0-9]{4,8}$",
-            minLength: 4,
-            maxLength: 8,
+            minLength: 1,
+            maxLength: 128,
             writeOnly: true,
             description:
-              "선행 0을 보존하는 숫자 문자열. roomNumber 접두사는 서버만 추가합니다.",
+              "선행 0과 원문을 보존하는 문자열. 숙박 유형별 길이/숫자 제한 없음. 공백만 있는 값, 제어문자, 잘못된 Unicode를 거절하며 UTF-8 128바이트 이하. roomNumber 접두사는 서버가 추가합니다.",
           },
           expectedPinVersion: { type: "integer", minimum: 0 },
           reasonCode: {
@@ -12919,7 +13218,8 @@ export const openApiDocument = {
           roomId: { type: "string", format: "uuid" },
           credential: {
             type: "string",
-            pattern: "^[A-Za-z0-9]{1,32}-[0-9]{4,8}$",
+            minLength: 3,
+            maxLength: 161,
             readOnly: true,
             description:
               "일시 표시 전용 plaintext. clipboard/cache/offline/persistent storage 금지.",
@@ -14714,7 +15014,7 @@ function prestartRequestSchema(
       type: "string",
       format: "date",
       description:
-        "오늘/내일 배정 탭에서 선택한 KST 계획일. 과거 업무 담당 변경 시 반드시 전달. 생략은 기존 통보 계획일/원 날짜 호환이며 생성일·통보일이 아님. #446 미배포 후보.",
+        "오늘/내일 배정 탭에서 선택한 KST 계획일. 과거 업무 담당 변경 시 반드시 전달. 생략은 기존 통보 계획일/원 날짜 호환이며 생성일·통보일이 아님.",
     };
     properties.maidProfileId = { type: "string", format: "uuid" };
     properties.sequenceNumber = { type: "integer", minimum: 1 };

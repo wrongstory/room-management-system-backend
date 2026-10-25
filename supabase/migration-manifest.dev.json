@@ -2,17 +2,17 @@
   "schemaVersion": 1,
   "release": "dev",
   "hashAlgorithm": "sha256-lf-utf8",
-  "totalCount": 117,
+  "totalCount": 122,
   "baseline": {
     "count": 78,
     "head": "reservation_bookability_optional_guest_count"
   },
   "pending": {
-    "count": 39,
+    "count": 44,
     "first": "assignment_unavailability_reassignment",
-    "head": "payroll_projection_materialization"
+    "head": "post_approval_memo_only"
   },
-  "head": "payroll_projection_materialization",
+  "head": "post_approval_memo_only",
   "migrations": [
     {
       "order": 1,
@@ -598,6 +598,31 @@
       "order": 117,
       "name": "payroll_projection_materialization",
       "sha256": "02dd365a9e9356595b903becd7f07513c27c640d35118bee460f24589fd2094a"
+    },
+    {
+      "order": 118,
+      "name": "assignment_midnight_rollover",
+      "sha256": "dc7fee28c3049c870072ff53f93427af14b11179c5e208321924d72c49613da8"
+    },
+    {
+      "order": 119,
+      "name": "room_pin_transfer",
+      "sha256": "77a5de1fcb89d355bb59a2247c6b36414defb4ec911e1e8afcc30aaaa8e64725"
+    },
+    {
+      "order": 120,
+      "name": "photo_upload_pre_provider_retry",
+      "sha256": "a2e2e5383ad8c280b38fcbb4df3d5c9fa02b1b5c750c78dced935b845446c814"
+    },
+    {
+      "order": 121,
+      "name": "photo_finalize_snapshot",
+      "sha256": "739c075894943666b8a546a10d838fc406a4bacfd7ddcfc550383468b7bee415"
+    },
+    {
+      "order": 122,
+      "name": "post_approval_memo_only",
+      "sha256": "72402db775a83d683061eda1192765c8b1e9f27920ad987dfc5ab7511b3e1fa7"
     }
   ]
 }
