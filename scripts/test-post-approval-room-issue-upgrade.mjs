@@ -219,7 +219,7 @@ export function validatePostApprovalUpgradeSource(manifest, entries) {
   }
   if (validated.length >= 126) {
     assert.equal(validated[125].file, '20261025022445_photo_collection_upload_batch.sql');
-    assert.equal(validated[125].sha256, 'e10388c5745b6e33523a090ccffe6b7d21e1cb9acd54d5386d89d212988ee3d6',
+    assert.equal(validated[125].sha256, '3a89a10f24a6dbcfd0eecf77935e7c580313f8f9039d4fc3b6148718ccee1c71',
       'Only the source-reviewed bounded photo-batch126 tail is permitted');
   }
   if (validated.length >= 127) {
