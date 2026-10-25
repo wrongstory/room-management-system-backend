@@ -32,7 +32,7 @@ function fixture() {
 function check(f = fixture()) { return inspect(f.expected, f.observed); }
 describe('source-owned logical reference registry', () => {
   it('has finite unique source-backed fields and frozen rules without wildcard fallback', () => {
-    expect(rules).toHaveLength(24);
+    expect(rules).toHaveLength(27);
     expect(new Set(rules.map(r => `${r.relation}:${r.path}`)).size).toBe(rules.length);
     expect(Object.isFrozen(rules)).toBe(true);
     for (const rule of rules) {

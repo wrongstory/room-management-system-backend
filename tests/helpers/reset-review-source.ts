@@ -8,8 +8,9 @@ const select = (names: string[], rows: (string | null)[][]) => ({ command: 'SELE
 const json = (input: unknown) => select(['payload'], [[JSON.stringify(input)]]);
 const names = ['pid', 'database_name', 'role_name', 'read_only', 'isolation', 'row_security', 'nonce', 'encoding',
   'timezone', 'datestyle', 'intervalstyle', 'bytea_output', 'float_digits', 'bypass_rls', 'snapshot', 'statement_timeout', 'lock_timeout'];
-export function reviewSourceHarness() {
+export function reviewSourceHarness(configure?: (fixture: ReturnType<typeof resetReviewFixture>) => void) {
   const f = resetReviewFixture();
+  configure?.(f);
   const tables = f.metadata.relations.map(table => ({ name: table.relation, kind: 'r', rls: true, forceRls: false,
     columns: table.columns.map((column, position) => ({ name: column.name, position: position + 1, type: column.pgType, nullable: !table.primaryKey.includes(column.name) })),
     keys: [{ name: `${table.relation.split('.')[1]}_pkey`, columns: table.primaryKey, primary: true, valid: true, immediate: true, partial: false, expressions: false }] }));

@@ -24,7 +24,10 @@ describe('durable reset receipt prepared source boundaries (no DB)', () => {
     expect(baseline.rules.filter(r => r.relation.includes('reset_receipt'))).toEqual([]);
     expect(baseline.fingerprint).toBe('bf8bfdf62cc1e77687a02f227d1f8f6bcf5fddc516c5d2b8ad7880cdb850ded2');
     expect(read('supabase/migrations/20261025024327_developer_reset_row_impact.sql')).toContain(baseline.fingerprint);
-    expect(source).toContain(RESET_ROW_RULE_FINGERPRINT);
+    const frozen135 = JSON.parse(read('scripts/reset-row-impact-baseline135.json'));
+    expect(source).toContain(frozen135.fingerprint);
+    expect(frozen135.fingerprint).not.toBe(RESET_ROW_RULE_FINGERPRINT);
+    expect(digest(source)).toBe('3e9513bbfb8f071e173bd1b3838d389fab123dc827ee3ed55641bbcd74c77299');
     expect(RESET_ROW_RULE_FINGERPRINT).not.toBe(baseline.fingerprint);
     expect(digest(read('supabase/migrations/20261025024327_developer_reset_row_impact.sql')))
       .toBe(JSON.parse(read('supabase/migration-manifest.dev.json')).migrations.find(r => r.name === 'developer_reset_row_impact')?.sha256);

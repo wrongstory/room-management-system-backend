@@ -61,6 +61,42 @@ function pgTime(v: string): { iso: string; micros: bigint } {
 }
 const sidecarSchema = z.object({ scopeId: hash, statementId: hash, statementAt: z.string().max(64),
   templateEvidence: z.unknown(), gateEvidence: z.unknown() }).strict();
+const handoverHistory = z.object({ sourceTemplateVersionId: z.uuid(), newTemplateVersionId: z.uuid(),
+  plannedAt: z.iso.datetime(), registrationTime: z.iso.datetime(), version: z.number().int().positive().max(2147483647),
+  policyFingerprint: z.literal(RESET_HANDOVER_POLICY_FINGERPRINT), commandHash: hash, payloadHash: hash }).strict();
+/** Exact136 historical mapping. Its old/new IDs are inspected in the already
+ * complete same-capture template inventory, never rewritten as current pointers.
+ * Invalid history remains kept and blocks review; it never becomes deletable. */
+function assertHandoverAuditHistory(rows: ReviewRow[]) {
+  const templates = rows.filter(row => row.relation === 'public.cleaning_template_versions');
+  for (const row of rows.filter(row => row.relation === 'public.audit_events')) {
+    if (text(row, 'event_type') !== 'cleaning_template.operational_handover') continue;
+    let decoded: unknown;
+    try { decoded = json(value(row, 'after_state')); } catch { return fail('RESET_REVIEW_HANDOVER_AUDIT_INVALID'); }
+    const history = handoverHistory.safeParse(decoded);
+    if (!history.success || row.disposition !== 'keep' || text(row, 'reason_code') !== 'OPERATIONAL_HANDOVER_INITIALIZATION'
+      || text(row, 'entity_type') !== 'cleaning_template_version' || value(row, 'before_state') !== null
+      || value(row, 'actor_display_name_snapshot') !== null || value(row, 'request_id') !== null) return fail('RESET_REVIEW_HANDOVER_AUDIT_INVALID');
+    const h = history.data, actor = text(row, 'actor_profile_id');
+    const source = templates.find(t => text(t, 'id').toLowerCase() === h.sourceTemplateVersionId.toLowerCase());
+    const target = templates.find(t => text(t, 'id').toLowerCase() === h.newTemplateVersionId.toLowerCase());
+    if (!source || !target) return fail('RESET_REVIEW_HANDOVER_AUDIT_TEMPLATE_MISSING');
+    if (source.disposition === 'remove' || target.disposition === 'remove') return fail('RESET_REVIEW_HANDOVER_AUDIT_TEMPLATE_REMOVED');
+    const actual = BigInt(Date.parse(h.registrationTime)) * 1000n;
+    if (!uuid.test(actor) || h.sourceTemplateVersionId.toLowerCase() === h.newTemplateVersionId.toLowerCase()
+      || text(row, 'entity_id').toLowerCase() !== h.newTemplateVersionId.toLowerCase()
+      || text(row, 'request_hash') !== h.payloadHash
+      || text(row, 'idempotency_key') !== `reset-template-handover:${h.commandHash}:${h.newTemplateVersionId}`
+      || h.registrationTime !== new Date(h.registrationTime).toISOString() || Date.parse(h.plannedAt) > Date.parse(h.registrationTime)
+      || pgTime(text(row, 'effective_at')).micros !== actual || pgTime(text(row, 'recorded_at')).micros < actual
+      || pgTime(text(row, 'created_at')).micros < actual || pgTime(text(target, 'created_at')).micros !== actual
+      || text(target, 'created_by').toLowerCase() !== actor.toLowerCase() || integer(text(target, 'version')) !== h.version
+      || integer(text(source, 'version')) >= h.version
+      || ['room_type_id', 'cleaning_kind', 'duration_minutes', 'photo_slots'].some(column => value(source, column) !== value(target, column))) {
+      return fail('RESET_REVIEW_HANDOVER_AUDIT_INVALID');
+    }
+  }
+}
 
 /** Envelope identity only; it does not validate the contained domain evidence. */
 export function assertResetReviewEnvelope(scopeId: string, input: unknown) {
@@ -71,6 +107,7 @@ export function assertResetReviewEnvelope(scopeId: string, input: unknown) {
 
 /** Shared same-capture consistency check, not a live session/reauth proof. */
 export function assertResetReviewActor(request: ResetReviewRequest, rows: ReviewRow[], relations: readonly string[]) {
+  assertHandoverAuditHistory(rows);
   if (!request.developerId) return false;
   if (request.receipt && request.receipt.actorProfileId.toLowerCase() !== request.developerId.toLowerCase()) return fail('RESET_REVIEW_ACTOR_MISMATCH');
   if (!relations.includes('public.profiles') || !relations.includes('auth.users')) return fail('RESET_REVIEW_RELATION_MISSING');
