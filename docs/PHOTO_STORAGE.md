@@ -1,5 +1,9 @@
 # Google Drive 사진 저장 운영안
 
+> 2026-10-25 #396 source 후보는 사용자 삭제 보류를 `photo-purge` 배포 entry의 명시적
+> `503 PHOTO_PURGE_HELD`로 보존한다. credential/DB/provider를 생성하지 않고 해제 mode도 없다.
+> 실제 배포·현재 호스트 중단 증거는 아니며 [HOLD 실행 경계](./PHOTO_PURGE_HOLD_396.md)를 따른다.
+
 > 상태: **#83·#84·#85·#31과 Issue #9 retention v2 source는 production 정본에 포함 / #256 스마트폰 원본 정규화는 `main@10a1f814649e92260e9e7353ab242400311b429e`와 최신 dev 기능 정본에 통합 완료 / Edge·Pages·실기기 UAT와 실제 Drive service account·provider/Cron hosted 활성화 미완료**
 > 최신 확정 계약은 Google Drive 전용·300KiB 이하·비공개 저장을 유지하되, 청소 제출은 최종 검사 결정+168시간, 이슈·컴플레인·중단/충돌 증빙은 해결·종결+180일, 진짜 orphan은 업로드+30일에 삭제한다. 아래 `uploaded_at + 7 days` 절은 현재 배포된 legacy 구현을 설명하는 기록이며 목표 정책이 아니다. 구현 우선순위와 충돌 해결은 [백엔드 AI 제품·도메인 가이드](./AI_BACKEND_PRODUCT_GUIDE.md)를 따른다.
 
