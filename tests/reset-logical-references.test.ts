@@ -32,7 +32,7 @@ function fixture() {
 function check(f = fixture()) { return inspect(f.expected, f.observed); }
 describe('source-owned logical reference registry', () => {
   it('has finite unique source-backed fields and frozen rules without wildcard fallback', () => {
-    expect(rules).toHaveLength(20);
+    expect(rules).toHaveLength(24);
     expect(new Set(rules.map(r => `${r.relation}:${r.path}`)).size).toBe(rules.length);
     expect(Object.isFrozen(rules)).toBe(true);
     for (const rule of rules) {
@@ -49,6 +49,14 @@ describe('source-owned logical reference registry', () => {
     expect(sql).toMatch(/foreign key\s*\(\s*draft_id,source_submission_id,client_report_id,draft_created_by_profile_id,original_performer_profile_id\s*\)/);
     for (const path of ['draft_created_by_profile_id', 'original_performer_profile_id']) {
       expect(find('private.post_approval_room_issue_reports', path)).toBeUndefined();
+    }
+  });
+  it('treats the durable receipt provenance as immutable history, not live actor/command authority', () => {
+    for (const [relation, path] of [
+      ['private.developer_reset_receipt_heads', 'actor_profile_id'], ['private.developer_reset_receipt_heads', 'binding'],
+      ['private.developer_reset_receipt_heads', 'header'], ['private.developer_reset_receipt_events', 'entry'],
+    ]) {
+      expect(find(relation ?? '', path ?? '')).toMatchObject({ semantics: 'HISTORICAL_SNAPSHOT', targets: {} });
     }
   });
   it('leaves all seven template paths with the existing 129 owner', () => {

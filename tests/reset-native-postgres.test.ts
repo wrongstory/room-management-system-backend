@@ -6,7 +6,9 @@ import { Client, type ClientConfig } from 'pg';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { validateResetCatalog } from '../scripts/reset-catalog-contract.mjs';
 import { RESET_ROW_RULE_FINGERPRINT } from '../scripts/reset-row-policy.mjs';
-import { inspectResetNativePostgres } from '../src/modules/developer-reset/snapshot-native-postgres.js';
+import { inspectResetNativePostgres, inspectResetNativeReview } from '../src/modules/developer-reset/snapshot-native-postgres.js';
+import { resetReviewEvidenceSql } from '../src/modules/developer-reset/snapshot-read-source.js';
+import { resetReviewFixture } from './helpers/reset-review.js';
 import { resetReadIdentitySql, resetReadSafetySql } from '../src/modules/developer-reset/snapshot-read-plan.js';
 import { resetCatalog } from './helpers/reset-catalog.js';
 
@@ -79,6 +81,17 @@ beforeEach(() => {
 afterEach(() => { for (const client of clients) client.connection.stream.destroy(); vi.restoreAllMocks(); vi.clearAllMocks(); vi.useRealTimers(); });
 
 describe('native reset connector with hermetic pg module (real DB zero)', () => {
+  it('routes review through the owned native transport and refuses a missing bound sidecar', async () => {
+    const result = await inspectResetNativeReview(fixture(), resetReviewFixture().request);
+    expect(result).toMatchObject({ snapshotValid: false, executionEnabled: false, liveDatabaseVerified: false });
+    expect(clients[0]?.queries.some(q => q.text === resetReviewEvidenceSql)).toBe(true);
+    expect(clients[0]?.password).toBeNull();
+    expect(JSON.stringify(result)).not.toContain('PREPARED');
+  });
+  it('does not fall back to basic inspection when review intent is absent', async () => {
+    expect((await inspectResetNativeReview(fixture(), undefined)).snapshotValid).toBe(false);
+    expect(Client).not.toHaveBeenCalled();
+  });
   it('composes the real closed collector and native owned transport without minting live DB proof', async () => {
     const result = await inspectResetNativePostgres(fixture());
     expect(result).toMatchObject({ snapshotValid: true, liveDatabaseVerified: false, executionEnabled: false });

@@ -1,7 +1,7 @@
 # 초기화 논리 참조의 유한 registry (#396)
 
 `logical-reference-registry.ts`와 `logical-reference-inspector.ts`는 실제 FK 밖의
-참조를 해석하는 Node 내부 검증기다. source에 확인된 20개 경로만 등록하고 알 수 없는
+참조를 해석하는 Node 내부 검증기다. source135의 영속 receipt 4경로를 포함한 24개 경로만 등록하고 알 수 없는
 관계·경로·종류·대상·형식은 차단한다. DB/외부 조회, 삭제·rewrite, 공개 API 및 운영 설정은 없다.
 
 ## 세 가지 의미
@@ -9,7 +9,7 @@
 | 의미 | 현재 등록 예 | 검사 |
 |---|---|---|
 | CURRENT_POINTER | 개발자 catalog preview의 `entity_id` | `preview_kind`별 정확한 객실/객실유형 대상, 같은 UUID, 보존 상태 필요 |
-| HISTORICAL_SNAPSHOT | 활동 이력의 예약 ID, 객실/일정 snapshot, 사진 삭제 명령의 과거 응답, 사진 저장 당시 객실번호 | 같은 원래 값 보존. 현재 행 재조회나 ID·이름·기본값 보충 금지 |
+| HISTORICAL_SNAPSHOT | 활동 이력의 예약 ID, 객실/일정 snapshot, 사진 삭제 명령의 과거 응답, 사진 저장 당시 객실번호, 영속 receipt의 actor/binding/header/entry | 같은 원래 값 보존. 현재 행 재조회나 ID·이름·기본값 보충 금지 |
 | EXTERNAL_LOCATOR | Drive 파일/폴더 ID, 저장 파일명 | 위치 값의 원본 보존과 형식만 확인. 실제 객체 존재·복구·삭제 권한을 추론하지 않음 |
 
 과거 예약이나 객실유형이 현재 목록에 없다는 이유로 역사 snapshot을 dangling current pointer로
@@ -35,6 +35,11 @@ observation의 rowToken은 snapshot 안의 비공개 opaque identity다. 실제 
 바꿔 공급하는 공격까지 방지하려면 기존 content snapshot builder의 독립 내용 검증과 결합해야 한다.
 `contentFingerprint` 문자열의 자기 신고만으로 그 결합이 성립하지 않는다.
 
+[같은 스냅샷 조립 경로](RESET_REVIEW_COMPOSITION.md)는 독립 내용/census/FK 검사를 통과한
+행에서 이 입력을 구성한다. 원문 보존 검사는 이전 actor가 현재 존재한다거나 영속 receipt의
+과거 event를 다시 실행할 수 있다는 뜻이 아니다. 새 source135의 actor/binding/header/entry는
+모두 역사 자료이며, `events.receipt_id`의 실제 FK는 기존 FK 검사가 담당한다.
+
 최대 1,000표면·10,000관측·8MiB 입력·12단계 구조를 허용한다. getter, cycle, custom object,
 sparse array, 추가 필드는 거부하고 오류에는 원문을 넣지 않는다. 반환값은 고정 blocker,
 합계, source registry 지문뿐이다. 원본 객체를 변경하거나 원문·ID·locator를 보관/로깅하지 않는다.
@@ -57,13 +62,15 @@ developer preview의 request/impact payload, 기타 새 보존 payload도 등록
 
 따라서 성공은 `coverageScope=registered-nontemplate-surfaces`의 정합성만 나타낸다.
 `completeResetCoverage=false`, `externalObjectsVerified=false`, `executionEnabled=false`는 항상 유지한다.
-전체 catalog 조사/실제 collector 연결, template/FK 보호, 백업, 정책, 실행 승인, 유지보수 종료 증거를
-연결하기 전에는 전체 초기화 참조 검증 완료나 실행 허가로 사용할 수 없다.
+서버 내부 collector 조립은 연결했지만, 전체 catalog의 비 FK 표면 조사, 실제 DB 검증,
+template/FK 보호, 백업, 정책, 실행 승인, 유지보수 종료 증거가 없으면 전체 초기화 참조 검증
+완료나 실행 허가로 사용할 수 없다.
 
 검증은 합성 회귀와 source 대조로 수행한다. 실제 DB/SQL/Auth/Drive 조회·수정·삭제는 NOT RUN이다.
 
-worker132와 내용 collector·템플릿 builder를 포함한 dev a97c84를 정상 통합한
+최초 PR506의 검증 기록: worker132와 내용 collector·템플릿 builder를 포함한 dev a97c84를 정상 통합한
 `ci:quality` 174파일/4,818 tests, manifest132,
 typecheck/lint/build가 PASS다. 관련35 tests 및 독립 QA의35 tests도 PASS이며 차단 finding은 없다.
 초기 fixture의 nullable 타입과 제어문자 정규식 lint 오류는 수정 후 재검사했다.
-이번4파일은 Node 내부만 변경한다. Edge/SQL/API 입력은 incoming dev와 같아 별도 실행하지 않았다.
+당시4파일은 Node 내부만 변경했다. Edge/SQL/API 입력은 당시 incoming dev와 같아 별도 실행하지 않았다.
+후속 composition/24경로 검증과 한계는 위 조립 문서 및 해당 PR에 기록한다.

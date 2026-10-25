@@ -4,7 +4,7 @@ import { checkServerIdentity, TLSSocket } from 'node:tls';
 import { Client, type CustomTypesConfig } from 'pg';
 import { z } from 'zod';
 import { migrationPostgresConnectionInput, migrationPostgresTlsIdentity } from '../../../scripts/lib/migration-readonly-postgres.mjs';
-import { inspectResetReadOnlySource, type OpenResetReadClient } from './snapshot-read-source.js';
+import { inspectResetReadOnlySource, inspectResetReadOnlyReview, type OpenResetReadClient } from './snapshot-read-source.js';
 
 const inputSchema = z.object({
   source: z.object({ catalog: z.unknown(), binding: z.object({ projectRef: z.string(), sourceCommit: z.string(),
@@ -25,6 +25,13 @@ const unavailable = () => ({ snapshotValid: false, executionEnabled: false, fing
  * live SQL/permissions still need approved validation; synthetic tests are not it.
  */
 export async function inspectResetNativePostgres(input: unknown, signal?: AbortSignal) {
+  return inspectNative(input, signal);
+}
+/** Internal review-only entry; uses the identical owned TLS/read-only connection. */
+export function inspectResetNativeReview(input: unknown, request: unknown, signal?: AbortSignal) {
+  return inspectNative(input, signal, request ?? null);
+}
+async function inspectNative(input: unknown, signal?: AbortSignal, request?: unknown) {
   let settings: ReturnType<typeof migrationPostgresConnectionInput> | undefined;
   try {
     const parsed = inputSchema.safeParse(input); if (!parsed.success) return unavailable();
@@ -98,7 +105,8 @@ export async function inspectResetNativePostgres(input: unknown, signal?: AbortS
         };
       } catch { destroy(); throw new Error('RESET_NATIVE_CONNECTION_FAILED'); }
     };
-    return await inspectResetReadOnlySource(source, open, signal);
+    return await (request === undefined ? inspectResetReadOnlySource(source, open, signal)
+      : inspectResetReadOnlyReview(source, request, open, signal));
   } catch { return unavailable(); }
   finally { if (settings) settings.password = null; }
 }

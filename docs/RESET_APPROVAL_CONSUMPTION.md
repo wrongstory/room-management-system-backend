@@ -81,3 +81,8 @@ Edge graph에는 이 모듈을 연결하지 않는다.
 독립 approval/receipt/store 105 tests PASS, 컴파일된 모듈의 실제 import PASS.
 새 승인 소비 검사는 메모리 FS/ACL 50건이며 승인 문서·marker의 실제 접근은 0회다.
 Edge graph/생성물/SQL을 변경하지 않아 이 단위의 추가 Edge·DB 실행은 NOT RUN/해당 없음으로 구분한다.
+
+PR513의 dev5d59ee8을 충돌 없이 정상 통합한 뒤 approval/receipt/store와 composition/내용·참조·템플릿의
+관련 12파일/358 tests, typecheck/build/compiled import, manifest135 및 생성물 정합성 검사를 통과했다.
+통합 입력인 PR513은 전체5,019/184 및 Edge65/560/68 PASS이며 이 브랜치의 통합된 Edge 소스·생성기·package 입력은
+그 검증본과 동일하다. 기존 전체5,023 PASS와 이 통합 관련 검사를 구분하며 새 전체 수를 추정하지 않는다.
