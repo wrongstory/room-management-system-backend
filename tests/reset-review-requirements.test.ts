@@ -3,10 +3,10 @@ const modulePath = '../scripts/reset-review-requirements.mjs';
 const { RESET_REVIEW_REQUIREMENTS, summarizeResetReviewRequirements } = await import(modulePath);
 
 describe('reset mixed/review dependency inventory', () => {
-  it('names all 135 mixed/review relations without approving their disposition', () => {
-    expect(summarizeResetReviewRequirements()).toMatchObject({ relationCount: 135, classificationComplete: false, executionEnabled: false });
+  it('names all 137 mixed/review relations without approving their disposition', () => {
+    expect(summarizeResetReviewRequirements()).toMatchObject({ relationCount: 137, classificationComplete: false, executionEnabled: false });
     const names: string[] = RESET_REVIEW_REQUIREMENTS.flatMap((group: { relations: string[] }) => group.relations);
-    expect(new Set(names).size).toBe(135);
+    expect(new Set(names).size).toBe(137);
     expect(names).not.toContain('private.room_pin_nonce_reservations');
     expect(names).not.toContain('public.room_types');
   });
@@ -18,6 +18,12 @@ describe('reset mixed/review dependency inventory', () => {
       expect.objectContaining({ code: 'ACCOUNT_SECURITY', required: expect.arrayContaining(['DEVELOPER_PRESERVATION', 'AUTH_DRAIN']) }),
     ]));
     expect(JSON.stringify(summarizeResetReviewRequirements())).not.toContain('public.profiles');
+  });
+  it('keeps both upload batch metadata tables under the photo deletion HOLD', () => {
+    const photo = RESET_REVIEW_REQUIREMENTS.find((group: { code: string }) => group.code === 'PHOTO_AND_EVIDENCE');
+    expect(photo.relations).toEqual(expect.arrayContaining(['private.photo_upload_batches', 'private.photo_upload_batch_members']));
+    expect(photo.required).toContain('PHOTO_DELETION_ON_HOLD');
+    expect(summarizeResetReviewRequirements().executionEnabled).toBe(false);
   });
   it('freezes every source-controlled rule', () => {
     expect(Object.isFrozen(RESET_REVIEW_REQUIREMENTS)).toBe(true);

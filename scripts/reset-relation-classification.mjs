@@ -2,8 +2,9 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 
 // Explicit candidate inventory, NOT a deletion allowlist. No wildcard rules.
-// Based on the inspected local 111-migration catalog including unmerged #336.
-export const RESET_CLASSIFICATION_VERSION = '396-local111-review-v1';
+// Based on the inspected local111 catalog plus the source-reviewed batch126 metadata.
+// The two batch relations remain photo-HOLD review candidates; no clear permission.
+export const RESET_CLASSIFICATION_VERSION = '396-local111-plus-batch126-review-v2';
 export const RESET_RELATION_GROUPS = Object.freeze({
   preserve: Object.freeze([
     'private.notification_event_catalog',
@@ -140,6 +141,8 @@ export const RESET_RELATION_GROUPS = Object.freeze({
     'private.photo_upload_admission_bindings',
     'private.photo_upload_admission_limits',
     'private.photo_upload_admissions',
+    'private.photo_upload_batches',
+    'private.photo_upload_batch_members',
     'private.photo_upload_events',
     'private.photo_upload_operations',
     'private.photo_upload_rate_limits',

@@ -135,6 +135,8 @@ export const resetRelationGroups = {
     "private.photo_upload_admission_bindings",
     "private.photo_upload_admission_limits",
     "private.photo_upload_admissions",
+    "private.photo_upload_batches",
+    "private.photo_upload_batch_members",
     "private.photo_upload_events",
     "private.photo_upload_operations",
     "private.photo_upload_rate_limits",

@@ -651,7 +651,14 @@ async function handleApiRequestCore(
         role: actor.role,
         profileStatus: identity.profileStatus,
       };
-      const result = photo.kind === "upload"
+      const result = photo.kind === "admit-batch"
+        ? await service.admitBatch(
+          request,
+          context,
+          photo.attemptId,
+          photo.slotId,
+        )
+        : photo.kind === "upload"
         ? await service.upload(
           request,
           context,

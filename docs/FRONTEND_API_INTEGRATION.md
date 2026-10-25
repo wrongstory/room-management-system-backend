@@ -775,3 +775,10 @@ token, 비밀번호, 전체 휴대전화, temporaryPassword를 로그·fixture·
 - 이 계약은 production OpenAPI와 `api` bundle에 반영됐다. 실제 역할별 hosted read/mutation smoke가 없는 경로는 배포 여부와 별도로 표시한다.
 
 현재 production Swagger 범위는 인증·계정·developer 운영 projection뿐 아니라 객실·예약·가능일·배정·수행·사진·제출·검수·컴플레인·주급·알림·PIN 관련 계약을 포함한 OpenAPI 0.5.1, 128 paths / 138 operations다. operation이 존재한다는 사실과 hosted provider/positive mutation 검증은 구분하며, 프런트는 역할·CAS·idempotency·redaction 계약을 충족한 경로만 활성화한다. Python 운영도구의 generated client는 계속 운영 관리 surface만 유지하며 전체 업무 API를 자동 포함하지 않는다.
+
+## #411 두 사진 예약 후보
+
+새 metadata-only `POST .../photo-slots/{slotId}/upload-batches`로 정확히 두 item을 예약한 뒤
+기존 binary upload 두 요청에 각 원래 key와 collection/item CAS를 그대로 사용한다.
+프런트 코드·실제 배포·현장 성능은 아직 변경/검증하지 않았다.
+[요청·실패·재시도 계약](./PHOTO_UPLOAD_BATCH_411.md)을 확인한 뒤 별도 프런트 연결이 필요하다.

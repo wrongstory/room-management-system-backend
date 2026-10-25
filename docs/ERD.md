@@ -1543,3 +1543,10 @@ service-only `get_assignment_card_hydration`은100개 assignment의 표시 관�
 기존 final actor/session/ownership·schedule RPC는 모든 hydration 이후 유지한다.
 public base table/RLS/원장 변경 없이 migration124 함수만 추가한다.
 [계약·완전성·DB 미실행 경계](./ASSIGNMENT_HYDRATION_COST_BASELINE.md)를 따른다.
+
+## #411 두 사진 전송 후보
+
+private.photo_upload_batches와 photo_upload_batch_members는 불변 예약 metadata다.
+actor/key UNIQUE와 admission FK를 사용하며 사진·보존·제출 원장을 복사하지 않는다.
+같은 두 member의 accepted change만 collection CAS 진행의 근거가 된다.
+설계·미실행 SQL은 [사진 묶음 계약](./PHOTO_UPLOAD_BATCH_411.md)을 따른다.
