@@ -31,6 +31,12 @@ function fixture() {
 type F = ReturnType<typeof fixture>;
 
 describe('coherent internal reset snapshot', () => {
+  it('binds STABLE statement and REPEATABLE READ consistency as different evidence', () => {
+    const f = fixture(); const rr = inspectResetSnapshot(f); f.snapshot.isolation = 'stable statement';
+    const stable = inspectResetSnapshot(f);
+    expect(rr.snapshotValid && stable.snapshotValid).toBe(true);
+    expect(rr.fingerprint).not.toBe(stable.fingerprint);
+  });
   it('checks a bounded consistent proposal without permitting execution or mutating it', () => {
     const f = fixture(); const before = structuredClone(f);
     expect(inspectResetSnapshot(f)).toMatchObject({ snapshotValid: true, executionEnabled: false,
