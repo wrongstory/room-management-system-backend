@@ -1,5 +1,14 @@
 # 프론트엔드·Codex API 연동 가이드
 
+## 2026-10-25 #415 합성 기준선 통합
+
+#453/#455 계산 개선은 v0.9.5 이후 운영에 포함됐다. PR456의
+[합성 CPU 기준선](./ASSIGNMENT_HYDRATION_COST_BASELINE.md)을 최신 dev와 통합한다.
+CPU 비교는 실제 API·DB·네트워크·사용자 대기 시간의 개선율이 아니다.
+신규 bounded hydration RPC의 source 후보를 준비했다. 실제 DB 실행·운영 적용·속도 계측은 NOT RUN이며 #415는 OPEN이다.
+기존 endpoint/Swagger/프런트 호출을 유지한다. Full DB는 NOT RUN이며
+최종 릴리스 1회 실행 전에 별도 승인을 받는다.
+
 ## 2026-10-25 #487 보안 패치 후보
 
 Zod·fast-uri 및 Edge 생성물 보안을 보완한다. 정상 API 계약과 프런트 연결은 동일하며 운영 미배포다.
