@@ -1,3 +1,4 @@
+import type { HttpAdmissionScope } from "./http-admission.ts";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { parseAuthContext } from "../../../src/modules/auth/auth-context.ts";
 
@@ -59,6 +60,7 @@ export function requiredEnv(name: string): string {
 }
 
 export function createEdgeClients(): {
+  operationAdmission?: () => HttpAdmissionScope | undefined;
   admin: SupabaseClient;
   publicClient: SupabaseClient;
   forAccessToken: (accessToken: string) => SupabaseClient;

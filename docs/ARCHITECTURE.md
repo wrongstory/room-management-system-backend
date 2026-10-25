@@ -1373,5 +1373,10 @@ public base table/RLS/원장 변경 없이 migration124 함수만 추가한다.
 
 128은 lifecycle/CAS와 password AMR 기반 재인증, 임시 세션 폐기 readback, nonce에 묶인
 admission/terminal 처리 primitive를 제공한다. marker 부재와 만료 미완료 effect는 UNKNOWN이다.
-전체 API·Auth·worker hook은 후속 구현이며 signed worker mode나 caller Boolean으로 drain을
-증명하지 않는다. 실제 활성화와 DB 실행은 NOT RUN이다. [정확한 경계](./DEVELOPER_OPERATION_GATES.md)를 따른다.
+130/131과 Node/Edge HTTP 연결은 65개 명령 원장과 고정 감사/읽음 transaction으로
+완료를 관측한다. Auth/provider 27개 경로는 시작만 기록하고 별도 완료 증거를 기다린다.
+기본 비활성, 실제 Supabase target 결합, 동일 관측 기한과 제한 세션 계약을 유지한다.
+worker/기존 요청과 직접 접근의 전체 coverage는 후속 근거이며 signed worker mode나 caller
+Boolean으로 drain을 증명하지 않는다. 실제 활성화와 DB 실행은 NOT RUN이다.
+[HTTP 연결](./HTTP_OPERATION_ADMISSION_396.md), [원자 감사](./OPERATION_ATOMIC_AUDIT.md),
+[운영 안전 경계](./DEVELOPER_OPERATION_GATES.md)를 따른다.

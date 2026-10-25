@@ -3202,8 +3202,16 @@ Table private.developer_operation_admissions {
   created_at timestamptz [not null]
   deadline_at timestamptz [not null]
   completed_at timestamptz
+  http_route_id text [note: 'source130 finite manifest route; null for non-HTTP admission']
+  http_actor_profile_id uuid [note: 'No account FK: preserve security receipt']
+  http_auth_user_id uuid
+  http_session_digest text
+  http_password_version text
+  http_command_name text
+  http_key_digest text
+  http_request_hash text
   indexes { (owner_digest,nonce_hash) [unique] }
-  Note: '#396 source128; deadline expiry is UNKNOWN, not completion. Full-path integration is pending.'
+  Note: '#396 source128/130/131; deadline expiry is UNKNOWN. HTTP terminal requires exact immutable actor/command/key/hash receipt; finite audit/read-state effects complete in the same transaction. Node/Edge HTTP adapters are opt-in; opaque/worker/external full-path coverage remains pending.'
 }
 Table private.developer_operation_events {
   id bigint [pk, increment]
