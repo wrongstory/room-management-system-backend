@@ -3,6 +3,8 @@
 `src/modules/developer-reset/snapshot-builder.ts`는 실제 collector를 연결할 수 있는 Node 내부
 검증 경계다. 공개 API, DB 연결, reset 실행, 복구 또는 정책 선택은 없다. 실제 collector의 구현과
 SQL 실행 검증은 별도로 필요하며 이 문서의 합성 검증을 그 성공으로 사용하지 않는다.
+후속 closed query compiler와 전용 read-only port 소스는
+[`RESET_READONLY_COLLECTOR.md`](RESET_READONLY_COLLECTOR.md)에 정리한다. 실제 connector/DB 검증은 미실행이다.
 
 ## 입력과 신뢰 경계
 

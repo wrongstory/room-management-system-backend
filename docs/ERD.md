@@ -1557,3 +1557,14 @@ actor/key UNIQUE와 admission FK를 사용하며 사진·보존·제출 원장�
 운영 상태·재인증·작업 입장·감사 관계다. 계정 cascade FK는 없고 event→reauth만 참조한다.
 marker/TTL seed 없이 UNKNOWN으로 시작하며 STARTED 잠금은 일반 전환으로 해제되지 않는다.
 실제 DB는 NOT RUN이며 [운영 안전 계약](./DEVELOPER_OPERATION_GATES.md)을 따른다.
+
+130은 admissions에 nullable HTTP route/actor/Auth/session digest/password version 및
+command/key digest/hash를 결합한다. 세션/key 원문과 raw 요청은 보관하지 않는다.
+131은 새 관계 없이 기존 admission과 감사/알림 읽음을 한 transaction에서 완료한다.
+두 방식 모두 HTTP 응답만으로 외부 효과를 완료하지 않으며 계정 cascade FK를 추가하지 않는다.
+[HTTP 원장 계약](./OPERATION_HTTP_ADMISSION.md)과 [원자 감사 계약](./OPERATION_ATOMIC_AUDIT.md)을 따른다.
+
+132는 같은 admissions 관계에 nullable worker_kind/worker_context를 추가한다. 알림 claim과
+동일 transaction에서 실제 attempt/target/leaseVersion/claim digest만 저장하며 민감 payload는
+보관하지 않는다. 만료나 나중 시도의 성공은 이전 unknown 효과를 완료하지 않는다.
+[Worker 입장 계약](./OPERATION_WORKER_ADMISSION.md)의 실제 DB 미실행·기본 비활성 경계를 따른다.

@@ -1,4 +1,13 @@
 import {
+  installAtomicHttpAdmission,
+  prepareHttpAdmission,
+} from "../_shared/http-admission-api.ts";
+import {
+  type AdmissionConfig,
+  type AdmissionRpc,
+  HttpAdmissionError,
+} from "../_shared/http-admission.ts";
+import {
   changeAccountRole,
   changeAccountStatus,
   changePassword,
@@ -336,6 +345,8 @@ export function configuredPostApprovalHandoverKey(): Uint8Array | undefined {
 }
 
 export interface ApiHandlerDependencies {
+  operationAdmissionConfig?: AdmissionConfig | null;
+  operationAdmissionRpc?: AdmissionRpc;
   createClients: () => EdgeClients;
   authenticateRequest: (
     request: Request,
@@ -573,7 +584,17 @@ async function handleApiRequestCore(
       return swaggerUiResponse(corsHeaders);
     }
 
-    clients = dependencies.createClients();
+    clients = { ...dependencies.createClients() };
+    installAtomicHttpAdmission(clients, dependencies);
+    const requestClients = clients;
+    const prepareAdmission = async () =>
+      prepareHttpAdmission(
+        request,
+        path,
+        requestClients,
+        async () => actor,
+        dependencies,
+      );
     if (supplementalFamily) {
       const handler = dependencies.supplementalRoomIssueHandler ??
         defaultDependencies.supplementalRoomIssueHandler;
@@ -584,6 +605,13 @@ async function handleApiRequestCore(
           "요청한 API 경로를 찾을 수 없습니다.",
         );
       }
+      await prepareHttpAdmission(request, path, clients, async () => {
+        actor ??= await dependencies.authenticateRequest(
+          request,
+          requestClients,
+        );
+        return actor;
+      }, dependencies);
       const supplemental = await handler(
         request,
         path,
@@ -602,6 +630,7 @@ async function handleApiRequestCore(
       );
     }
     if (request.method === "POST" && path === "/v1/auth/login") {
+      await prepareAdmission();
       return jsonResponse(await login(request, clients), 200, corsHeaders);
     }
 
@@ -644,6 +673,7 @@ async function handleApiRequestCore(
       }
       const identity = await authenticateLimitedAttempt(request, clients);
       actor = identity.actor;
+      await prepareAdmission();
       service = service.withTiming();
       const context = {
         profileId: actor.profileId,
@@ -688,6 +718,7 @@ async function handleApiRequestCore(
     if (request.method === "POST" && path === "/v1/offline-events") {
       const identity = await authenticateLimitedAttempt(request, clients);
       actor = identity.actor;
+      await prepareAdmission();
       return jsonResponse(
         await syncOfflineEvent(request, clients, identity),
         200,
@@ -707,6 +738,7 @@ async function handleApiRequestCore(
       }
       const identity = await authenticateLimitedAttempt(request, clients);
       actor = identity.actor;
+      await prepareAdmission();
       return jsonResponse(
         await listLimitedAttempts(request, clients, identity),
         200,
@@ -721,6 +753,7 @@ async function handleApiRequestCore(
     ) {
       const identity = await authenticateLimitedAttempt(request, clients);
       actor = identity.actor;
+      await prepareAdmission();
       const result = limited.action === "read"
         ? await getLimitedAttempt(request, clients, identity, limited.attemptId)
         : await completeLimitedAttempt(
@@ -742,6 +775,7 @@ async function handleApiRequestCore(
         dependencies.authenticateLimitedRequest ?? authenticateLimitedAttempt
       )(request, clients);
       actor = identity.actor;
+      await prepareAdmission();
       return jsonResponse(
         {
           submission: await createSubmission(
@@ -758,6 +792,7 @@ async function handleApiRequestCore(
     }
 
     actor = await dependencies.authenticateRequest(request, clients);
+    await prepareAdmission();
     if (
       (request.method === "GET" && path === "/v1/rooms/pins/export") ||
       (request.method === "POST" &&
@@ -2308,6 +2343,13 @@ async function handleApiRequestCore(
       "요청한 API 경로를 찾을 수 없습니다.",
     );
   } catch (error) {
+    if (error instanceof HttpAdmissionError) {
+      error = new EdgeError(
+        error.status,
+        error.code,
+        "현재 작업을 시작할 수 없습니다. 잠시 후 다시 시도해 주세요.",
+      );
+    }
     const photoDiagnostic = photoFailureDiagnostic(error, id);
     if (photoDiagnostic) console.error(JSON.stringify(photoDiagnostic));
     const safeError =
