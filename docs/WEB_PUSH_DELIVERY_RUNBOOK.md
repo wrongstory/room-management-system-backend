@@ -3,6 +3,25 @@
 이 문서는 #112 source를 release/main 이후 실제 운영에 활성화할 때의 순서와 복구 경계를 고정한다.
 feature PR은 production, Vault, Cron, `pg_net`, Function Secrets를 변경하지 않는다.
 
+## 2026-10-25 운영 재확인과 v1 준비
+
+읽기 점검에서 notification-delivery13은 배포돼 있지만 heartbeat와 해당 Cron은 확인되지 않았다.
+당시 pending10건은 모두24시간 이상이었고 targets는0건이었다. 아래 과거 실제 기기 수신은
+현재 정기 실행의 성공 증거가 아니다. 활성화 직전에 대상·대기·만료 상태를 다시 읽고,
+실제 수신자에게 영향을 주는 시험은 대상과 실행 범위를 확정한 뒤 진행한다.
+
+PR493은 선택형 signed-v1 호출을 추가했다. [서명 호출 계약](SCHEDULED_INVOCATION_492.md)의
+정확한 worker/키/SQL 전환 순서와 기존 job 보존 조건을 적용한다. 기본 legacy 설정을
+개발 통합만으로 변경하지 않는다. 호출 키 교체는 DB 비밀번호나 VAPID pair 교체와 별개다.
+실제 SQL/키/Cron 변경과 배포는 아직 하지 않았다. 운영 이전 결정과 실행 승인은
+현재 진행 채팅의 `USER_DECISIONS.md`에서 다른 v1 결정과 함께 확인한다.
+
+PR504의 [알림 작업 진입 제어](OPERATION_WORKER_ADMISSION.md)는 기본 비활성이다.
+활성화된 경우 claim 당시의 정확한 attempt/target/lease에 대한 DB 완료 근거만 인정한다.
+네트워크 timeout이나 결과 UNKNOWN은 나중의 다른 성공·lease 만료로 해제하지 않는다.
+실제 전환 전 기존 작업의 종료 확인과 대상 재조정이 필요하며, 이 소스의 통합은 현재
+운영의 전체 작업 중단 검증이나 오래된 알림의 재발송 허가가 아니다.
+
 > 현재 상태(2026-09-23): 사용자가 실제 기기에서 Web Push 수신을 확인했다. 이는 device-visible UAT 완료 증거이며, secret 값·내부 heartbeat·dead-letter가 정상이라는 추정 근거로 대신 사용하지 않는다. 운영 내부 상태는 developer projection의 안전한 configured/health 값으로 별도 확인한다.
 
 ## 키와 secret 계약
