@@ -52,7 +52,7 @@ describe('reset plan revalidation through the real closed collector (no DB)', ()
   it('blocks changed selection/actor/source intent before opening a second connection', async () => {
     for (const change of ['selection', 'actor', 'source'] as const) {
       const h = fixture(); await h.prepare();
-      if (change === 'selection') h.f.request.templateSelection = 'ALL_VERSIONS';
+      if (change === 'selection') Object.assign(h.f.request, { templateSelection: 'ALL_VERSIONS' });
       if (change === 'actor') h.f.request.receipt.actorProfileId = '00000000-0000-4000-8000-000000000050';
       if (change === 'source') h.source.binding.sourceCommit = 'f'.repeat(40);
       expect((await h.recheck()).status).toBe('REJECTED'); expect(h.open).toHaveBeenCalledOnce();

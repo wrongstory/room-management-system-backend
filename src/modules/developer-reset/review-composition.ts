@@ -8,6 +8,7 @@ import { createResetReceipt, inspectResetReceipt } from './reset-receipt.js';
 import { RESET_TEMPLATE_REFERENCE_PATHS, summarizeResetTemplateEvidence } from './reset-template-evidence.js';
 import { buildTemplateReseedProposal, templateInventoryFingerprint } from './template-plan-builder.js';
 import { captureResetPlanTemplate, resetPlanTemplateDependencies } from './plan-revalidation.js';
+import { RESET_HANDOVER_POLICY, RESET_HANDOVER_POLICY_FINGERPRINT, inspectHandoverReauthenticationPolicy, approvedTemplateSelectionEvidence } from './approved-handover-policy.js';
 
 const hash = z.string().regex(/^[a-f0-9]{64}$/);
 const surface = z.object({ relation: z.string().max(128), path: z.string().max(160) }).strict();
@@ -17,10 +18,11 @@ const receiptIntent = z.object({ actorProfileId: z.uuid(), authUserId: z.uuid(),
   expiresAt: z.number().int().min(1).max(8640000000000000),
   steps: z.array(z.object({ id: hash, kind: z.enum(['DATABASE', 'AUTH', 'EXTERNAL']) }).strict()).min(1).max(100),
 }).strict();
-/** Server-selected inventory/intent only. No default selection, TTL or policy. */
+/** Server-selected inventory/intent only. Explicit selection must match the
+ * approved T1 policy; null still permits an incomplete diagnostic review. */
 export const resetReviewRequestSchema = z.object({
   surfaces: z.array(surface).max(1000),
-  templateSelection: z.enum(['CURRENT_PUBLISHED', 'ALL_VERSIONS']).nullable(),
+  templateSelection: z.literal(RESET_HANDOVER_POLICY.templateSelection).nullable(),
   developerId: z.uuid().nullable(), receipt: receiptIntent.nullable(),
 }).strict();
 export type ResetReviewRequest = z.infer<typeof resetReviewRequestSchema>;
@@ -134,7 +136,6 @@ export function composeResetReview(input: { request: ResetReviewRequest; binding
 
   const templateEvidence = summarizeResetTemplateEvidence(sidecar.templateEvidence, census, sidecar.statementId);
   if (!templateEvidence.available) return fail('RESET_REVIEW_TEMPLATE_EVIDENCE_MISSING');
-  for (const code of templateEvidence.blockers) blockers.add(code);
   const templates = get('public.cleaning_template_versions').map(row => ({
     id: text(row, 'id').toLowerCase(), content: { roomTypeId: text(row, 'room_type_id').toLowerCase(), cleaningKind: text(row, 'cleaning_kind'),
       durationMinutes: value(row, 'duration_minutes') === null ? null : integer(text(row, 'duration_minutes')), slots: json(value(row, 'photo_slots')) },
@@ -168,20 +169,25 @@ export function composeResetReview(input: { request: ResetReviewRequest; binding
     }
   }
   if (requestHash(refCounts) !== requestHash(templateEvidence.referenceCounts)) return fail('RESET_REVIEW_TEMPLATE_REFERENCE_DRIFT');
-  const evidenceRows = (sidecar.templateEvidence as { templates: { sourceId: string; status: string; cleaningKind: string }[] }).templates;
+  const evidenceRows = (sidecar.templateEvidence as { templates: { sourceId: string; status: string; cleaningKind: string;
+    registrationShapeValid: boolean; currentPublicationPathSupported: boolean; versionAvailable: boolean }[] }).templates;
   if (templates.some(t => !evidenceRows.some(e => e.sourceId.toLowerCase() === t.id && e.status === t.status && e.cleaningKind === t.content.cleaningKind))) {
     return fail('RESET_REVIEW_TEMPLATE_CONTENT_DRIFT');
   }
+  const selectedEvidence = request.templateSelection ? approvedTemplateSelectionEvidence(evidenceRows, templateEvidence.blockers) : null;
+  for (const code of selectedEvidence?.blockers ?? templateEvidence.blockers) blockers.add(code);
   const templateDigest = templateInventoryFingerprint(templates, references);
   const templateBinding = { projectRef: binding.projectRef, sourceCommit: binding.sourceCommit, catalogFingerprint: binding.catalogFingerprint,
     snapshotId: binding.snapshotId, contentFingerprint: templateDigest };
   const proposal = request.templateSelection && request.developerId ? buildTemplateReseedProposal({ expected: templateBinding,
-    developerId: request.developerId, selection: request.templateSelection,
+    developerId: request.developerId, selection: request.templateSelection, handoverPolicy: RESET_HANDOVER_POLICY.id,
     inventory: { binding: templateBinding, complete: true, referencesComplete: true, templateCount: templates.length,
       referenceCount: references.length, templates, references } }, planCapture ? resetPlanTemplateDependencies(planCapture) : undefined) : null;
   if (planCapture) captureResetPlanTemplate(planCapture, proposal);
   if (!proposal) blockers.add('RESET_REVIEW_TEMPLATE_SELECTION_REQUIRED');
-  for (const code of proposal?.blockers ?? []) blockers.add(code);
+  const proposalBlockers = (proposal?.blockers ?? []).filter(code =>
+    code !== 'TEMPLATE_PUBLICATION_COMPATIBILITY_NOT_VERIFIED' || !selectedEvidence?.registrationShapeCompatible);
+  for (const code of proposalBlockers) blockers.add(code);
 
   const gates = summarizeOperationGates(sidecar.gateEvidence);
   const control = get('private.developer_operation_control');
@@ -189,6 +195,8 @@ export function composeResetReview(input: { request: ResetReviewRequest; binding
   const c = control[0];
   if (c && (text(c, 'singleton') !== 'true' || text(c, 'target_ref') !== binding.projectRef || text(c, 'version') !== gates.controlVersion ||
     text(c, 'lifecycle') !== gates.lifecycle || text(c, 'maintenance') !== gates.maintenance)) return fail('RESET_REVIEW_GATE_CONTROL_DRIFT');
+  const reauthenticationPolicy = inspectHandoverReauthenticationPolicy(c ? text(c, 'reauth_ttl_seconds') : null);
+  for (const code of reauthenticationPolicy.blockers) blockers.add(code);
   const unfinished = get('private.developer_operation_admissions').filter(row => value(row, 'completed_at') === null);
   const expired = unfinished.filter(row => pgTime(text(row, 'deadline_at')).micros <= statement.micros).length;
   const passwords = get('private.password_change_commands').filter(row => ['auth_pending', 'inconsistent', 'reset_pending'].includes(text(row, 'state'))).length;
@@ -198,7 +206,8 @@ export function composeResetReview(input: { request: ResetReviewRequest; binding
   for (const code of gates.blockers) blockers.add(code);
   blockers.add('RESET_REVIEW_FULL_COVERAGE_NOT_VERIFIED');
   const planFingerprint = requestHash({ binding, logical, templateEvidence, templateProposal: proposal?.planFingerprint ?? null,
-    templateSelection: request.templateSelection, gates, pending: input.pending,
+    templateSelection: request.templateSelection, selectedEvidence, handoverPolicy: RESET_HANDOVER_POLICY_FINGERPRINT,
+    gates, reauthenticationPolicy, pending: input.pending,
     dispositions: rows.map(({ relation, key, disposition }) => ({ relation, key, disposition })).sort((a, b) => order(`${a.relation}:${a.key}`, `${b.relation}:${b.key}`)) });
   // Explicit inputs are intent, not proof of approval/backup/fresh authentication.
   // A candidate does not clear any blocker and cannot authorize an effect.
@@ -216,8 +225,10 @@ export function composeResetReview(input: { request: ResetReviewRequest; binding
   // Only the owning builder adds contentVerified/reviewPrepared after validation.
   return { executionEnabled: false, liveDatabaseVerified: false,
     completeResetCoverage: false, contentFingerprint: binding.contentFingerprint, planFingerprint,
-    logical, templates: { evidence: templateEvidence, proposal: proposal ? { generated: proposal.generated,
-      counts: proposal.counts, planFingerprint: proposal.planFingerprint, blockers: proposal.blockers } : null }, gates,
+    logical, templates: { evidence: templateEvidence, selectedEvidence, proposal: proposal ? { generated: proposal.generated,
+      counts: proposal.counts, planFingerprint: proposal.planFingerprint, blockers: proposalBlockers,
+      plannedDraftCount: proposal.handover?.drafts.length ?? null } : null }, gates,
+    handoverPolicy: RESET_HANDOVER_POLICY, reauthenticationPolicy,
     receipt, receiptStatus: receipt ? inspectResetReceipt(receipt, receipt.createdAt) : null, blockers: [...blockers].sort() };
 }
 
