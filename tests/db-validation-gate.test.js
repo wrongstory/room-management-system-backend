@@ -188,10 +188,14 @@ describe('#431 final-only full DB validation gate', () => {
   it('keeps every full DB command gated, manifest unconditional, proof after successful cleanup', () => {
     const workflow = readFileSync(new URL('../.github/workflows/quality.yml', import.meta.url), 'utf8').replaceAll('\r\n', '\n');
     const migration = workflow.split('  migration:')[1];
-    for (const command of ['db:start:ci', 'db:verify', 'db:test:template-contract', 'backup:dry-run', 'db:test',
+    for (const command of ['db:start:ci', 'db:test:template-contract', 'backup:dry-run', 'db:test',
       'db:test:static-warning', 'db:test:long-stay-clock', 'db:test:concurrency']) {
       expect(migration).toContain(`- run: npm run ${command}\n        if: steps.db_gate.outputs.full == 'true'`);
     }
+    expect(migration).toContain("- name: Fresh exact source with prefix122 hash-only checkpoint\n        if: steps.db_gate.outputs.full == 'true'");
+    expect(migration).toContain(`RMS_FINAL_DB_GATE_MODE: \${{ steps.db_gate.outputs.mode }}`);
+    expect(migration).toContain(`RMS_FINAL_DB_INPUT_SHA256: \${{ steps.db_gate.outputs.fingerprint }}`);
+    expect(migration).toContain('run: node scripts/test-migration-baseline-checkpoint.mjs');
     expect(migration).toContain("if: steps.db_gate.outputs.full == 'true'\n        run: npm run db:lint:baseline");
     expect(migration).toContain('- run: npm run db:manifest:verify\n      - run:');
     expect(migration.indexOf('Full DB proof')).toBeGreaterThan(migration.indexOf('run: npm run db:stop'));

@@ -5,13 +5,22 @@ import { performance } from 'node:perf_hooks';
 import { checkServerIdentity, rootCertificates, TLSSocket } from 'node:tls';
 import { Client, type ClientConfig } from 'pg';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { baselineMetadataFixture } from './helpers/baseline-metadata.js';
+import { BASELINE_OUTPUT_SETTINGS,BASELINE_OUTPUT_CONFIGURE_SQL,BASELINE_OUTPUT_READ_SQL } from '../scripts/lib/migration-baseline-metadata.mjs';
 
 // No network/database/TLS handshake. This double exercises the real adapter's internal I/O path.
 vi.mock('pg', () => ({ Client: vi.fn() }));
+const baselineSeam = vi.hoisted(() => ({ owned: new WeakSet<object>() }));
+vi.mock('../scripts/lib/migration-baseline-review-design.mjs', () => ({ createHistoricalBaselineReviewDesign: (bundle: object) => {
+  if (!baselineSeam.owned.has(bundle)) throw new Error('Synthetic ownership denial');
+  return { modelSource: { projectRef: 'abcdefghijklmnopqrst' },sourceBundleSha256: 'a'.repeat(64),designSha256: 'b'.repeat(64) };
+} }));
 type Observation = { mode: string; scope: string; driverReadbackObserved: true; tlsPeerValidated: true;
   observedHistorySha256: string; rowCount: number; backend: { pid: number; backendStart: string; connectionNonce: string; major: number };
   executionAllowed: false; operationalApproval: false; DBHistoryVerified: false; fullStateVerified: false; cliParityVerified: false };
 type Api = { observePostgresMigrationHistory(input: unknown): Promise<Observation>;
+  observePostgresBaselineMetadata(input: unknown, bundle: unknown): Promise<Observation & { metadata: { history: unknown[] }; baselineAccepted: false }>;
+  isOwnedPostgresBaselineObservation(input: unknown): boolean;
   isOwnedPostgresHistoryObservation(input: unknown): boolean;
   comparePostgresHistoryObservation(input: unknown): { matches: boolean; DBHistoryVerified: false; executionAllowed: false; observedHistoryIsCallerClaim: false } };
 const api = await import(new URL('../scripts/lib/migration-readonly-postgres.mjs', import.meta.url).href) as Api;
@@ -77,12 +86,20 @@ class HermeticClient extends EventEmitter {
     let result: Result;
     if (query.text === 'BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY') { kind = 'begin'; result = command('BEGIN'); }
     else if (query.text === 'ROLLBACK') { kind = 'rollback'; result = command('ROLLBACK'); }
+    else if (query.text===BASELINE_OUTPUT_CONFIGURE_SQL||query.text===BASELINE_OUTPUT_READ_SQL) {
+      kind=query.text===BASELINE_OUTPUT_CONFIGURE_SQL?'baseline-settings':'baseline-settings-after';
+      result=select(BASELINE_OUTPUT_SETTINGS.map(s=>s.field),[BASELINE_OUTPUT_SETTINGS.map(s=>s.value)]);
+    }
     else if (query.text.includes('set_config')) { kind = 'configure'; result = select(['statement_timeout', 'lock_timeout', 'idle_timeout', 'search_path'], [[query.values[0] ?? null, query.values[1] ?? null, query.values[0] ?? null, 'pg_catalog']]); }
     else if (query.text.includes('pg_stat_activity')) {
       kind = this.identityCalls++ === 0 ? 'identity-before' : 'identity-after';
       result = select(identityFields, [['12345', '2026-10-05T01:02:03.123456Z', this.config.application_name ?? null,
         'postgres', '5', '10', 'postgres', 'postgres', '170006', 'on', 'repeatable read', 'UTF8', 'UTF8',
         String(this.config.statement_timeout), String(this.config.lock_timeout), String(this.config.idle_in_transaction_session_timeout)]]);
+    } else if (query.text.includes('objects(kind,identity,definition)')) {
+      kind = 'baseline-catalog';result = baselineMetadataFixture().catalog;
+    } else if (query.text.includes('AS statement_hashes')) {
+      kind = 'baseline-history';result = baselineMetadataFixture().history;
     } else if (query.text.includes('pg_attribute')) {
       kind = 'catalog'; result = select(catalogFields, ['version', 'name', 'statements'].map((name, index) => [name, index === 2 ? '1009' : '25', index === 0 ? 'true' : 'false', 'r', 'false', 'false', 'false', 'false', '1']));
     } else if (query.text.includes('invalid_shape')) { kind = 'census'; result = select(['row_count', 'invalid_shape'], [[String(scenario.history.length), '0']]); }
@@ -106,6 +123,58 @@ const observe = () => api.observePostgresMigrationHistory(input());
 function change(kind: string, mutate: (result: Result, client: HermeticClient) => void) {
   scenario.transform = (phase, result, client) => { if (phase === kind) mutate(result, client); return result; };
 }
+
+describe('#14 owned hash-only baseline readback with no network', () => {
+  function baseline() {
+    const f = baselineMetadataFixture();
+    const bundle = { files: f.expected.map(row => ({ name: row.name })) };baselineSeam.owned.add(bundle);
+    scenario.history = f.expected.map(row => [row.version,row.name,'["synthetic"]','1','1','1','1']);
+    return { bundle,value: { ...input(),expectedVersions: f.expected.map(row => row.version) } };
+  }
+  it('keeps TLS/owned RR/identity/close while never calling raw history SQL', async () => {
+    const f=baseline(),result=await api.observePostgresBaselineMetadata(f.value,f.bundle);
+    expect(api.isOwnedPostgresBaselineObservation(result)).toBe(true);
+    expect(api.isOwnedPostgresBaselineObservation(structuredClone(result))).toBe(false);
+    expect(api.isOwnedPostgresHistoryObservation(result)).toBe(false);
+    expect(result).toMatchObject({ mode:'POSTGRES_BASELINE_HASH_METADATA_OBSERVATION',baselineAccepted:false,executionAllowed:false,
+      DBHistoryVerified:false,driverReadbackObserved:true,tlsPeerValidated:true });
+    expect(result.metadata.history).toHaveLength(122);
+    expect(clients[0]?.queries.some(q=>q.text.includes('AS statement_values'))).toBe(false);
+    expect(clients[0]?.queries.filter(q=>q.text.includes('AS statement_hashes'))).toHaveLength(1);
+    expect(clients[0]?.identityCalls).toBe(2);expect(clients[0]?.queries.at(-1)?.text).toBe('ROLLBACK');
+    expect(clients[0]?.endCalls).toBe(1);expect(JSON.stringify(result)).not.toContain(syntheticPassword);
+  });
+  it.each(['source-clone','project','local','count'])('rejects %s before opening a connection',async kind => {
+    const f=baseline();
+    if(kind==='source-clone')f.bundle=structuredClone(f.bundle);
+    if(kind==='project'){f.value.target.projectRef='z'.repeat(20);f.value.target.host=`db.${'z'.repeat(20)}.supabase.co`;}
+    if(kind==='local')f.value.target.scope='ISOLATED_LOCAL';
+    if(kind==='count')f.value.expectedVersions.pop();
+    await expect(api.observePostgresBaselineMetadata(f.value,f.bundle)).rejects.toThrow();expect(clients).toHaveLength(0);
+  });
+  it.each(['baseline-settings','baseline-settings-after','baseline-history','baseline-catalog','identity-after','rollback'])('cannot issue evidence after invalid %s',async phase => {
+    const f=baseline();change(phase,result=>{result.command='UPDATE';});
+    await expect(api.observePostgresBaselineMetadata(f.value,f.bundle)).rejects.toThrow(/^POSTGRES_/);
+    expect(clients[0]?.connection.stream.destroyed).toBe(true);
+  });
+  it('rejects canonical output GUC drift without masking it with another SET',async()=>{
+    const f=baseline();change('baseline-settings-after',result=>{const row=result.rows[0];if(row)row[0]='Asia/Seoul';});
+    await expect(api.observePostgresBaselineMetadata(f.value,f.bundle)).rejects.toThrow('POSTGRES_OUTPUT_SETTINGS_INVALID');
+    expect(clients[0]?.queries.filter(q=>q.text===BASELINE_OUTPUT_CONFIGURE_SQL)).toHaveLength(1);
+  });
+  it('cannot issue evidence after close failure',async () => {
+    const f=baseline();scenario.end=async()=>{throw new Error('private connection detail');};
+    await expect(api.observePostgresBaselineMetadata(f.value,f.bundle)).rejects.toThrow('POSTGRES_CLOSE_FAILED');
+    expect(clients[0]?.connection.stream.destroyed).toBe(true);
+  });
+  it('destroys only the owned connection after a hung metadata query and returns a fixed error',async () => {
+    const f=baseline();f.value.queryMs=100;f.value.deadlineMs=250;
+    scenario.query=async phase=>{if(phase==='baseline-catalog')await new Promise(()=>{});};
+    await expect(api.observePostgresBaselineMetadata(f.value,f.bundle)).rejects.toThrow('POSTGRES_READBACK_FAILED');
+    expect(clients[0]?.connection.stream.destroyed).toBe(true);expect(clients[0]?.password).toBeNull();
+    expect(clients[0]?.queries.some(q=>q.text==='ROLLBACK')).toBe(false);
+  });
+});
 
 describe('#378 actual internal Client readback path with hermetic driver only', () => {
   it.each([

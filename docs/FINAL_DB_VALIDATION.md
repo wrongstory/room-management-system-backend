@@ -57,10 +57,19 @@ main 검사는 exact main SHA를 merge_commit_sha로 가진 단 하나의 merged
 
 ## 기존 전체 검사 유지
 
-fresh db:verify → template contract → exact lint baseline → 합성 backup dry-run →
+fresh source122 reset → hash-only checkpoint → exact pending 전체 tip 적용 →
+template contract → exact lint baseline → 합성 backup dry-run →
 전체 db:test/upgrade → static warning upgrade → KST clock → concurrency → cleanup.
-모든 명령과 timeout40분을 유지하며 테스트 삭제/skip/continue-on-error를 추가하지 않는다.
+그 밖의 명령과 timeout 40분을 유지하며 테스트 삭제/skip/continue-on-error를 추가하지 않는다.
 운영 백업/복원은 사용자 결정대로 후속이며 CI 합성 검사를 실제 운영 복원으로 표현하지 않는다.
+
+H1의 [checkpoint 경로](MIGRATION_BASELINE_METADATA.md)는 최초 `db:verify`의 fresh 전체
+적용을 prefix122와 나머지 exact source tip으로 분할한다. 기존110→111 실험/전체 검증은
+유지하고 최초 reset 횟수를 추가하지 않는다.135 같은 특정 숫자를 최종 상한으로 고정하지 않는다.
+정확 실행 승인은 CLI의 로컬 container/volume 재생성, 나머지 적용, 기존 upgrade/fixture와
+오류 시 cleanup을 포함해야 한다. source 구현은 실행 허가가 아니며 일반 dev PR은 DB 실행0이다.
+전체 검사와 cleanup 뒤 hash-only oracle 업로드까지 성공해야 proof를 만든다. artifact 자체의
+fullDbProofVerified/baselineAccepted는 false이며 원 run의 성공 근거를 별도로 대조한다.
 
 ## 전환과 현재 제한
 

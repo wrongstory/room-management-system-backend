@@ -135,6 +135,9 @@ D04 실행별 승인, 유한 실행/실패·손실 판정은 유지한다. 데�
 
 ## 검증 경계
 
+후속 [hash-only collector와 prefix122 checkpoint](MIGRATION_BASELINE_METADATA.md)의 소스·합성
+검증이 추가되었다. 실제 운영/로컬 관측이나 기준 수용은 별개이며 아래 NOT RUN 경계를 유지한다.
+
 새 합성 검사는 frozen source/hash 재현8건, 변경된12개 source 거부, clone/getter/다른대상/
 pending혼입 거부, 오류 비노출, 결과의 false 권한, 기존 runtime 표현3종 불변을 확인한다.
 ownership seam은 메모리 double이며 기존 source bundle의 실제 immutable Git 경계 회귀와 구분한다.

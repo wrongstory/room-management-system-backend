@@ -14,10 +14,13 @@ const load = () => import('../scripts/lib/migration-runtime-integrity.mjs');
 describe('#378 executing-source check with all files/Git replaced', () => {
   it('compares startup and current copies of every execution module with approved main blobs', async () => {
     const { verifyMigrationRuntimeIntegrity } = await load();
-    expect(verifyMigrationRuntimeIntegrity({ request: {}, repositoryPath: root })).toMatchObject({ runtimeSourceVerified: true, firstPartyFileCount: 22 });
-    expect(memory.calls).toHaveLength(22);
+    expect(verifyMigrationRuntimeIntegrity({ request: {}, repositoryPath: root })).toMatchObject({ runtimeSourceVerified: true, firstPartyFileCount: 25 });
+    expect(memory.calls).toHaveLength(25);
     expect(memory.calls.every(call => call.options.timeout === 3000 && call.options.windowsHide)).toBe(true);
     expect(memory.calls.some(call => call.args.at(-1).endsWith(':scripts/lib/migration-atomic-postgres.mjs'))).toBe(true);
+    for (const path of ['scripts/lib/migration-baseline-metadata.mjs', 'scripts/lib/migration-baseline-review-design.mjs', 'scripts/migration-baseline-review-evidence.json']) {
+      expect(memory.calls.some(call => call.args.at(-1).endsWith(`:${path}`))).toBe(true);
+    }
   });
   it.each(['changed', 'gitChanged', 'symlink'])('rejects %s files without accepting a code-path claim', async key => {
     const { verifyMigrationRuntimeIntegrity } = await load(); memory[key] = true;

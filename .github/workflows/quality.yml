@@ -71,8 +71,12 @@ jobs:
       - run: npm run db:manifest:verify
       - run: npm run db:start:ci
         if: steps.db_gate.outputs.full == 'true'
-      - run: npm run db:verify
+      - name: Fresh exact source with prefix122 hash-only checkpoint
         if: steps.db_gate.outputs.full == 'true'
+        env:
+          RMS_FINAL_DB_GATE_MODE: ${{ steps.db_gate.outputs.mode }}
+          RMS_FINAL_DB_INPUT_SHA256: ${{ steps.db_gate.outputs.fingerprint }}
+        run: node scripts/test-migration-baseline-checkpoint.mjs
       - run: npm run db:test:template-contract
         if: steps.db_gate.outputs.full == 'true'
       - name: Prepare exact isolated PG17 TLS fixture image (#378)
@@ -108,6 +112,14 @@ jobs:
       - name: Stop local Supabase
         if: always() && steps.db_gate.outputs.full == 'true'
         run: npm run db:stop
+      - name: Preserve source122 oracle after all Full DB checks and cleanup
+        if: success() && steps.db_gate.outputs.full == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: baseline122-oracle-${{ github.sha }}
+          path: .tmp/baseline122-oracle.json
+          if-no-files-found: error
+          include-hidden-files: true
       - name: Full DB proof ${{ steps.db_gate.outputs.fingerprint }}
         if: success() && steps.db_gate.outputs.full == 'true'
         run: echo "Full DB validation PASS; proof is bound to the tested merge tree inputs."

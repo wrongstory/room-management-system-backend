@@ -6,8 +6,8 @@ import { fileURLToPath } from 'node:url';
 import { migrationReleaseConfiguration } from './migration-release-preflight.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
-const paths = ['package.json', 'package-lock.json', 'scripts/execute-production-migrations.mjs', 'scripts/migration-execution-child.mjs', 'scripts/db-validation-gate.mjs',
-  ...['atomic-postgres', 'evidence-input', 'execution-approval', 'execution-command', 'executor-policy', 'history-codec', 'postgres-state', 'process-supervisor', 'readonly-postgres',
+const paths = ['package.json', 'package-lock.json', 'scripts/execute-production-migrations.mjs', 'scripts/migration-execution-child.mjs', 'scripts/db-validation-gate.mjs', 'scripts/migration-baseline-review-evidence.json',
+  ...['atomic-postgres', 'baseline-metadata', 'baseline-review-design', 'evidence-input', 'execution-approval', 'execution-command', 'executor-policy', 'history-codec', 'postgres-state', 'process-supervisor', 'readonly-postgres',
     'release-preflight', 'release-supervisor', 'remote-release', 'runtime-integrity', 'runtime-plan', 'source-bundle', 'sql-plan', 'state-snapshot']
     .map(name => `scripts/lib/migration-${name}.mjs`)];
 function current(path) {

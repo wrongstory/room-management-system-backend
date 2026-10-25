@@ -1,0 +1,22 @@
+export const BASELINE_METADATA_COUNT: 122;
+export const BASELINE_METADATA_SCHEMAS: readonly string[];
+export const BASELINE_METADATA_MAX_ROWS: number;
+export const BASELINE_METADATA_MAX_BYTES: number;
+export const BASELINE_OUTPUT_SETTINGS: readonly {name:string;field:string;value:string}[];
+export const BASELINE_OUTPUT_CONFIGURE_SQL: string;
+export const BASELINE_OUTPUT_READ_SQL: string;
+export const BASELINE_METADATA_QUERIES: Readonly<{ history: string; catalog: string }>;
+export const BASELINE_METADATA_QUERY_SHA256: string;
+export const BASELINE_HISTORY_FIELDS: readonly string[];
+export const BASELINE_CATALOG_FIELDS: readonly string[];
+export type BaselineMetadata = {
+  format: 'baseline-hash-metadata-v1'; querySha256: string; schemas: readonly string[];
+  history: readonly { version: string; name: string; dimensions: readonly { lowerBound: number; length: number }[];
+    statements: readonly { ordinal: number; byteLength: number; sha256: string }[] }[];
+  catalog: readonly { kind: string; identitySha256: string; definitionBytes: number; definitionSha256: string }[];
+  historyBytes: number; catalogBytes: number; metadataSha256: string; historyMetadataSha256: string; catalogMetadataSha256: string;
+  unsupportedObjectCount: number; baselineAccepted: false; executionAllowed: false; operationalApproval: false;
+  fullStateVerified: false; liveObservationVerified: false; globalCoverageVerified: false; historicalEffectsVerified: false;
+};
+export function decodeBaselineMetadata(history: unknown, catalog: unknown, expected: unknown): BaselineMetadata;
+export function readBaselineMetadata(query: (sql: string) => Promise<unknown>, expected: unknown): Promise<BaselineMetadata>;
