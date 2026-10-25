@@ -3210,6 +3210,8 @@ Table private.developer_operation_admissions {
   http_command_name text
   http_key_digest text
   http_request_hash text
+  worker_kind text [note: 'source132 finite notification worker, null for non-worker admission']
+  worker_context jsonb [note: 'Exact immutable attempt/target/fence identifiers only; no subscription secret or payload']
   indexes { (owner_digest,nonce_hash) [unique] }
   Note: '#396 source128/130/131; deadline expiry is UNKNOWN. HTTP terminal requires exact immutable actor/command/key/hash receipt; finite audit/read-state effects complete in the same transaction. Node/Edge HTTP adapters are opt-in; opaque/worker/external full-path coverage remains pending.'
 }

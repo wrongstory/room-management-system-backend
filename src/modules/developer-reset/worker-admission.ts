@@ -1,0 +1,242 @@
+/** Server-only optional integration. Runtime budgets observe existing worker
+ * deadlines; they never expire/release an unobserved remote effect. */
+export interface OperationWorkerConfig {
+  target: string;
+}
+interface WorkerResult {
+  data: unknown;
+  error: unknown;
+}
+interface WorkerCall extends PromiseLike<WorkerResult> {
+  abortSignal?(signal: AbortSignal): PromiseLike<WorkerResult>;
+}
+export interface OperationWorkerRpc {
+  rpc(name: string, args: Record<string, unknown>): WorkerCall;
+}
+export class OperationWorkerAdmissionError extends Error {
+  readonly code = "OPERATION_WORKER_ADMISSION_UNAVAILABLE";
+  constructor() {
+    super("OPERATION_WORKER_ADMISSION_UNAVAILABLE");
+  }
+}
+const fail = (): never => {
+  throw new OperationWorkerAdmissionError();
+};
+const object = (input: unknown): Record<string, unknown> =>
+  input && typeof input === "object" && !Array.isArray(input)
+    ? input as Record<string, unknown>
+    : fail();
+const hex = /^[0-9a-f]{64}$/;
+const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export function operationWorkerConfig(
+  mode: string | undefined,
+  target: string | undefined,
+  supabaseUrl: string | undefined,
+): OperationWorkerConfig | undefined {
+  if (!mode || mode === "disabled") return undefined;
+  if (
+    mode !== "required" || !target || !/^[a-z]{20}$/.test(target) ||
+    !supabaseUrl
+  ) return fail();
+  let url: URL;
+  try {
+    url = new URL(supabaseUrl);
+  } catch {
+    return fail();
+  }
+  if (
+    url.protocol !== "https:" || url.hostname !== `${target}.supabase.co` ||
+    url.port || url.username || url.password ||
+    url.pathname !== "/" || url.search || url.hash
+  ) return fail();
+  return { target };
+}
+
+/** Fixed database-only pre-claim heartbeat; never claims provider quiescence. */
+export async function recordNotificationOperationConfigurationFailure(input: {
+  config: OperationWorkerConfig | undefined;
+  db: OperationWorkerRpc;
+  budgetMs: number;
+}): Promise<void> {
+  if (!Number.isSafeInteger(input.budgetMs) || input.budgetMs < 1) {
+    return fail();
+  }
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const name = input.config
+    ? "record_operation_notification_configuration_failure"
+    : "record_notification_delivery_heartbeat";
+  const args = input.config
+    ? {
+      p_target: input.config.target,
+      p_nonce: Array.from(crypto.getRandomValues(new Uint8Array(32)), (n) =>
+        n.toString(16).padStart(2, "0")).join(""),
+      p_deadline: new Date(Date.now() + input.budgetMs).toISOString(),
+    }
+    : {
+      p_status: "degraded",
+      p_claimed: 0,
+      p_delivered: 0,
+      p_retrying: 0,
+      p_suppressed: 0,
+      p_dead_letter: 0,
+      p_blocked: 0,
+      p_deferred: 0,
+      p_error_code: "PROVIDER_CONFIGURATION_ERROR",
+    };
+  try {
+    const raw = input.db.rpc(name, args);
+    const result = await Promise.race([
+      Promise.resolve(raw.abortSignal?.(controller.signal) ?? raw),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          controller.abort();
+          reject(new OperationWorkerAdmissionError());
+        }, Math.min(input.budgetMs, 2147483647));
+      }),
+    ]);
+    if (result.error) return fail();
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/** One immutable notification claim is fenced across envelope/permit/provider/
+ * settle/heartbeat. Only SQL readback of every captured attempt may complete it.
+ * A failed/unobserved claim forbids subsequent worker RPCs in this invocation. */
+export async function withNotificationOperationAdmission<T>(input: {
+  config: OperationWorkerConfig | undefined;
+  db: OperationWorkerRpc;
+  budgetMs: number;
+  clock?: () => number;
+  nonce?: () => string;
+}, run: (db: OperationWorkerRpc) => Promise<T>): Promise<T> {
+  if (!input.config) return run(input.db);
+  const clock = input.clock ?? Date.now;
+  const deadline = clock() + input.budgetMs;
+  if (
+    !Number.isSafeInteger(input.budgetMs) || input.budgetMs < 1 ||
+    !Number.isSafeInteger(deadline) ||
+    !Number.isFinite(new Date(deadline).getTime()) ||
+    !/^[a-z]{20}$/.test(input.config.target)
+  ) return fail();
+  const nonce = input.nonce?.() ??
+    Array.from(
+      crypto.getRandomValues(new Uint8Array(32)),
+      (n) => n.toString(16).padStart(2, "0"),
+    ).join("");
+  if (!hex.test(nonce)) return fail();
+  let claimed = false;
+  let blocked = false;
+  let admission: string | null | undefined;
+  const passthrough = new Set([
+    "get_notification_delivery_envelope",
+    "permit_notification_delivery",
+    "settle_notification_delivery",
+    "record_notification_delivery_heartbeat",
+  ]);
+  const call = async (
+    name: string,
+    args: Record<string, unknown>,
+    signal?: AbortSignal,
+  ): Promise<WorkerResult> => {
+    const remaining = deadline - clock();
+    if (remaining <= 0 || signal?.aborted) return fail();
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    signal?.addEventListener("abort", abort, { once: true });
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const raw = input.db.rpc(name, args);
+      return await Promise.race([
+        Promise.resolve(raw.abortSignal?.(controller.signal) ?? raw),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => {
+            controller.abort();
+            reject(new OperationWorkerAdmissionError());
+          }, Math.min(remaining, 2147483647));
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+      signal?.removeEventListener("abort", abort);
+    }
+  };
+  const execute = async (
+    name: string,
+    args: Record<string, unknown>,
+    signal?: AbortSignal,
+  ): Promise<WorkerResult> => {
+    if (blocked) return fail();
+    if (name !== "claim_notification_deliveries") {
+      if (admission === undefined || !passthrough.has(name)) return fail();
+      return call(name, args, signal);
+    }
+    if (
+      claimed ||
+      Object.keys(args).sort().join(",") !== "p_claim_digest,p_limit" ||
+      typeof args.p_claim_digest !== "string" ||
+      !hex.test(args.p_claim_digest) ||
+      !Number.isSafeInteger(args.p_limit) || (args.p_limit as number) < 1 ||
+      (args.p_limit as number) > 10
+    ) return fail();
+    claimed = true;
+    try {
+      const response = await call("claim_operation_notification_deliveries", {
+        p_target: input.config?.target,
+        p_nonce: nonce,
+        p_deadline: new Date(deadline).toISOString(),
+        ...args,
+      }, signal);
+      if (response.error) return fail();
+      const data = object(response.data);
+      if (
+        Object.keys(data).sort().join(",") !== "admissionId,claim" ||
+        (data.admissionId !== null &&
+          (typeof data.admissionId !== "string" ||
+            !uuid.test(data.admissionId)))
+      ) return fail();
+      const claim = object(data.claim);
+      admission = data.admissionId as string | null;
+      return { data: claim, error: null };
+    } catch {
+      blocked = true;
+      return fail();
+    }
+  };
+  const wrapped: OperationWorkerRpc = {
+    rpc(name, args) {
+      // Preserve lazy RPC builders and abortSignal chaining used by both workers.
+      let signal: AbortSignal | undefined;
+      let execution: Promise<WorkerResult> | undefined;
+      const result: WorkerCall = {
+        abortSignal(value) {
+          signal = value;
+          return result;
+        },
+        // biome-ignore lint/suspicious/noThenProperty: Preserve the Supabase lazy RPC builder contract.
+        then(resolve, reject) {
+          execution ??= execute(name, args, signal);
+          return execution.then(resolve, reject);
+        },
+      };
+      return result;
+    },
+  };
+  const result = await run(wrapped);
+  if (!claimed || blocked || admission === undefined) return fail();
+  if (admission !== null) {
+    const response = await call("complete_operation_notification_deliveries", {
+      p_target: input.config.target,
+      p_admission_id: admission,
+      p_nonce: nonce,
+    });
+    if (response.error) return fail();
+    const value = object(response.data);
+    if (
+      Object.keys(value).join(",") !== "completed" || value.completed !== true
+    ) return fail();
+  }
+  return result;
+}

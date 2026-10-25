@@ -1380,3 +1380,9 @@ worker/기존 요청과 직접 접근의 전체 coverage는 후속 근거이며 
 Boolean으로 drain을 증명하지 않는다. 실제 활성화와 DB 실행은 NOT RUN이다.
 [HTTP 연결](./HTTP_OPERATION_ADMISSION_396.md), [원자 감사](./OPERATION_ATOMIC_AUDIT.md),
 [운영 안전 경계](./DEVELOPER_OPERATION_GATES.md)를 따른다.
+
+132의 알림 Node/Edge worker는 실제 claim과 입장 기록을 원자화하고 해당 immutable attempt
+결과를 조회한 뒤에만 완료한다. 결과를 확인하지 못한 시도는 새 claim 성공/만료로 해제되지
+않는다. 구성 실패 heartbeat도 같은 transaction으로 보호한다. 별도 opt-in이며 scheduler,
+PIN/사진 worker 및 직접 운영 접근의 전체 coverage를 대신하지 않는다.
+[Worker 계약과 미실행 SQL](./OPERATION_WORKER_ADMISSION.md)을 따른다.

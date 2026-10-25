@@ -15,6 +15,78 @@ const arrayBuffer = (value: Uint8Array): ArrayBuffer =>
     value.byteOffset + value.byteLength,
   ) as ArrayBuffer;
 
+Deno.test("Edge worker admission wraps an actual empty claim through the last heartbeat", async () => {
+  const calls: string[] = [];
+  const id = "13200000-0000-4000-8000-000000000001";
+  const db: EdgeDeliveryRpc = {
+    rpc: async (name) => {
+      calls.push(name);
+      if (name === "claim_operation_notification_deliveries") {
+        return {
+          data: {
+            admissionId: id,
+            claim: { items: [], suppressed: 0, blocked: 0 },
+          },
+          error: null,
+        };
+      }
+      return {
+        data: name.startsWith("complete_")
+          ? { completed: true }
+          : { status: "succeeded" },
+        error: null,
+      };
+    },
+  };
+  const result = await new EdgeNotificationDeliveryWorker(
+    db,
+    {
+      send: () => {
+        throw new Error("unexpected provider call");
+      },
+    },
+    { currentVersion: "v1", currentKey: new Uint8Array(32), keyring: {} },
+    Date.now,
+    { target: "a".repeat(20) },
+  ).run();
+  if (
+    result.claimed !== 0 ||
+    calls.join(",") !==
+      "claim_operation_notification_deliveries,record_notification_delivery_heartbeat,complete_operation_notification_deliveries"
+  ) {
+    throw new Error("admission lifetime mismatch");
+  }
+});
+
+Deno.test("Edge refused admission does not write a fallback heartbeat or call a provider", async () => {
+  const calls: string[] = [];
+  const db: EdgeDeliveryRpc = {
+    rpc: async (name) => {
+      calls.push(name);
+      return { data: null, error: { code: "OPERATION_ADMISSION_REJECTED" } };
+    },
+  };
+  let rejected = false;
+  try {
+    await new EdgeNotificationDeliveryWorker(
+      db,
+      {
+        send: () => {
+          throw new Error("unexpected provider call");
+        },
+      },
+      { currentVersion: "v1", currentKey: new Uint8Array(32), keyring: {} },
+      Date.now,
+      { target: "a".repeat(20) },
+    ).run();
+  } catch {
+    rejected = true;
+  }
+  if (
+    !rejected || calls.join(",") !== "claim_operation_notification_deliveries"
+  ) throw new Error("untracked fallback write");
+});
+
 Deno.test("notification delivery Edge constants preserve the 45/33/39 second bounded contract", () => {
   if (NOTIFICATION_DELIVERY_BATCH_LIMIT !== 10) throw new Error("batch drift");
   if (NOTIFICATION_DELIVERY_RUN_BUDGET_MS !== 45_000) {
