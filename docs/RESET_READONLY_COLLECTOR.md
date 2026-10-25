@@ -76,3 +76,5 @@ parser 실행은 SQL 실행이나 권한·동시성·DB 통합 테스트가 아�
 Edge/Python/public API/migration 입력은 이 단위에서 변경하지 않았으며 별도 실행하지 않았다.
 dev8b40ef(130/131 및 관측 원장 포함) 정상 통합 후 `ci:quality`는170파일/4,736 tests PASS다.
 manifest131와 admission/atomic source 생성 검사 PASS, collector 고유 변경10파일을 유지했다.
+최종 dev9abe806(worker132) 정상 통합 후 `ci:quality` 172파일/4,765 tests, manifest132,
+worker source 생성 검사 PASS다. Edge/SQL/worker 입력은 해당 dev와 동일함을 확인했다.

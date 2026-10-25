@@ -1,11 +1,16 @@
 import { createEdgeClients, requestId } from "../_shared/runtime.ts";
 import {
+  operationWorkerConfig,
+  recordNotificationOperationConfigurationFailure,
+} from "../_shared/worker-admission.ts";
+import {
   scheduledInvokeMode,
   verifyScheduledInvocation,
 } from "../_shared/scheduled-invocation.ts";
 import {
   type EdgeDeliveryCryptoConfig,
   EdgeNotificationDeliveryWorker,
+  NOTIFICATION_DELIVERY_RUN_BUDGET_MS,
 } from "../_shared/notification-delivery-worker.ts";
 import {
   RfcWebPushProvider,
@@ -266,21 +271,18 @@ export interface NotificationDeliveryHandlerDependencies {
   recordConfigurationFailure?: () => Promise<void>;
 }
 async function recordConfigurationFailure(): Promise<void> {
-  const { error } = await createEdgeClients().admin.rpc(
-    "record_notification_delivery_heartbeat",
-    {
-      p_status: "degraded",
-      p_claimed: 0,
-      p_delivered: 0,
-      p_retrying: 0,
-      p_suppressed: 0,
-      p_dead_letter: 0,
-      p_blocked: 0,
-      p_deferred: 0,
-      p_error_code: "PROVIDER_CONFIGURATION_ERROR",
-    },
+  await recordNotificationOperationConfigurationFailure({
+    config: loadOperationAdmission(),
+    db: createEdgeClients().admin,
+    budgetMs: NOTIFICATION_DELIVERY_RUN_BUDGET_MS,
+  });
+}
+function loadOperationAdmission() {
+  return operationWorkerConfig(
+    Deno.env.get("NOTIFICATION_OPERATION_ADMISSION_MODE"),
+    Deno.env.get("DEVELOPER_OPERATION_TARGET"),
+    Deno.env.get("SUPABASE_URL"),
   );
-  if (error) throw new Error("NOTIFICATION_DELIVERY_HEARTBEAT_FAILED");
 }
 export async function handleNotificationDelivery(
   request: Request,
@@ -370,6 +372,8 @@ export async function handleNotificationDelivery(
         createEdgeClients().admin,
         new RfcWebPushProvider(config.vapid),
         config.envelope,
+        Date.now,
+        loadOperationAdmission(),
       ).run();
     return response(200, id, result);
   } catch {
