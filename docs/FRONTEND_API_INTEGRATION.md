@@ -789,3 +789,13 @@ token, 비밀번호, 전체 휴대전화, temporaryPassword를 로그·fixture·
 기존 binary upload 두 요청에 각 원래 key와 collection/item CAS를 그대로 사용한다.
 프런트 코드·실제 배포·현장 성능은 아직 변경/검증하지 않았다.
 [요청·실패·재시도 계약](./PHOTO_UPLOAD_BATCH_411.md)을 확인한 뒤 별도 프런트 연결이 필요하다.
+
+## 개발자 초기화 미리보기의 템플릿 증거
+
+`GET /v1/developer/reset/preview`의 `templateEvidence`는 모든 draft/published/retired 내용과
+slot projection, 명시된 역사 참조의 건수 진단이다. 실제 내용·작성자·ID·내용 digest는 표시하지
+않는다. `historicallyUnreadable`과 `registrationShapeInvalid`는 서로 다른 원인이다.
+`selectionAlternatives`의 두 후보는 source 수와 제외 상태의 수만 보여주며, 게시나 상태 변환을
+선택한 결과가 아니다. `diagnosticComplete=true`도 백업·보호·게시·초기화 승인이나 운영 성공이
+아니며 `executionEnabled=false`를 유지한다. 이전 DB가 아직 수집하지 않으면 available=false와
+`TEMPLATE_INVENTORY_NOT_COLLECTED`를 반환한다. 프런트 구현은 별도 범위다.
