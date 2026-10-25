@@ -22,6 +22,14 @@ function first<T>(items: T[]): T { if (!items[0]) throw new Error('fixture missi
 const profiles = [{ id: 'developer-id', auth_user_id: 'developer-auth', role: 'developer' }, { id: 'maid-id', auth_user_id: 'maid-auth', role: 'maid' }];
 
 describe('reset candidate row policy and aggregate collector evidence', () => {
+  it('keeps the exact execution audit family even with malformed details, without protecting ordinary test audits', () => {
+    for (const reason_code of ['OPERATIONAL_HANDOVER_INITIALIZATION', 'wrong', null]) {
+      expect(evaluateResetRowCandidate('public.audit_events', { event_type: 'cleaning_template.operational_handover', reason_code }, [])).toBe('preserve');
+    }
+    for (const event_type of ['cleaning_template.published', 'cleaning_template.operational_handover_extra', null])
+      expect(evaluateResetRowCandidate('public.audit_events', { event_type }, [])).toBe('resetCandidate');
+    expect(resetRowDispositionExpression('public.audit_events', 'r')).toBe("case when r.event_type='cleaning_template.operational_handover' then 'preserve' else 'resetCandidate' end");
+  });
   it('covers every inventoried relation exactly once without unknown-table fallback', () => {
     expect(RESET_ROW_RULES.map((r: { relation: string }) => r.relation).sort()).toEqual(Object.values(resetRelationGroups).flat().sort());
     expect(resetRowDispositionExpression('private.future_table', 'r')).toBeNull();

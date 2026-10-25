@@ -26,6 +26,7 @@ export function resetReviewFixture() {
   add('public.rooms'); add('public.room_types');
   add('private.developer_catalog_previews', { preview_kind: 'text', actor_profile_id: 'uuid' });
   add('private.actor_activity_events', { resource_type: 'text', actor_profile_id: 'uuid' });
+  add('public.audit_events', { event_type: 'text' });
   add('public.cleaning_template_versions', { room_type_id: 'uuid', cleaning_kind: 'text', duration_minutes: 'int4',
     photo_slots: 'jsonb', status: 'text', version: 'int4', created_by: 'uuid', created_at: 'timestamptz' });
   add('private.photo_template_slots', { template_version_id: 'uuid', slot_snapshot: 'jsonb' });

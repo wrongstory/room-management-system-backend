@@ -57,6 +57,11 @@ const receiptStore = '20261025051231_developer_reset_receipt_store.sql';
 add('private.developer_reset_receipt_heads', ['actor_profile_id'], 'HISTORICAL_SNAPSHOT', 'uuid', receiptStore);
 add('private.developer_reset_receipt_heads', ['binding', 'header'], 'HISTORICAL_SNAPSHOT', 'json-object', receiptStore);
 add('private.developer_reset_receipt_events', ['entry'], 'HISTORICAL_SNAPSHOT', 'json-object', receiptStore);
+// Exact handover audit rows are retained by136. Preserve their full historical
+// mapping, never resolve old/new IDs as current pointers or rewrite the JSON.
+const handover = '20261025072617_developer_template_handover_effect.sql';
+add('public.audit_events', ['entity_id'], 'HISTORICAL_SNAPSHOT', 'uuid', handover, true);
+add('public.audit_events', ['before_state', 'after_state'], 'HISTORICAL_SNAPSHOT', 'json-object', handover, true);
 
 export const RESET_LOGICAL_REFERENCE_RULES: readonly LogicalReferenceRule[] = Object.freeze(
   rules.sort((a, b) => `${a.relation}:${a.path}` < `${b.relation}:${b.path}` ? -1 : 1),

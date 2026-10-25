@@ -16,10 +16,10 @@ function checkExpectedCount(expectedCount) {
   // 116/117 payroll projection; 119 PIN transfer; 120/121 photo commands;
   // 122 memo-only reports; 123 overdue delivery clock; 124 card hydration;
   // 125 reset inventory read; 126 bounded photo batch admission;
-  // 127 read-only reset row impact; 128 private operation gates; 129 template inventory; 130 HTTP admission; 131 atomic audit; 132 notification admission; 133 scheduler admission; 134 incremental PIN admission; 135 durable reset receipt store. No catalog rows are added.
+  // 127 read-only reset row impact; 128 private operation gates; 129 template inventory; 130 HTTP admission; 131 atomic audit; 132 notification admission; 133 scheduler admission; 134 incremental PIN admission; 135 durable reset receipt store; 136 inactive template handover effect. No catalog rows are added.
   // Runtime event dispatch is not permission to mutate historical catalog metadata.
-  assert(Number.isSafeInteger(expectedCount) && expectedCount >= 95 && expectedCount <= 135,
-    'Only the audited95..135 upgrade range is supported; 112..135 add no catalog rows');
+  assert(Number.isSafeInteger(expectedCount) && expectedCount >= 95 && expectedCount <= 136,
+    'Only the audited95..136 upgrade range is supported; 112..136 add no catalog rows');
 }
 function catalogRows(value) {
   assert(Array.isArray(value), 'An existing baseline notification catalog is required');

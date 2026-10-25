@@ -12,9 +12,11 @@ type Phase = 'NEW' | 'PREPARING' | 'PREPARED' | 'CHECKING' | 'CHECKED' | 'CLOSED
 type Blueprint = { ids: string[]; time: string; digest: string };
 type Session = { phase: Phase; secret: Buffer; expiresAt: number; deadline: number;
   inputHash?: string; content?: string; blueprint?: Blueprint; summary?: Summary;
+  effectSource?: unknown; effectContentFingerprint?: string; effectRows?: ReviewRow[]; effectProposal?: Proposal;
   contentSeen: boolean; proposalSeen: boolean; controller?: AbortController; timer?: ReturnType<typeof setTimeout> };
 type Summary = { commitment: string; reviewedPlanFingerprint: string; blockers: string[] };
 const captures = new WeakMap<object, Session>();
+const sessions = new WeakMap<object, Session>();
 const reject = (): never => { throw new Error('RESET_PLAN_REVALIDATION_REJECTED'); };
 const order = (a: string, b: string) => a < b ? -1 : a > b ? 1 : 0;
 const flags = { executionEnabled: false as const, liveDatabaseVerified: false as const, completeResetCoverage: false as const };
@@ -23,6 +25,7 @@ const reviewSummarySchema = z.object({ reviewPrepared: z.literal(true), contentV
 const failed = () => ({ ...flags, status: 'REJECTED' as const, revalidated: false as const, summary: null });
 function close(session: Session) {
   session.phase = 'CLOSED'; session.secret.fill(0); delete session.blueprint;
+  delete session.effectSource; delete session.effectContentFingerprint; delete session.effectRows; delete session.effectProposal;
   session.controller?.abort(); if (session.timer) clearTimeout(session.timer);
 }
 function live(session: Session) {
@@ -57,6 +60,9 @@ export function captureResetPlanContent(token: object, expected: unknown, reques
   const content = digest(session, 'content', { expected, request, rows: normalized });
   if (session.phase === 'PREPARING') session.content = content;
   else if (content !== session.content) return reject();
+  if (session.phase === 'PREPARING') session.effectSource = copyMigrationData(expected);
+  else session.effectRows = copyMigrationData(rows.filter(row =>
+    row.relation === 'public.cleaning_template_versions' || row.relation === 'private.photo_template_slots')) as ReviewRow[];
 }
 
 /** Only the composition can obtain these functions with its private capture token.
@@ -76,6 +82,25 @@ export function captureResetPlanTemplate(token: object, proposal: Proposal | nul
   if (session.phase === 'PREPARING') session.blueprint = { ids: proposal.plan.replacements.map(row => row.newId),
     time: proposal.plan.registrationTime, digest: fingerprint };
   else if (fingerprint !== session.blueprint?.digest) return reject();
+  if (session.phase === 'CHECKING') session.effectProposal = structuredClone(proposal);
+}
+
+/** Internal S1 adapter seam. Only this module's successfully rechecked handle can
+ * transfer the original template plan once. Never expose this raw internal value
+ * via an HTTP/API/log. Ordinary consume/dispose/expiry also destroys the payload.
+ * Ownership is NOT live transport, backup, approval or execution authority. */
+export function takeResetTemplateHandover(handle: object, commitment: string) {
+  const session = sessions.get(handle);
+  if (!session) return reject();
+  try {
+    live(session);
+    if (session.phase !== 'CHECKED' || session.summary?.commitment !== commitment || !session.effectRows
+      || !session.effectProposal?.generated || !session.effectProposal.handover || !session.effectContentFingerprint) return reject();
+    return { source: copyMigrationData(session.effectSource), contentFingerprint: session.effectContentFingerprint,
+      reviewedPlanFingerprint: session.summary.reviewedPlanFingerprint, expiresAt: session.expiresAt,
+      rows: structuredClone(session.effectRows), proposal: structuredClone(session.effectProposal),
+      blockers: [...session.summary.blockers] };
+  } finally { close(session); }
 }
 
 /** Bounded server-owned two-observation session. It is not human authorization,
@@ -122,6 +147,8 @@ export function createResetPlanRevalidation(options: unknown) {
       if (abort.aborted || !session.contentSeen || !session.proposalSeen || !session.content || !session.blueprint) return reject();
       const blockers = [...new Set([...result.blockers, ...review.blockers])].sort();
       if (mode === 'PREPARING') {
+        const effectReview = z.object({ contentFingerprint: z.string().regex(/^[a-f0-9]{64}$/) }).safeParse('review' in result ? result.review : null);
+        if (effectReview.success) session.effectContentFingerprint = effectReview.data.contentFingerprint;
         session.summary = { commitment: digest(session, 'review', { inputHash, content: session.content,
           plan: session.blueprint.digest, blockers }), reviewedPlanFingerprint: review.planFingerprint, blockers };
         session.phase = 'PREPARED';
@@ -129,13 +156,13 @@ export function createResetPlanRevalidation(options: unknown) {
       }
       if (!session.summary || requestHash(blockers) !== requestHash(session.summary.blockers)) return reject();
       session.phase = 'CHECKED';
-      // Keep only the safe confirmation until one explicit consume or expiry.
+      // Retain the bounded internal template payload until one transfer, consume or expiry.
       session.secret.fill(0); delete session.blueprint;
       return { ...flags, status: 'MATCHED' as const, revalidated: true as const, summary: structuredClone(session.summary) };
     } catch { close(session); return failed(); }
     finally { if (token) captures.delete(token); }
   }
-  return Object.freeze({
+  const handle = Object.freeze({
     prepare: (input: unknown, request: unknown, open: OpenResetReadClient, signal?: AbortSignal) => observe('PREPARING', input, request, open, signal),
     recheck: (input: unknown, request: unknown, open: OpenResetReadClient, signal?: AbortSignal) => observe('CHECKING', input, request, open, signal),
     prepareNative: (input: unknown, request: unknown, signal?: AbortSignal) => observe('PREPARING', input, request, null, signal),
@@ -150,4 +177,6 @@ export function createResetPlanRevalidation(options: unknown) {
     },
     dispose: () => close(session),
   });
+  sessions.set(handle, session);
+  return handle;
 }
