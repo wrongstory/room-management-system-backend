@@ -22,7 +22,8 @@ function fixture() {
     sources: [], references: [], replacements: [{ sourceId: id(3), newId: id(4), createdBy: id(2), createdAt: registrationTime,
       reason: 'OPERATIONAL_HANDOVER_INITIALIZATION', content: { private: 'synthetic plan content' } }] };
   let count = 0;
-  const state = { mutatePlan: false, invalid: false, omitContent: false, omitPlan: false, blocker: 'POLICY_UNDECIDED', seenTokens: [] as object[] };
+  const state = { mutatePlan: false, invalid: false, omitContent: false, omitPlan: false, blocker: 'POLICY_UNDECIDED',
+    handover: { status: 'draft', version: 10, policy: 'explicit-approved-selection' }, seenTokens: [] as object[] };
   closed.mockImplementation(async (_input, _request, _open, _signal, token) => {
     if (!token) throw new Error('missing private token'); state.seenTokens.push(token);
     if (!state.omitContent) captureResetPlanContent(token, expected, _request, rows);
@@ -33,7 +34,7 @@ function fixture() {
       for (const row of current.replacements) { row.newId = deps.newId(); row.createdAt = current.registrationTime; }
     }
     if (state.mutatePlan) required(current.replacements[0]).newId = id(5);
-    if (!state.omitPlan) captureResetPlanTemplate(token, { generated: true, plan: current } as unknown as ReturnType<typeof buildTemplateReseedProposal>);
+    if (!state.omitPlan) captureResetPlanTemplate(token, { generated: true, plan: current, handover: state.handover } as unknown as ReturnType<typeof buildTemplateReseedProposal>);
     return { blockers: [state.blocker], review: state.invalid ? null : { reviewPrepared: true, contentVerified: true,
       planFingerprint: h(String(++count)), blockers: [state.blocker] } } as Awaited<ReturnType<typeof inspectResetReadOnlyReview>>;
   });
@@ -42,6 +43,12 @@ function fixture() {
 }
 
 describe('bounded reset plan revalidation lifecycle (inert closed-collector seam)', () => {
+  it.each(['status', 'version', 'policy'] as const)('rejects changed draft lifecycle %s even when original UUIDs/content are unchanged', async field => {
+    const f = fixture(); expect((await f.prepare()).status).toBe('PREPARED');
+    if (field === 'version') f.state.handover.version++;
+    else f.state.handover[field] = 'changed';
+    expect((await f.recheck()).status).toBe('REJECTED');
+  });
   it('keeps original allocations/plan identity across observations and consumes only once without execution authority', async () => {
     const f = fixture(); const first = await f.prepare();
     expect(first.status).toBe('PREPARED');

@@ -72,7 +72,7 @@ export function captureResetPlanTemplate(token: object, proposal: Proposal | nul
   const session = owned(token);
   if (!session.contentSeen || session.proposalSeen || !proposal?.generated) return reject();
   session.proposalSeen = true;
-  const fingerprint = digest(session, 'template-plan', proposal.plan);
+  const fingerprint = digest(session, 'template-plan', { plan: proposal.plan, handover: proposal.handover ?? null });
   if (session.phase === 'PREPARING') session.blueprint = { ids: proposal.plan.replacements.map(row => row.newId),
     time: proposal.plan.registrationTime, digest: fingerprint };
   else if (fingerprint !== session.blueprint?.digest) return reject();

@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { requestHash } from '../../lib/command.js';
 import { inspectTemplateReseedPlan, templateReseedPlanSchema } from './template-reseed-plan.js';
+import { RESET_HANDOVER_POLICY, planApprovedTemplateLifecycle } from './approved-handover-policy.js';
 
 const uuid = z.uuid().transform(s => s.toLowerCase());
 const hash = z.string().regex(/^[a-f0-9]{64}$/);
@@ -15,6 +16,7 @@ const reference = z.object({ referenceId: uuid, sourceId: uuid,
   kind: z.enum(['CURRENT_POINTER', 'HISTORICAL_SNAPSHOT']) }).strict();
 const schema = z.object({ expected: binding, developerId: uuid,
   selection: z.enum(['CURRENT_PUBLISHED', 'ALL_VERSIONS']),
+  handoverPolicy: z.literal(RESET_HANDOVER_POLICY.id).optional(),
   inventory: z.object({ binding, complete: z.literal(true), referencesComplete: z.literal(true),
     templateCount: z.number().int().min(0).max(10000), referenceCount: z.number().int().min(0).max(10000),
     templates: z.array(template).max(10000), references: z.array(reference).max(10000),
@@ -37,7 +39,8 @@ const fail = (code: string): never => { throw new PlanFailure(code); };
 
 /** Server-internal proposal generator. Explicit selection is mandatory. The
  * collector must independently supply the complete bound inventory and digest.
- * This function never publishes, selects a new status/version or rewires history.
+ * The approved handover mode plans new draft status/version; it never publishes
+ * or rewires history. The generic inspection mode retains explicit alternatives.
  * Output content/provenance is INTERNAL and must not be sent to a public API/log.
  */
 export function buildTemplateReseedProposal(input: unknown, dependencies: {
@@ -47,12 +50,16 @@ export function buildTemplateReseedProposal(input: unknown, dependencies: {
     const parsed = schema.safeParse(input);
     if (!parsed.success) return fail('TEMPLATE_BUILDER_INPUT_INVALID');
     const p = parsed.data; const { inventory } = p;
+    if (p.handoverPolicy && p.selection !== RESET_HANDOVER_POLICY.templateSelection) fail('TEMPLATE_BUILDER_POLICY_SELECTION_MISMATCH');
     if (requestHash(p.expected) !== requestHash(inventory.binding)) fail('TEMPLATE_BUILDER_BINDING_CHANGED');
     const originalIds = new Set(inventory.templates.map(t => t.id));
     const refIds = new Set(inventory.references.map(r => r.referenceId));
     if (originalIds.size !== inventory.templateCount || inventory.templates.length !== inventory.templateCount ||
         refIds.size !== inventory.referenceCount || inventory.references.length !== inventory.referenceCount) fail('TEMPLATE_BUILDER_CENSUS_MISMATCH');
     if (requestHash(canonical(inventory.templates, inventory.references)) !== p.expected.contentFingerprint) fail('TEMPLATE_BUILDER_CONTENT_CHANGED');
+    if (new Set(inventory.templates.map(t => `${t.content.roomTypeId}:${t.content.cleaningKind}:${t.version}`)).size !== inventory.templateCount) {
+      fail('TEMPLATE_BUILDER_VERSION_AMBIGUOUS');
+    }
     // Detached historical identity is reported separately by source129. It must
     // receive a protection plan instead of silently vanishing from this proposal.
     if (inventory.references.some(r => !originalIds.has(r.sourceId))) fail('TEMPLATE_BUILDER_DETACHED_REFERENCE');
@@ -62,6 +69,10 @@ export function buildTemplateReseedProposal(input: unknown, dependencies: {
     if (selected.length > 1000) fail('TEMPLATE_BUILDER_SELECTION_LIMIT');
     const selectedIds = new Set(selected.map(t => t.id));
     const refs = inventory.references.filter(r => selectedIds.has(r.sourceId));
+    if (p.handoverPolicy && selected.some(source => inventory.templates.some(t =>
+      t.content.roomTypeId === source.content.roomTypeId && t.content.cleaningKind === source.content.cleaningKind && t.version === 2147483647))) {
+      fail('TEMPLATE_BUILDER_VERSION_EXHAUSTED');
+    }
     const now = (dependencies.now ?? (() => new Date()))();
     if (!(now instanceof Date) || !Number.isFinite(now.getTime())) fail('TEMPLATE_BUILDER_CLOCK_INVALID');
     if (selected.some(t => Date.parse(t.createdAt) >= now.getTime())) fail('TEMPLATE_BUILDER_CLOCK_NOT_AFTER_SOURCE');
@@ -86,17 +97,18 @@ export function buildTemplateReseedProposal(input: unknown, dependencies: {
       referencesComplete: refs.length === 0, references: [] };
     const checked = inspectTemplateReseedPlan(plan);
     if (checked.blockers.some(code => code !== 'INCOMPLETE_REFERENCES')) fail('TEMPLATE_BUILDER_GENERATED_PLAN_INVALID');
+    const handover = p.handoverPolicy ? planApprovedTemplateLifecycle(inventory.templates, replacements) : null;
     return { generated: true as const, executionEnabled: false, selection: p.selection,
-      plan, originalProvenance: selected.map(({ id, createdBy, createdAt, status, version }) => ({ id, createdBy, createdAt, status, version })),
+      plan, handover, originalProvenance: selected.map(({ id, createdBy, createdAt, status, version }) => ({ id, createdBy, createdAt, status, version })),
       counts: { inventory: inventory.templateCount, selected: selected.length, excluded: inventory.templateCount - selected.length,
         currentReferences: refs.filter(r => r.kind === 'CURRENT_POINTER').length,
         historicalReferences: refs.filter(r => r.kind === 'HISTORICAL_SNAPSHOT').length },
-      planFingerprint: requestHash({ binding: p.expected, selection: p.selection, plan }),
-      blockers: [...checked.blockers, 'TEMPLATE_STATUS_AND_VERSION_POLICY_REQUIRED', 'TEMPLATE_HISTORY_PROTECTION_REQUIRED',
+      planFingerprint: requestHash({ binding: p.expected, selection: p.selection, plan, ...(handover ? { handover } : {}) }),
+      blockers: [...checked.blockers, ...(handover ? ['TEMPLATE_DRAFT_REGISTRATION_NOT_EXECUTED', 'TEMPLATE_PUBLICATION_NOT_EXECUTED'] : ['TEMPLATE_STATUS_AND_VERSION_POLICY_REQUIRED']), 'TEMPLATE_HISTORY_PROTECTION_REQUIRED',
         'TEMPLATE_PUBLICATION_COMPATIBILITY_NOT_VERIFIED'],
     };
   } catch (error) {
-    return { generated: false as const, executionEnabled: false, plan: null, originalProvenance: null, counts: null,
+    return { generated: false as const, executionEnabled: false, plan: null, handover: null, originalProvenance: null, counts: null,
       planFingerprint: null, blockers: [error instanceof PlanFailure ? error.message : 'TEMPLATE_BUILDER_UNAVAILABLE'] };
   }
 }
