@@ -6,6 +6,8 @@ import type { Actor } from '../src/domain/actor.js';
 import type { SupabaseClients } from '../src/lib/supabase.js';
 import { requestHash } from '../src/lib/command.js';
 import { SupabasePayrollService } from '../src/modules/payroll/payroll.service.js';
+import { readRemittanceBatch, remittanceBatchQuery } from '../src/modules/payroll/payroll-remittance-batch.js';
+import { openApiDocument } from '../supabase/functions/_shared/openapi.js';
 import { normalizeRemittanceCommand, normalizeRemittanceHistoryInput, PayrollRemittanceCursor,
   remittanceQuery, remittanceProjection, remittanceHistoryProjection, remittanceRequestFingerprint,
   remittanceRequestHash, remittanceErrorStatus, remittanceDatabaseError
@@ -56,6 +58,137 @@ async function app(data: unknown = marker, error: string | null = null, actor = 
   return { ...fixture, authenticate, app: await buildApp({ env, services, logger: false }) };
 }
 const headers = { authorization: 'Bearer synthetic', 'idempotency-key': 'marker-331-synthetic' };
+
+const batchQuery = (ids = [id(3)]) => new URLSearchParams({ weekStart: input.weekStart, maidProfileIds: ids.join(',') });
+describe('#414 bounded remittance batch', () => {
+  it.each([
+    '', 'weekStart=2026-09-21', 'maidProfileIds=', 'maidProfileIds=bad&weekStart=2026-09-21',
+    batchQuery([id(3), id(3).toUpperCase()]).toString(),
+    batchQuery(Array.from({length:11}, (_, i) => id(i + 3))).toString(),
+    batchQuery().toString() + '&extra=1', batchQuery().toString() + '&weekStart=2026-09-21',
+    batchQuery().toString() + '&maidProfileIds=' + id(4),
+    'maidProfileIds=' + id(3) + ',&weekStart=2026-09-21',
+    'maidProfileIds=' + id(3) + '&weekStart=2026-02-29',
+  ])('rejects invalid whole query before reads: %s', async (query) => {
+    const read = vi.fn();
+    await expect(readRemittanceBatch(admin, new URLSearchParams(query), read)).rejects.toThrow('VALIDATION_ERROR');
+    expect(read).not.toHaveBeenCalled();
+  });
+  it('accepts ten IDs and normalizes case', () => {
+    const ids = Array.from({length:10}, (_, i) => id(i+3));
+    expect(remittanceBatchQuery(batchQuery(ids.map((id) => id.toUpperCase()))))
+      .toEqual(ids.map((maidProfileId) => ({ ...input, maidProfileId })));
+  });
+  it('enforces password, role and all maid scopes before reads', async () => {
+    for (const [actor, ids, code] of [
+      [{...admin, mustChangePassword:true}, [id(3)], 'PASSWORD_CHANGE_REQUIRED'],
+      [{...admin, role:'developer'}, [id(3)], 'PAYROLL_ACCESS_REQUIRED'],
+      [maid, [id(3), id(4)], 'PAYROLL_ACCESS_REQUIRED'],
+    ] as const) {
+      const read = vi.fn();
+      await expect(readRemittanceBatch(actor, batchQuery([...ids]), read)).rejects.toThrow(code);
+      expect(read).not.toHaveBeenCalled();
+    }
+  });
+  it('keeps input order with only three reads in flight', async () => {
+    const ids = Array.from({length:10}, (_, i) => id(i+3));
+    const releases: Array<() => void> = [];
+    let active = 0, peak = 0;
+    const read = vi.fn(async (value) => {
+      active++; peak = Math.max(peak, active);
+      await new Promise<void>((resolve) => { releases.push(resolve); });
+      active--;
+      return {...marker, ...value};
+    });
+    const pending = readRemittanceBatch(admin, batchQuery(ids), read);
+    expect(read).toHaveBeenCalledTimes(3);
+    for (let i=0; i<10; i++) {
+      releases.pop()?.();
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(active).toBeLessThanOrEqual(3);
+    }
+    expect((await pending).markers.map((row) => row.maidProfileId)).toEqual(ids);
+    expect(peak).toBe(3); expect(active).toBe(0); expect(read).toHaveBeenCalledTimes(10);
+  });
+  it('drains in-flight reads and stops taking new items after first failure', async () => {
+    const releases: Array<(value: typeof marker) => void> = [];
+    const failure = new Error('SESSION_REVOKED');
+    const read = vi.fn((value) => value.maidProfileId === id(3)
+      ? Promise.reject(failure)
+      : new Promise<typeof marker>((resolve) => { releases.push(resolve); }));
+    let settled = false;
+    const pending = readRemittanceBatch(admin, batchQuery([id(3),id(4),id(5),id(6)]), read);
+    const checked = expect(pending).rejects.toBe(failure);
+    void pending.then(() => { settled=true; }, () => { settled=true; });
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(settled).toBe(false); expect(read).toHaveBeenCalledTimes(3);
+    for (const release of releases) release(marker);
+    await checked; expect(settled).toBe(true); expect(read).toHaveBeenCalledTimes(3);
+  });
+  it('Fastify batches existing RPCs with each actor/session and preserves reconfirmation', async () => {
+    const fixture = await app();
+    const drift = {...on, basis: {...basis, accrualAmount:33000}, needsReconfirmation:true, canReconfirm:true};
+    fixture.rpc.mockImplementation(async (...args: unknown[]) => ({
+      data:{...drift, maidProfileId:(args[1] as Record<string,string>).p_maid_profile_id}, error:null
+    }));
+    try {
+      const response = await fixture.app.inject({method:'GET',url:'/v1/payroll/remittance-markers?' + batchQuery([id(3),id(4)]),headers});
+      expect(response.statusCode).toBe(200); expect(response.headers['cache-control']).toBe('no-store');
+      expect(response.json()).toEqual({weekStart:input.weekStart, markers:[id(3),id(4)].map((maidProfileId) => ({...drift,maidProfileId}))});
+      expect(fixture.authenticate).toHaveBeenCalledTimes(1); expect(fixture.rpc).toHaveBeenCalledTimes(2);
+      for (const maidProfileId of [id(3),id(4)]) expect(fixture.rpc).toHaveBeenCalledWith('get_payroll_remittance_marker', {
+        p_actor_profile_id:admin.profileId,p_session_id:session,p_expected_actor_role:'admin',p_maid_profile_id:maidProfileId,p_week_start:input.weekStart
+      });
+    } finally { await fixture.app.close(); }
+  });
+  it('Fastify returns only error for RPC failure, bad projection and invalid query', async () => {
+    for (const [data, error, query, status, code] of [
+      [marker, 'SESSION_REVOKED', batchQuery(), 401, 'SESSION_REVOKED'],
+      [{...marker,maidProfileId:id(4)}, null, batchQuery(), 500, 'PAYROLL_COMMAND_FAILED'],
+      [{...marker,private:'x'.repeat(140000)}, null, batchQuery(), 500, 'PAYROLL_RESPONSE_TOO_LARGE'],
+      [marker, null, batchQuery([id(3),id(3)]), 400, 'VALIDATION_ERROR'],
+    ] as const) {
+      const fixture = await app(data, error);
+      try {
+        const response = await fixture.app.inject({method:'GET',url:'/v1/payroll/remittance-markers?' + query,headers});
+        expect(response.statusCode).toBe(status); expect(response.json().error.code).toBe(code);
+        expect(response.json()).not.toHaveProperty('markers'); expect(response.headers['cache-control']).toBe('no-store');
+        if (status === 400) expect(fixture.rpc).not.toHaveBeenCalled();
+      } finally { await fixture.app.close(); }
+    }
+  });
+  it('Fastify permits self maid and denies developer/other maid/password gate', async () => {
+    for (const actor of [maid, {...maid,profileId:id(4)}, {...admin,role:'developer' as const}, {...admin,mustChangePassword:true}]) {
+      const fixture = await app({...marker,canSet:false,setBlockedReason:'ADMIN_REQUIRED'}, null, actor);
+      try {
+        const response = await fixture.app.inject({method:'GET',url:'/v1/payroll/remittance-markers?' + batchQuery(),headers});
+        expect(response.statusCode).toBe(actor === maid ? 200 : 403);
+        if (actor !== maid) expect(fixture.rpc).not.toHaveBeenCalled();
+      } finally { await fixture.app.close(); }
+    }
+  });
+  it('Fastify rejects aliases and wrong methods before authentication', async () => {
+    const fixture = await app();
+    try {
+      for (const [method, path] of [['HEAD','remittance-markers'],['POST','remittance-markers'],['PUT','remittance-markers'],['DELETE','remittance-markers'],
+        ['GET','remittance-markers/'],['GET','remittance%2Dmarkers'],['GET','remittance-markers/history'],['GET','/remittance-markers']] as const) {
+        const response=await fixture.app.inject({method,url:'/v1/payroll/'+path});
+        expect(response.statusCode).toBe(404);
+      }
+      expect(fixture.authenticate).not.toHaveBeenCalled(); expect(fixture.rpc).not.toHaveBeenCalled();
+    } finally { await fixture.app.close(); }
+  });
+  it('documents CSV bounds and exact batch response in Swagger', () => {
+    const operation = openApiDocument.paths['/v1/payroll/remittance-markers'].get;
+    expect(operation.operationId).toBe('listPayrollRemittanceMarkers');
+    expect(operation.parameters[0]).toMatchObject({name:'maidProfileIds',style:'form',explode:false,schema:{type:'string',minLength:36,maxLength:369}});
+    const pattern = new RegExp((operation.parameters[0] as {schema:{pattern:string}}).schema.pattern);
+    expect(pattern.test(Array.from({length:10}, (_, i) => id(i+3)).join(','))).toBe(true);
+    expect(pattern.test(Array.from({length:11}, (_, i) => id(i+3)).join(','))).toBe(false);
+    expect(pattern.test(id(3) + ',')).toBe(false);
+    expect(openApiDocument.components.schemas.PayrollRemittanceBatch).toMatchObject({additionalProperties:false,required:['weekStart','markers']});
+  });
+});
 
 describe('#331 remittance strict display-only contract', () => {
   it('preserves independent marker and financial tuple without status-based inference', () => {

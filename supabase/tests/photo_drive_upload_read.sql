@@ -64,6 +64,20 @@ insert into flow values('operation',pg_temp.begin_upload('admission',1));
 select is(pg_temp.begin_upload('admission',1), (select result from flow where label='operation'),'same canonical upload retries operation');
 select is((select count(*) from private.photo_upload_admission_bindings),1::bigint,'admission binding is exactly once');
 select public.claim_admitted_photo_upload(pg_temp.pid(2),pg_temp.pid(902),pg_temp.val('operation','operationId')::uuid,repeat('c',64));
+-- #464 final-release coverage; SQL execution requires separate approval.
+savepoint retry_release;
+select throws_ok($$select public.release_pre_provider_photo_upload(pg_temp.pid(3),pg_temp.pid(903),pg_temp.val('operation','operationId')::uuid,1,repeat('c',64))$$,
+ '42501','PHOTO_ACCESS_REQUIRED','other maid cannot release upload');
+select throws_ok($$select public.release_pre_provider_photo_upload(pg_temp.pid(2),pg_temp.pid(902),pg_temp.val('operation','operationId')::uuid,1,repeat('d',64))$$,
+ '40001','PHOTO_UPLOAD_FENCE_CONFLICT','wrong claim cannot release upload');
+select is(public.release_pre_provider_photo_upload(pg_temp.pid(2),pg_temp.pid(902),pg_temp.val('operation','operationId')::uuid,1,repeat('c',64)),true,
+ 'pre-file failure releases exact live claim');
+select is(private.photo_quota_context(clock_timestamp())->>'pendingBytes','307200','release keeps quota reservation');
+select is((select count(*) from private.photo_upload_events where operation_id=pg_temp.val('operation','operationId')::uuid),3::bigint,'release appends state event');
+select is(public.claim_admitted_photo_upload(pg_temp.pid(2),pg_temp.pid(902),pg_temp.val('operation','operationId')::uuid,repeat('d',64))->>'leaseVersion','2','same operation can immediately reclaim');
+select throws_ok($$select public.release_pre_provider_photo_upload(pg_temp.pid(2),pg_temp.pid(902),pg_temp.val('operation','operationId')::uuid,1,repeat('c',64))$$,
+ '40001','PHOTO_UPLOAD_FENCE_CONFLICT','late old caller cannot release successor lease');
+rollback to retry_release;
 insert into flow values('context',public.get_photo_provider_context(pg_temp.pid(2),pg_temp.pid(902),pg_temp.val('operation','operationId')::uuid,1,repeat('c',64)));
 select ok((select result->'providerFileId'='null'::jsonb from flow where label='context'),'provider context starts without fabricated file identity');
 select ok((select result->>'roomNumber'=(select notified_room_number_snapshot from public.cleaning_assignments where id=pg_temp.pid(401)) from flow where label='context'),'folder room comes from notified snapshot');
@@ -85,6 +99,8 @@ select throws_ok($$select public.reserve_photo_provider_identity(pg_temp.pid(2),
   '23514','PHOTO_FOLDER_PARENT_REQUIRED','file identity cannot bypass the room folder winner');
 select public.reserve_photo_provider_identity(pg_temp.pid(2),pg_temp.pid(902),pg_temp.val('operation','operationId')::uuid,1,repeat('c',64),'synthetic_drive_file_84','synthetic_drive_folder_84');
 select is((select count(*) from private.photo_drive_identities),1::bigint,'pre-generated file identity persisted before external create');
+select is(public.release_pre_provider_photo_upload(pg_temp.pid(2),pg_temp.pid(902),pg_temp.val('operation','operationId')::uuid,1,repeat('c',64)),false,
+ 'reserved external identity cannot be released as pre-file failure');
 select is((select count(*) from private.photo_provider_objects where uploaded_at is not null),0::bigint,'identity reservation is not provider success');
 select lives_ok($$select public.reserve_photo_provider_identity(pg_temp.pid(2),pg_temp.pid(902),pg_temp.val('operation','operationId')::uuid,1,repeat('c',64),'synthetic_drive_file_84','synthetic_drive_folder_84')$$,'same pre-generated ID replay');
 select throws_ok($$select public.reserve_photo_provider_identity(pg_temp.pid(2),pg_temp.pid(902),pg_temp.val('operation','operationId')::uuid,1,repeat('c',64),'synthetic_drive_rotated_84','synthetic_drive_folder_84')$$,'23505','PHOTO_PROVIDER_IDENTITY_CONFLICT','timeout cannot rotate file ID');
@@ -95,8 +111,24 @@ select public.refresh_photo_storage_quota(clock_timestamp(),1000);
 select public.record_admitted_photo_provider_success(pg_temp.val('operation','operationId')::uuid,1,repeat('c',64),'synthetic_drive_file_84',
  (select reserved_at from private.photo_drive_identities where operation_id=pg_temp.val('operation','operationId')::uuid));
 select is(private.photo_quota_context(clock_timestamp())->>'pendingBytes','307200','late DB success stays reserved even when Google createdTime predates snapshot');
-update flow set result=public.finalize_admitted_photo_upload(pg_temp.pid(2),pg_temp.pid(902),pg_temp.val('operation','operationId')::uuid,1,repeat('c',64)) where label='operation';
+-- Transaction-local fault injection; restore exact function immediately and roll back this file.
+create temp table saved_snapshot_definition as
+select pg_get_functiondef('public.get_attempt_photo_slots(uuid,uuid,uuid)'::regprocedure) as definition;
+create or replace function public.get_attempt_photo_slots(p_actor_profile_id uuid,p_session_id uuid,p_attempt_id uuid)
+returns jsonb language plpgsql volatile security definer set search_path='' as $$
+begin raise exception using errcode='42501',message='PHOTO_ACCESS_REQUIRED'; end; $$;
+insert into flow(label,result) values('snapshot_failure',public.finalize_photo_upload_with_slots(pg_temp.pid(2),pg_temp.pid(902),pg_temp.val('operation','operationId')::uuid,1,repeat('c',64)));
+select is(pg_temp.val('snapshot_failure','upload')::jsonb->>'status','accepted','optional read failure preserves newly accepted upload');
+select ok((select result->'photoSlots'='null'::jsonb from flow where label='snapshot_failure'),'snapshot fault returns explicit JSON null');
+select is((select count(*) from private.photo_upload_acceptances where operation_id=pg_temp.val('operation','operationId')::uuid),1::bigint,'snapshot fault preserves exactly one acceptance');
+do $$ begin execute (select definition from saved_snapshot_definition); end; $$;
+insert into flow(label,result) values('combined_finalize',public.finalize_photo_upload_with_slots(pg_temp.pid(2),pg_temp.pid(902),pg_temp.val('operation','operationId')::uuid,1,repeat('c',64)));
+select is(pg_temp.val('combined_finalize','upload')::jsonb->>'status','accepted','combined finalize preserves accepted receipt');
+select is(jsonb_array_length(pg_temp.val('combined_finalize','photoSlots')::jsonb->'slots'),10,'combined snapshot uses the existing authorized slot projection');
+update flow set result=(select result->'upload' from flow where label='combined_finalize') where label='operation';
 select is(pg_temp.val('operation','status'),'accepted','same actual-upload KST date is accepted normally');
+select is(public.release_pre_provider_photo_upload(pg_temp.pid(2),pg_temp.pid(902),pg_temp.val('operation','operationId')::uuid,1,repeat('c',64)),false,
+ 'accepted upload cannot be released');
 select is(private.photo_quota_context(clock_timestamp())->>'pendingBytes','307200','acceptance does not prematurely release quota before new about response');
 select public.refresh_photo_storage_quota(clock_timestamp(),1100);
 select is(private.photo_quota_context(clock_timestamp())->>'pendingBytes','0','refresh started after provider success absorbs exactly prior bytes');
@@ -327,6 +359,8 @@ create temp table before_midnight_finalize as select (select count(*) from priva
   (select count(*) from private.attempt_photo_current) pointers,(select count(*) from public.audit_events) audits;
 select throws_ok($$select public.finalize_admitted_photo_upload(pg_temp.pid(2),pg_temp.pid(902),pg_temp.pid(7301),1,repeat('c',64))$$,
   '55000','PHOTO_PROVIDER_DATE_MISMATCH','23:59 folder reservation cannot accept next-day 00:00 create');
+select throws_ok($$select public.finalize_photo_upload_with_slots(pg_temp.pid(2),pg_temp.pid(902),pg_temp.pid(7301),1,repeat('c',64))$$,
+  '55000','PHOTO_PROVIDER_DATE_MISMATCH','combined wrapper never swallows finalize rejection');
 select ok(not exists(select 1 from private.photo_upload_acceptances where operation_id=pg_temp.pid(7301)),'cross-day candidate has no acceptance');
 select ok((select photos=(select count(*) from private.attempt_photo_versions) and pointers=(select count(*) from private.attempt_photo_current)
   and audits=(select count(*) from public.audit_events) from before_midnight_finalize),'cross-day rejection creates no photo, pointer or audit');
@@ -393,6 +427,7 @@ insert into new_functions values
 ('public.reconcile_admitted_photo_upload(uuid,text)'),('public.settle_admitted_photo_compensation(uuid,integer,text,text)'),
 ('public.get_photo_reconciliation_context(uuid,integer,text)'),('public.authorize_photo_read(uuid,uuid,uuid)');
 insert into new_functions values('public.get_attempt_photo_slots(uuid,uuid,uuid)');
+insert into new_functions values('public.finalize_photo_upload_with_slots(uuid,uuid,uuid,integer,text)');
 insert into new_functions values('public.reserve_photo_drive_folder(uuid,uuid,uuid,integer,text,text,text,text)');
 insert into new_functions values
 ('public.claim_due_photo_purges(text,integer)'),('public.get_photo_purge_context(uuid,integer,text)'),

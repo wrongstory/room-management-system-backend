@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
+import { validatePostApprovalUpgradeSource } from './test-post-approval-room-issue-upgrade.mjs';
 import { manualCancelFixture, manualCancelId as id } from './test-manual-cleaning-cancel-concurrency.mjs';
+import { assertUpgradeNotificationCatalog, upgradeHistorySnapshotSql } from './lib/upgrade-notification-catalog-compatibility.mjs';
 
 // Disposable local94→current only. Capture every baseline public/private table
 // and column, so nullable additions cannot hide any original history mutation.
@@ -10,7 +12,8 @@ const psqlArgs = ['exec', '-i', 'supabase_db_room-management-system-backend', 'p
   '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', 'postgres'];
 const baseline = '20261002074234';
 const added = '20261002101126';
-const expectedCount = JSON.parse(readFileSync('supabase/migration-manifest.dev.json', 'utf8')).totalCount;
+const manifest = JSON.parse(readFileSync('supabase/migration-manifest.dev.json', 'utf8'));
+const expectedCount = manifest.totalCount;
 assert(Number.isSafeInteger(expectedCount) && expectedCount >= 95);
 const serviceDate = '2041-06-07';
 const commandAt = '2041-06-07 09:00+09';
@@ -53,20 +56,34 @@ function historyShape() {
     where n.nspname in('public','private') and c.relkind='r'
     group by n.nspname,c.relname) tables;`));
 }
+function snapshot(shape, excludeApprovedAddition = false) {
+  return JSON.parse(sql(upgradeHistorySnapshotSql(shape, expectedCount, excludeApprovedAddition)));
+}
 function digest(shape) {
-  const literal = (text) => `'${text.replaceAll("'", "''")}'`;
-  const rows = shape.map(({ table, columns }) => {
-    assert(/^(public|private)\.[a-z_][a-z_0-9]*$/.test(table), 'Source-controlled baseline table identifier');
-    assert(columns.every((column) => /^[a-z_][a-z_0-9]*$/.test(column)), 'Baseline column identifiers');
-    return `select ${literal(table)} tag,(select jsonb_object_agg(key,value) from jsonb_each(to_jsonb(t))
-      where key=any(array[${columns.map(literal).join(',')}]::text[]))::text data from ${table} t`;
-  });
-  return sql(`select md5(coalesce(string_agg(tag||':'||data,'|' order by tag,data),''))
-    from (${rows.join(' union all ')}) history;`);
+  return snapshot(shape).digest;
+}
+function preservedDigest(shape, baselineCatalog) {
+  const current = snapshot(shape, true);
+  // Validate the complete unfiltered catalog from the SAME statement before
+  // accepting the digest that excludes only the exact approved111 addition.
+  assertUpgradeNotificationCatalog(baselineCatalog, current.catalog, expectedCount);
+  return current.digest;
 }
 const scheduleRead = (assignments, includeCurrent) => `select public.get_assignment_schedule_read(
   '${id(2)}','${id(202)}',array[${assignments.map((value) => `'${value}'::uuid`).join(',')}],${includeCurrent},'maid');`;
 try {
+  // Fail before any DB access/reset on unreviewed, renamed or rehashed SQL.
+  // Reuse the existing exact source pins rather than trusting a count alone.
+  phase = 'reviewed-source';
+  if (expectedCount >= 111) {
+    validatePostApprovalUpgradeSource(manifest, readdirSync('supabase/migrations', { withFileTypes: true })
+      .filter(entry => entry.name.endsWith('.sql'))
+      .map(entry => ({ file: entry.name, isFile: entry.isFile(), isSymbolicLink: entry.isSymbolicLink(),
+        raw: readFileSync(`supabase/migrations/${entry.name}`) })));
+  }
+  // Check the helper's supported range before the expensive baseline rebuild.
+  upgradeHistorySnapshotSql([{ table: 'public.profiles', columns: ['id'] }], expectedCount);
+  phase = 'local-identity';
   const status = JSON.parse(execFileSync(process.execPath, [cli, 'status', '--output', 'json'],
     { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }));
   assert(['localhost', '127.0.0.1'].includes(new URL(status.API_URL).hostname), 'Only disposable local database is allowed');
@@ -100,7 +117,8 @@ try {
   const shape = historyShape();
   assert(!shape.find(({ table }) => table === 'public.cleaning_assignments').columns.includes('notified_reservation_schedule_snapshot'));
   assert(!shape.find(({ table }) => table === 'public.cleaning_target_schedule_revisions').columns.includes('reservation_schedule_snapshot'));
-  const preserved = digest(shape);
+  const baselineSnapshot = snapshot(shape);
+  const preserved = baselineSnapshot.digest;
   const priorImpact = JSON.parse(sql(impactSql));
   const priorIncident = JSON.parse(sql(`select to_json(pg_get_functiondef('${incidentSignature}'::regprocedure));`)).replaceAll('\r\n', '\n');
   assert.equal(priorIncident.split(sourceUpdate).length - 1, 1);
@@ -109,7 +127,8 @@ try {
   execFileSync(process.execPath, [cli, 'migration', 'up', '--local'], { stdio: 'inherit' });
   assert.equal(sql('select count(*) from supabase_migrations.schema_migrations;'), String(expectedCount));
   assert.equal(sql(`select exists(select 1 from supabase_migrations.schema_migrations where version='${added}');`), 't');
-  assert.equal(digest(shape), preserved, 'Every original column of every baseline public/private row remains exact');
+  assert.equal(preservedDigest(shape, baselineSnapshot.catalog), preserved,
+    'Every original column of every baseline public/private row remains exact except the separately verified exact111 catalog addition');
   assert.equal(sql(`select not exists(select 1 from public.cleaning_target_schedule_revisions where reservation_schedule_snapshot is not null)
     and not exists(select 1 from public.cleaning_assignments where notified_reservation_schedule_snapshot is not null);`), 't',
   'Every legacy schedule and assignment remains NULL without hydration');
@@ -129,7 +148,8 @@ try {
   sql(`begin read only; ${scheduleRead([oldAssignment], true)} rollback;`);
   assert.deepEqual(JSON.parse(sql(commitSql(1, oldImpact.impactFingerprint, 'schedule-upgrade-old-receipt'))), oldReceipt,
     'Legacy successful receipt replays without adding nested snapshots');
-  assert.equal(digest(shape), preserved, 'Legacy reads and replay have zero history/notification/audit/PIN/receipt effects');
+  assert.equal(preservedDigest(shape, baselineSnapshot.catalog), preserved,
+    'Legacy reads and replay have zero history/notification/audit/PIN/receipt effects; exact catalog metadata remains verified');
   phase = 'legacy-first-notification';
   const legacyNotice = JSON.parse(sql(commitSql(2, afterImpact.impactFingerprint, 'schedule-upgrade-legacy-receipt')));
   const legacyCard = JSON.parse(sql(scheduleRead([legacyNotice.notifiedAssignments[0].assignmentId], true)))[0];

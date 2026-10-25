@@ -1,6 +1,14 @@
-import { describe, expect, it, vi } from 'vitest';
+import { createHash, randomUUID } from 'node:crypto';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { SupabaseClients } from '../src/lib/supabase.js';
 import { SupabaseAuthService } from '../src/modules/auth/auth.service.js';
+
+vi.mock('node:crypto', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:crypto')>();
+  return { ...actual, randomUUID: vi.fn(actual.randomUUID) };
+});
+
+afterEach(() => vi.mocked(randomUUID).mockReset());
 
 const profileId = '10000000-0000-4000-8000-000000000001';
 const authUserId = '20000000-0000-4000-8000-000000000001';
@@ -8,6 +16,26 @@ const sessionId = '30000000-0000-4000-8000-000000000001';
 const accessToken = `x.${Buffer.from(JSON.stringify({ session_id: sessionId })).toString('base64url')}.y`;
 const verificationPepper = 'password-verification-test-pepper-at-least-32-characters';
 const effectMarker = 'e'.repeat(64);
+const proposedMarkerNonce = '42200000-0000-4000-8000-000000000001';
+// Its real SHA-256 claim contains "1234": reproduce the former CI false positive.
+const claimNonce = '42200000-0000-4000-8000-0000000000e7';
+const expectedPrepare = {
+  p_actor_profile_id: profileId,
+  p_auth_user_id: authUserId,
+  p_session_id: sessionId,
+  p_idempotency_key: 'password-change-0001',
+  p_request_hash: createHash('sha256')
+    .update(JSON.stringify({ actorProfileId: profileId, command: 'account.password.change' }))
+    .digest('hex'),
+  p_claim_digest: createHash('sha256').update(`password-change-claim:v1\0${claimNonce}`).digest('hex'),
+  p_effect_marker: createHash('sha256').update(`password-change-effect:v1\0${proposedMarkerNonce}`).digest('hex')
+};
+
+function expectSafePrepare(parameters: unknown) {
+  // Exact keys and password-independent values reject plaintext, transformed
+  // passwords, extra fields, and even a valid-looking password-derived digest.
+  expect(parameters).toStrictEqual(expectedPrepare);
+}
 const actor = {
   authUserId,
   profileId,
@@ -83,6 +111,7 @@ function clientsFor(options: {
 
 describe('password change replay receipt', () => {
   it('changes Auth once and completes the scoped receipt', async () => {
+    vi.mocked(randomUUID).mockReturnValueOnce(proposedMarkerNonce).mockReturnValueOnce(claimNonce);
     const mocked = clientsFor({
       verifiedPasswords: ['tmp:1234'],
       rpcStates: [
@@ -108,9 +137,24 @@ describe('password change replay receipt', () => {
     expect(prepare.p_request_hash).toMatch(/^[0-9a-f]{64}$/);
     expect(prepare.p_claim_digest).toMatch(/^[0-9a-f]{64}$/);
     expect(prepare.p_effect_marker).toMatch(/^[0-9a-f]{64}$/);
-    expect(JSON.stringify(prepare)).not.toContain('1234');
-    expect(JSON.stringify(prepare)).not.toContain('654321');
+    expect(prepare.p_claim_digest).toContain('1234');
+    expectSafePrepare(prepare);
+    expect(randomUUID).toHaveBeenCalledTimes(2);
   });
+
+  it.each(['1234', 'tmp:1234', '654321'])('rejects an extra receipt field leaking %s', (password) => {
+    expect(() => expectSafePrepare({ ...expectedPrepare, p_password: password })).toThrow();
+  });
+
+  it.each(['p_request_hash', 'p_claim_digest', 'p_effect_marker'] as const)(
+    'rejects plaintext and password-derived values in %s', (field) => {
+      for (const password of ['1234', 'tmp:1234', '654321']) {
+        for (const value of [password, createHash('sha256').update(password).digest('hex')]) {
+          expect(() => expectSafePrepare({ ...expectedPrepare, [field]: value })).toThrow();
+        }
+      }
+    }
+  );
 
   it('returns success after response loss by verifying the supplied new password', async () => {
     const mocked = clientsFor({ verifiedPasswords: ['654321'], rpcStates: [{ data: { state: 'completed' }, error: null }] });

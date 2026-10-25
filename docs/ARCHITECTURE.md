@@ -1,5 +1,119 @@
 # 백엔드 서버 설계
 
+## #414 주급 projection 재사용 후보
+
+117번째 후보는 private before_workflow의 단일행 CTE만 MATERIALIZED로
+명시한다. schema/API·권한·시계·금액 계약과 요청/페이지별 재검증은 보존한다.
+전역 cache가 아니며 [실행계획·금액 동등성 gate](./PAYROLL_PROJECTION_REUSE_414.md)는
+최종 릴리스의 사전 승인 DB 검증에 남는다. 실제 DB·운영 반영은 NOT RUN이다.
+
+## #416 조회 계획·인덱스 근거 수집
+
+최신-event의 effective/recorded/id 순서와 기존 recorded 중심 인덱스를 로컬 임시 합성
+테이블에서 비교하는 도구를 추가한다. 앱 SQL·DB·RLS·운영 인덱스는 변경하지 않는다.
+주급 coalesce 및 반복 summary, 객실 issue count는 아직 실측할 후속 후보다.
+[과거 측정 결과와 최신 기준의 미검증 범위](./QUERY_PLAN_EVIDENCE_416.md).
+
+후속 dev114 소스 후보는 객실별 두 issue count helper 호출을 동일 시간 조건의
+단일 lateral aggregate로 대체한다. 빈 객실도 0 집계행을 유지하며 현재 status만으로
+과거 특이사항을 누락하지 않는다. 기존 함수 OID/권한/서명/시계/나머지 본문은 보존한다.
+[후보·승인 대기 DB 검증](./ROOM_BOARD_ISSUE_COUNTS_416.md). 운영 미적용이며 속도 실측은 없다.
+
+주급·송금 표시 후속 dev116 후보는 basis helper 내부 CTE만 materialize한다.
+8개 금액·표시 재확인·권한/명령 잠금은 동일하고 요청 간 캐시를 만들지 않는다.
+[후보·미실행 DB/성능 검증](./PAYROLL_BASIS_PERFORMANCE_416.md). 운영 미반영이다.
+
+## #415 배정 카드 조회 의존 분기 최적화 후보
+
+Node/Edge의 bounded 관계 조회에서 attempt→submission만 하나의 병렬 분기로 묶는다.
+모든 hydration 후 최종 schedule RPC에서 latest actor/session/ownership을 검증하는
+순서는 불변이다. 새 SQL/RPC/schema/DTO·캐시를 추가하지 않는다.
+[검증·운영 미반영 경계](./ASSIGNMENT_READ_PERFORMANCE.md).
+
+## #336 역사 접근과 신규 신고의 상태 분리 (source 등록·운영 미배포)
+
+2026-10-22 #474 후보는 사진 없는 새 초안에서 업로드 없이 메모 전용 확정을 허용한다.
+evidence=[]/expectedEvidenceRevision=0과 현재 collection을 검증하며 사진이 이미 있는
+초안의 증빙 누락은 허용하지 않는다. 메모 필수·접근 권한·멱등 receipt는 유지한다.
+DB/API 적용 전 상태와 요청 계약은 [메모 전용 신고](MEMO_ONLY_SUPPLEMENTAL_REPORT.md)를 따른다.
+
+2026-10-07 최신 상태: dev `ac8c775` 기반111 migration 후보에 신규11 operation을 기본
+Fastify/Edge 및 source Swagger150 paths/162 operations로 연결했다. 영속 인계 키의
+lazy 구성과 로컬 전체 SQL·Edge·동시성 검증 및 최종 독립 QA를 완료했다. PR/CI·dev 병합 및
+운영 반영은 아직 미완료다. 아래 원본 후보의 미등록 설명은 과거 검증 이력이며 현재
+[31차 checkpoint](./POST_APPROVAL_ROOM_ISSUE_REPORT.md)를 우선한다.
+
+private source authority는 기존 submission/attempt/assignment snapshot provenance를 읽는다.
+historical-access 검사는 기존 사건의 source/draft recovery/list/report/content/admin close에
+사용하며 반려·대체만으로 차단하지 않는다. 신규 draft/finalize/upload는 별도의 생성 상태
+검사를 유지한다. content의 보존 만료·delete barrier와 close의 admin-only CAS/receipt는 유지한다.
+메이드 source 접근은 본인의 실제 notified assignment 이력을 DB에서 확인하며 현재 담당·
+담당 종료·경과 일수만으로 막지 않는다. 과거 이력은 현재 PIN/수행/지급 권한을 부여하지 않는다.
+
+관리자 공동 draft 조회/save/finalize는 `(source_submission_id, client_report_id)` 유일 identity를
+사용한다. draft creator는 불변이며 memo revision은 실제 actor, 최종 report는 draft creator와
+실제 reporter를 별도 FK로 보존한다. actor별 receipt·CAS·seal·live session은 유지한다.
+관리자는 다른 작성자의 draft에도 본인 admission/permit으로 새 사진을 추가할 수 있다.
+업로드 실제 actor와 draft creator는 분리하며, admit/begin은 최초 admission actor를 검사한다.
+`get`은 활성 관리자가 다른 관리자의 operation 상태·leaseVersion CAS를 안전하게 읽는 예외다.
+조회는 executor·lease·fence·upload state를 변경하지 않고 역사 접근 검사를 사용하므로 원 제출의
+반려·대체 후에도 가능하다. 메이드는 본인 draft/current executor 제한을 유지한다.
+실제 claim/write/accept 및 compensation/delete는 현재 executor와 draft 접근 권한·신규 source
+상태·fresh session·fence를 계속 검사한다. 읽기 공유는 실행 인계나 provider I/O 허가가 아니다.
+역할 변경 뒤 permit/receipt 재사용도 재검증한다.
+명시적 관리자 인계 DB 후보는 최초 admission actor와 현재 executor를 구별한다.
+불변 handover 원장·lease CAS·새 fence는 한 transaction이며 이전 executor의 mutation과
+compensation은 차단한다. 원 admission과 현 실행자의 in-flight를 함께 제한하되 storage
+reservation을 복제하지 않는다. source에 등록된 인계 service adapter는 인증 actor의 독립 command를
+RPC에 연결하고 서버 전용 고정 키 HMAC으로 재시도 fence를 보존한다. 키는 완료 receipt를
+포함한 재생 수명 동안 유지해야 한다. 서버 내부 inspect 복구는 기존 provider identity만
+확인하며 current executor의 same-fence claim으로 만료 lease를 상한8 안에서 재획득한다.
+receipt는 원 인계 기록을 보존하며 같은 fence의 최신 lease projection을 재생할 수 있다.
+과거 원본 #336 후보의 report7·증빙/인계4 Edge 동작은 명시 factory와 기존 API 선택 hook으로
+조합 검증됐고, 영속32-byte 인계 키를 명시 인자로만 받는다. 원본·생성본 각각59건 및
+후보 번들18,147,616 bytes가 PASS다. 검토 manifest/입력 SHA·라이선스를 보존하고
+checksum-pinned 사진 자산을 후보 검사 전에 준비한다. default 운영 route는 활성화하지
+않았다. 이 결과는 최신 dev 통합본의 PASS가 아니며 정식 runtime 키 구성·API/Swagger 등록·
+최신 dev 및 실제 DB 전체 통합은 후속이다. [실제 검증·미완료 범위](./POST_APPROVAL_ROOM_ISSUE_REPORT.md).
+
+> 2026-10-06 현재: #318/PR321과 #330/PR337은 required CI·독립 QA 후 dev에 병합됐다. #332는 `dev@109d6b7` 통합110개/OpenAPI140 paths·151 operations 후보이며 제출 전 실제 등록 신고의 관리자 조회만 추가한다. 아래 이전 수치와 후보 설명은 각 과거 checkpoint다. 현재 검증·남은 gate는 [#332 기록](./ADMIN_REPORT_READ.md)을 따른다. 운영 배포 완료는 아니다.
+
+## #332 등록 신고 조회 후보
+
+86번째 append-only `admin_registered_report_read`는 기존 private 신고 원장을 room 단위로
+UNION한 admin-only bounded projection이다. session/active/password/role을 DB에서 먼저 검증하며
+service-role EXECUTE 외 direct table 접근 권한을 추가하지 않는다. 5/10건 keyset과 서명 cursor,
+128 KiB 응답 상한, nested allowlist, no-store를 Fastify/Edge에 동일하게 적용한다.
+현재 사진 collection이 아니라 불변 report evidence만 읽고 provider locator는 읽기 가능 판정에만
+사용하며 공개 응답에서 제외한다. 기존 photo content 재검증·retention·검수 명령은 변경하지 않는다.
+[API와 rollout 경계](./ADMIN_REPORT_READ.md).
+
+> 2026-10-05 최신 통합 경계: #382/#323은 독립 QA와 exact CI 후 `dev@fdd8d7d`에 보호 통합됐다. 이를 정상 재통합한 #329 후보는 기존 A안·snapshot6/fresh18/core2를 유지하고, 실제 fresh104·template6순열·전체9경합·최종fresh104 및 Node1,767/Edge486/Python95를 PASS했다. 최종 문서 QA·commit/push·새 exact-head CI·dev 병합은 후속이다. SQL/manifest와 원본 installer는 불변이며 운영·프런트·v0.8.0은 변경하지 않았다. 현재 상태와 증거는 [API 상태 정본](./API_STATUS_MATRIX.md) 및 [제한 세션 검증 기록](./LIMITED_SESSION_REENTRY.md)을 따른다.
+
+> 과거 bb4 checkpoint 설명: 아래 이전 #329 후보의 103개/head/previous 및 미완료 표기는 당시 source 준비 설명이며 현재104 검증이나 최신 manifest로 재사용하지 않는다. 기존 A안·21 baseline caller의 strict source 분류와 최종 snapshot6/fresh18/core2 matrix를 그대로 유지했다. `dev@bb4fa40`의 #373/#384를 정상 merge한 source이며 당시 #383/#382 후속 dev 재통합·fresh/전체 DB·독립 QA·새 exact-head CI는 미완료였다. 원본 #329 migration/LF SHA는 불변이다. 이전 설명의 head `photo_collection_provider_context_axis`·previous `db_static_warning_remediation`·103개 준비 문구는 이력으로 보존하며, 과거 strict17/101 checkpoint를 현재 검증으로 재사용하지 않는다. 원본 strict FAIL9·exact9 비교 gate를 분리한다.
+
+## #329 기존 세션 제한 업무 재진입 — 구현 중
+
+후속101번째 append는 최초 active→limited 전환 transaction의 실제 visible live session을
+domain-separated digest의 private immutable evidence로 동결한다. grant와 최초 restriction root를
+연결하고 finish→upload에서도 root membership을 상속한다. 현재 세션을 이용한 과거 backfill이나
+새 로그인/credential/일반 active guard 완화는 없다. 정상 완료의 최초24h upload grant는 유지하며
+기존 grant는 재진입·재시도로 갱신하지 않는다.
+
+기존 제한 단건·완료와 사진 actor/accepted 수렴·제출 경로를 같은 eligibility에 맞춘다.
+제출은 명시적인 서버 검증 session 인자를 사용하는 별도 core/wrapper로 처리하며 unbound
+limited 우회를 닫는다. 기존 receipt/global/profile/session/업무 잠금 순서와 post-lock clock을 검증한다.
+외부 Drive 호출은 transaction 밖이고 accepted 이력은 authorization 실패로 삭제하지 않는다.
+기존 public STABLE 조회6개의 요청 snapshot·HTTP/RPC 호환성은 유지한다. 동일 권한 규칙의
+private STABLE at-clock core와 explicit SELECT VOLATILE fresh wrapper를 분리하고,
+기존 VOLATILE caller15개·신규3개의 호출 목록/횟수/속성을 fail-closed 검사한다.
+private snapshot/core/fresh helper는 runtime EXECUTE를 허용하지 않는다. 조회 결과는 이후
+mutation을 승인하지 않으며 이 보완을 전체 기존 RPC의 post-lock gap 해결로 확대하지 않는다.
+최소 discovery의9개 item 필드와 server bound만 반환하며 PIN·객실/고객 PII·raw grant/session/digest는 숨긴다.
+로컬 기능·경합 검증과 독립 소스 QA는 완료했고 기존 strict17 FAIL을 명시한 진단용 Draft 공유 후보이다.
+CI·dev 통합·운영·프런트 UAT는 미완료다. [계약·검증 gate](./LIMITED_SESSION_REENTRY.md)를 따른다.
+v0.8.0 고정 후보·운영/recovery·Auth 설정·프런트는 변경하지 않는다.
+
 ## #363/#373 DB warning 보완 후보
 
 기존 함수7개의 body-only append와 private owner-only STABLE developer snapshot guard를 추가한다.
@@ -142,6 +256,16 @@ command replay는 기존 audit idempotency로 한 건만 남고 두 원장의 ID
 
 현재 객실 현황은 이 snapshot 시각에 실제로 활성화된 점유·청소 의무·운영 차단만 계산한다. 미래 예약의 준비 의무는 일정과 작업 계획에는 남지만 현재 `cleaningRequired`나 `allocationBlocked`를 활성화하지 않는다. `reservationPhase`, `occupied`, `cleaningRequired`, `allocationBlocked`, `allocationReady`, `reasonCodes`, `pinSyncStatus`는 계속 독립 축이며 새 영구 `status` 컬럼이나 단일 API status를 만들지 않는다. 프런트의 5단계 대표 문구는 이 축을 읽는 표시 mapper일 뿐 정본 상태가 아니다.
 
+### #318 날짜별 객실 현황과 상세 조건 projection
+
+2026-10-05 최신 통합 후보는 [날짜 projection 계약](./ROOM_BOARD_DATE_FILTERS.md)의 미적용 baseline 전략을 따른다. 원격 미적용인 #318 본문 SHA를 보존해 #329 strict caller/snapshot migration 뒤로 재정렬하고 LIVE의 PIN/current-cleaning helper와 실제active 점유 선택을 후속 append로 호환 유지한다. STABLE 요청 시각은 `statement_timestamp()`다. 과거·미래 날짜 경계·조건 계산식·권한·history는 변경하지 않는다. 예정 퇴실 이후 inspection과 실제 cleaning materialization은 독립 축이다. 현재 dev58a 재통합 총106/head `room_board_live_projection_compatibility`이며 fresh106·전체27 upgrade/SQL·static/KST·전체9경합/최종cleanup은 통과했다. 새 CI·보호 병합·운영은 후속이고 이전104 checkpoint와 구분한다.
+
+`GET /v1/rooms`는 optional `serviceDate=YYYY-MM-DD`를 받는다. 생략 또는 KST 오늘은 요청 시각의 `LIVE`, 과거는 해당 날짜의 `23:59:59.999999 Asia/Seoul`, 미래는 `00:00:00 Asia/Seoul`을 `evaluatedAt`으로 사용한다. `serverTime`은 응답을 계산한 실제 시각이므로 과거·미래 조회에서는 `evaluatedAt`과 다르다. 잘못된 달력 날짜, 중복 query key, 알려지지 않은 query key는 HTTP 400으로 닫는다.
+
+새 `get_room_board_projection`은 active/password-complete business admin과 live session을 DB에서 다시 검증하며 service role만 실행할 수 있다. 기존 원장을 덮거나 새 복합 상태를 저장하지 않고 예약 segment, cleaning target/attempt, 촛불 event, 객실 issue, operation block, PIN sync event와 표시 override의 평가 시점 값을 조합한다. 객실 타입/기준정보는 effective-dated 이력이 아직 없으므로 최신 catalog 값을 사용한다는 제한을 공개한다.
+
+`detailConditionCodes`는 와이어프레임의 `CHECKOUT_INSPECTION_REQUIRED`, `EXTRA_GUESTS`, `VACANT`, `CANDLE_PRESENT`, `ROOM_ISSUE_PRESENT`, `EARLY_CHECK_IN`, `LATE_CHECK_OUT`과 운영 경고 `DATA_VERIFICATION_REQUIRED`, `PIN_SYNC_WARNING`을 반환한다. `CANDLE_PRESENT` 상세 필터는 와이어프레임대로 공실 카드에서만 표시하지만 기존 blocking/readiness 촛불 축은 점유 여부와 무관하게 유지한다. 고객 PII 없이 표시 예약 ID·입퇴실 시각·인원·기준 인원만 추가한다. 퇴실점검 수동 완료/청소 완료 대체 mutation은 제품 미확정이므로 이 projection에 포함하지 않는다.
+
 ### #228 점유·객실 문제·배정 준비 분리
 
 77번째 append-only `room_status_admin_correction`은 #236의 76번째 `developer_room_catalog_capacity` 뒤에 적용되며, `occupied`를 canonical non-retired stay segment의 서버 snapshot 반개구간 `[startsAt, endsAt)` 포함 여부로만 계산한다. 시작 직전은 비점유, 시작 시각은 점유, 종료 시각은 비점유이며 null end인 장기투숙 segment는 실제 종료/보정 전까지 계속 점유다. 조기 실제 checkout과 관리자 vacant 보정은 segment를 닫으므로 즉시 projection에서 빠진다.
@@ -154,7 +278,7 @@ command replay는 기존 audit idempotency로 한 건만 남고 두 원장의 ID
 
 ### #187 예약 임박 lifecycle projection Phase A
 
-기존 GET 경로와 필드는 그대로 두고 `serverTime`, `occupancyStatus`, `reservationLifecycle`, `readinessStatus`, `primaryDisplayStatus`, `nextReservationId/nextCheckInAt/nextCheckOutAt`, `blockingReasonCodes`, `readinessReasonCodes`를 추가한다. `serverTime`과 `evaluatedAt`은 같은 DB snapshot timestamp다. lifecycle은 current 반개구간 또는 실제 active occupancy를 `OCCUPIED`로 우선하고, current가 없을 때 가장 이른 미래 active 예약의 KST 체크인 날짜를 오늘 `ARRIVAL_PENDING`, 내일 `RESERVATION_PRESENT`, 모레 이후 `FUTURE`, 없음 `NONE`으로 분류한다. next 필드는 current가 아닌 가장 이른 미래 active 예약만 가리킨다.
+기존 GET 경로와 필드는 그대로 두고 `serverTime`, `occupancyStatus`, `reservationLifecycle`, `readinessStatus`, `primaryDisplayStatus`, `nextReservationId/nextCheckInAt/nextCheckOutAt`, `blockingReasonCodes`, `readinessReasonCodes`를 추가한다. 오늘 LIVE 조회에서는 `serverTime`과 `evaluatedAt`이 같은 DB snapshot timestamp다. #318 과거·미래 날짜 조회에서는 평가 경계와 실제 계산 시각을 분리한다. lifecycle은 current 반개구간 또는 실제 active occupancy를 `OCCUPIED`로 우선하고, current가 없을 때 가장 이른 미래 active 예약의 KST 체크인 날짜를 오늘 `ARRIVAL_PENDING`, 내일 `RESERVATION_PRESENT`, 모레 이후 `FUTURE`, 없음 `NONE`으로 분류한다. next 필드는 current가 아닌 가장 이른 미래 active 예약만 가리킨다.
 
 대표 상태는 `BLOCKED → OCCUPIED → ARRIVAL_PENDING → RESERVATION_PRESENT → CLEANING_REQUIRED → READY` 우선순위다. 청소는 readiness 사유지만 `BLOCKED`를 만들지 않고, `FUTURE`는 현재 readiness 대표 상태를 유지한다. PIN mismatch/unconfigured는 current check-in readiness 경고로만 추가하며 예약 bookability와 기존 #140 권한 계약은 바꾸지 않는다. public projection RPC만 service role에 열고 private SECURITY DEFINER helper는 fixed `search_path`와 PUBLIC/anon/authenticated/service_role EXECUTE revoke를 적용한다. Phase A는 route, reservation move preview/commit, stay/segment 저장, Python codegen을 추가하지 않는다.
 
@@ -480,6 +604,10 @@ wrapper이며 외부 Drive create 전에 같은 transaction에서 확정한다. 
 
 ## 인증
 
+#442 미배포 후보는 일반 인증의 profile/session을 서버 전용 `get_active_auth_context` 1회로
+통합한다. 순차 SQL·fresh snapshot·hard expiry·권한은 유지하고 limited/사진 전용 인증은
+변경하지 않는다. [설계와 배포 gate](./AUTH_CONTEXT_PERFORMANCE_442.md)를 따른다.
+
 1. 서버가 먼저 불변 profile UUID를 만들고, 관리자가 그 ID로 Supabase Auth 사용자를 생성합니다.
 2. 내부 이메일은 `user-{profile_id}@auth.castletheart.invalid` 형식으로 서버만 계산합니다.
 3. 사용자가 이름형 `loginId`와 최초 휴대전화 끝 4자리 임시 비밀번호 또는 허용된 개인 비밀번호를 보냅니다. 개인 비밀번호는 숫자 6~72자리 또는 10~72자의 영문 대·소문자·숫자·특수문자 조합이며, 4자리 임시값은 서버 내부에서만 Supabase 최소 길이를 만족하는 namespace 값으로 변환합니다.
@@ -701,7 +829,17 @@ production 자동 purge/HTTP 활성화나 hosted/client offline E2E, ready/검�
 
 #26의 알림 확정은 `GET /v1/assignments/commit-impact`에서 반환한 비민감 fingerprint와 선택 항목의 assignment/availability version을 `POST /v1/assignments/commit`에서 재검증합니다. 서비스 날짜는 KST 오늘/내일로 제한하고 source별 예약·점유·재청소 계약과 active maid/current availability를 다시 검사합니다. 성공한 선택 항목은 한 transaction에서 `notified`로 전이하고 typed `notifications`, private `notification_delivery_outbox`, `assignment.notified` 감사 원장을 함께 추가합니다. 일부 항목 실패 시 선택 부분집합 전체가 롤백되며 cleaning attempt와 외부 네트워크 호출은 생성하지 않습니다.
 
-#308 4B2의 dev 통합 계약(PR #340)은 오늘 current 목록과 계획일 오늘의 commit 집합에 원 날짜가 과거인
+#446 최신 사용자 정책은 관리자 내일 배정에도 과거 미완료 업무를 포함합니다. 요청 계획일의
+근무 희망을 검사하며 원 업무 날짜/이력은 유지합니다. [후보 계약](./ASSIGNMENT_PLANNING_TABS_446.md)은
+아래 #308의 내일 exact-date 제한을 대체합니다. 실제 DB 적용 전 후보입니다.
+
+2026-10-13 #446 후속은 KST 자정에 전일 미착수 담당을 종료하고 미배정 계획일을 하루씩
+이월합니다. 원 source 날짜/접근 창은 유지하고 append-only `assignment.rolled_over`의
+`rolloverToDate`와 target version으로 현재 계획일을 읽습니다. 기존 scheduler의 예약 공통
+잠금 아래 activation 전에 실행하며, 별도 회전 cursor와 일별 전이 100건 상한으로 catch-up합니다.
+실제 시작/완료된 회차와 당일 사전 배정은 보존합니다. [상세 계약·검증 경계](./ASSIGNMENT_MIDNIGHT_ROLLOVER_446.md)를 따릅니다.
+
+#308 4B2의 당시 dev 통합 계약(PR #340)은 오늘 current 목록과 계획일 오늘의 commit 집합에 원 날짜가 과거인
 미완료 업무를 포함합니다. 내일·과거/이력 조회는 기존 exact-date 범위이며 원 날짜/담당/순번은
 갱신하지 않습니다. Fastify/Edge 목록은 access-token RLS 본인 통보 범위를 먼저 제한하고,
 오늘 exact row와 과거 unfinished inner-target row를 합칩니다. 과거 이력에는 현재 target join을
@@ -1008,8 +1146,9 @@ legacy 중복 key·필수 슬롯 등 교차 항목 조건과 receipt 존재 여�
 조건 대신 v9 3-slot 후보를 정렬 후 역할별로 검사합니다. DB publisher는 이미 같은 정렬을 수행하므로
 원본 SQL·manifest를 바꾸지 않습니다. canonical 응답 검사는 그대로여서 비정렬 DB projection은
 계속 fail-closed합니다. 기존 frozen snapshot의 exact canonical equality와 저장 이름 자격도 재해석하지 않습니다.
-6순열 허용·동일 hash·잘못된 역할/order·누락/중복 회귀를 실제 실행하되, 최종 QA·새 exact-head CI·
-최신 dev 재통합·전체 DB gate가 완료되기 전에는 #323/PR #335의 source/dev 완료를 선언하지 않습니다.
+당시 후보에서는 6순열 허용·동일 hash·잘못된 역할/order·누락/중복 회귀를 실제 실행하되, 최종 QA·새 exact-head CI·
+최신 dev 재통합·전체 DB gate 완료 전에는 #323/PR #335의 source/dev 완료를 선언하지 않았습니다.
+이는 과거 검증 checkpoint이며 현재 완료 상태는 [API 상태 정본](./API_STATUS_MATRIX.md)의 `dev@fdd8d7d` 보호 통합 기록을 따릅니다.
 
 `tests/fixtures/cleaning-template-contract.ts`를 Fastify·Edge·실제 JSON Schema 검사·생성 클라이언트·로컬 DB
 검증이 공유합니다. `npm run openapi:template-client:check`는 앱 TypeScript 7을 바꾸지 않고
@@ -1141,7 +1280,13 @@ worker reconciliation에 business CAS를 새로 추가하지 않는다. 최신 �
 
 현재 critical path는 안전한 fixture가 승인되면 예약 success·동일 요청 replay·planned target/snapshot smoke를 수행하고, #13 전체 frontend/generated client/browser E2E와 청소관리 API 연결을 진행하는 것이다. #12 backup/recovery, #112 Web Push, #137 Google Sheets의 실제 운영 활성화는 각각 별도 승인 gate다.
 
-Edge `/v1/rooms*`와 `/v1/availability/*`는 DB의 snake_case column을 그대로 노출하지 않고 Fastify와 같은 camelCase projection으로 변환한다. 객실 상세·기준정보·운영 차단·촛불·이슈·PIN 동기화 adapter는 `get_room_operational_projection`, `change_room_master_data`, `mutate_room_operation`만 재사용하며 raw table DML을 하지 않는다. actor는 exact active business admin이고 비밀번호 변경과 active session까지 확인한다. 생성 entity UUID는 request hash에서 제외해 같은 payload 재시도가 동일 logical event로 수렴하고, PIN 원문·door code·credential·provider secret은 입력 단계에서 거부한다. 가능일 조회는 Bearer token으로 만든 요청별 Supabase client가 기존 RLS를 통과하고, 제출·변경·결정은 service-role RPC가 actor profile의 최신 exact role/status를 다시 검증한다. 프론트는 OpenAPI의 재사용 schema와 안정적인 `operationId`로 타입을 생성하고, error message 문자열 대신 `ErrorCode` union으로 분기한다.
+Edge `/v1/rooms*`와 `/v1/availability/*`는 DB의 snake_case column을 그대로 노출하지 않고 Fastify와 같은 camelCase projection으로 변환한다. 객실 상세·기준정보·운영 차단·이슈·PIN 동기화 adapter는 `get_room_operational_projection`, `change_room_master_data`, `mutate_room_operation`을 재사용하며 raw table DML을 하지 않는다. 이 명령의 actor는 exact active business admin이고 비밀번호 변경과 active session까지 확인한다. #330 촛불 조회·조정만 `list_room_candles`/`set_room_candle_count`로 분리하여 활성 admin/maid를 허용한다. 생성 entity UUID는 request hash에서 제외해 같은 payload 재시도가 동일 logical event로 수렴하고, PIN 원문·door code·credential·provider secret은 입력 단계에서 거부한다. 가능일 조회는 Bearer token으로 만든 요청별 Supabase client가 기존 RLS를 통과하고, 제출·변경·결정은 service-role RPC가 actor profile의 최신 exact role/status를 다시 검증한다. 프론트는 OpenAPI의 재사용 schema와 안정적인 `operationId`로 타입을 생성하고, error message 문자열 대신 `ErrorCode` union으로 분기한다.
+
+### #330 촛불 전용 capability — source 후보
+
+`list_room_candles`는 최대 50개 UUID keyset page의 `roomId`, `roomNumber`, `count`, `roomStateVersion`만 반환한다. 두 RPC 모두 profile 및 해당 actor의 `auth.sessions` 행을 SHARE lock으로 재검증한다. 변경은 기존 `room.operation.set_candle_count` receipt namespace/hash를 유지하고 receipt → actor/session → room 잠금 순서로 직렬화한다. 감소는 처리자의 `physicallyVerified=true`를 요구하지만 관리자 승인·배정·제출/승인·7일 제한은 없다. room CAS 증가, append-only candle/audit event와 receipt를 한 transaction에 기록한다.
+
+최초 후보의 86번째 migration은 당시 기존 85개와 과거 event를 수정하지 않았다. 현재 dev106 통합에서는 미적용 원본 본문을 보존한 107번째 촛불 migration과 108번째 세션 hard-expiry append를 사용한다. before-insert trigger가 room lock 뒤 `recorded_at`을 기존 최댓값보다 최소 1μs 뒤로 부여하여 기존/신규 writer와 동일 transaction에서도 최신 수량 순서를 보장한다. 기존 room/time 및 actor FK index, RLS, 원장 UPDATE/DELETE 금지는 유지한다. 제출·검수·사진·수익·지급 snapshot과 다른 차단은 변경하지 않는다. 상세 HTTP/rollback 계약은 [#330 연동 문서](./ROOM_CANDLES_330.md)를 따른다.
 
 Edge `/v1/reservations*`도 예약·청소요청 command RPC 9개와 #196 read projection RPC 2개만 재사용하며 raw DML을 허용하지 않는다. actor는 exact active business admin이고 최초 비밀번호 변경과 active session까지 매 요청 확인한다. 목록·mutation projection에는 고객명과 암호문이 없고, 단건 상세에서 고객명을 실제 복호화할 때만 server-generated request ID를 가진 `sensitive.read` activity를 append한다. activity append가 실패하면 상세 응답도 fail-closed한다. Edge Web Crypto AES-256-GCM envelope와 HMAC request fingerprint는 Fastify 계약과 호환하며, scheduler와 관리자 수동 전이의 인증·멱등성 namespace는 분리한다.
 
@@ -1163,7 +1308,7 @@ developer API의 DB 상태는 적용 시점에 따라 달라지는 원격 migrat
 - Google Cloud Drive API OAuth 앱, 전용 운영 계정, 비공개 루트 폴더와 refresh token
 - Web Push VAPID keyring과 실제 기기 subscription/delivery 검증
 
-예약 고객명은 API 서버에서 AES-256-GCM으로 암호화해 `reservations.guest_name_encrypted`에만 저장합니다. 현재 키와 버전은 `RESERVATION_PII_KEY_BASE64`, `RESERVATION_PII_KEY_VERSION`, 이전 복호화 키는 secret인 `RESERVATION_PII_KEYRING_JSON`으로 관리합니다. 목록에는 이름을 포함하지 않고 관리자 단건 상세에서만 복호화하며, 체크아웃 또는 투숙 전 취소 후 180일이 지나면 예약 전이 worker가 암호문을 제거합니다. 멱등성 hash에는 평문 대신 서버 키 HMAC fingerprint만 사용하고 응답·감사 event에는 암호문이나 원문을 복제하지 않습니다. #131 Phase A PIN은 선행 0을 보존한 4~8자리 `pinDigits`만 받고 서버가 current room master snapshot으로 `<room_number>-<pin_digits>` credential을 조합·암호화해 private immutable revision/current pointer에만 저장한다. 평문·암호문은 public table, audit, outbox, error, URL 또는 로그에 넣지 않는다. PIN source/schema와 Edge bundle은 production에 반영됐지만 Google target·ACL·Cron/worker hosted 활성화는 별도 pending이다.
+예약 고객명은 API 서버에서 AES-256-GCM으로 암호화해 `reservations.guest_name_encrypted`에만 저장합니다. 현재 키와 버전은 `RESERVATION_PII_KEY_BASE64`, `RESERVATION_PII_KEY_VERSION`, 이전 복호화 키는 secret인 `RESERVATION_PII_KEYRING_JSON`으로 관리합니다. 목록에는 이름을 포함하지 않고 관리자 단건 상세에서만 복호화하며, 체크아웃 또는 투숙 전 취소 후 180일이 지나면 예약 전이 worker가 암호문을 제거합니다. 멱등성 hash에는 평문 대신 서버 키 HMAC fingerprint만 사용하고 응답·감사 event에는 암호문이나 원문을 복제하지 않습니다. #131 Phase A PIN은 선행 0을 보존한 UTF-8 128바이트 이하 비어 있지 않은 `pinDigits` 문자열을 받고(#452, 숙박 유형/숫자 자릿수 제한 없음) 서버가 current room master snapshot으로 `<room_number>-<pin_digits>` credential을 조합·암호화해 private immutable revision/current pointer에만 저장한다. 평문·암호문은 public table, audit, outbox, error, URL 또는 로그에 넣지 않는다. PIN source/schema와 Edge bundle은 production에 반영됐지만 Google target·ACL·Cron/worker hosted 활성화는 별도 pending이다.
 
 `RESERVATION_SCHEDULER_ACTOR_PROFILE_ID`는 production에서 활성 관리자 profile ID로 설정한다. Fastify 기준선은 시작 시 첫 실행으로 actor를 검증하고, Supabase-only runtime은 Cron이 1분마다 별도 secret으로 scheduler Function을 호출하며 DB command가 actor의 최신 역할·상태를 매 실행 재검증한다. 어느 runtime이든 퇴실을 먼저 처리하므로 반개구간 경계의 다음 입실이 같은 batch에서 진행되고, 중단 기간 전체가 지난 미입실 예약도 가짜 check-in 없이 예정 checkout으로 종결된다. 자세한 운영·rollback 계약은 [Edge runtime PoC](./EDGE_RUNTIME_POC.md)를 따른다.
 
@@ -1195,3 +1340,7 @@ assignment에만 새 PIN revision successor를 발급한다. 물리 PIN 변경�
 attempt와 authoritative access lease를 그대로 요구한다. entitlement/outbox/audit에는 PIN, envelope, raw session,
 token, request body 또는 idempotency payload를 저장하지 않는다. 이 source 계약은 production PIN/Sheets/Cron
 활성화를 포함하지 않는다.
+
+## #452 명시적 PIN 파일 전송
+
+관리자 전용 export/preview/apply는 [ROOM_PIN_TRANSFER.md](./ROOM_PIN_TRANSFER.md)를 따른다. 읽기 원본과 쓰기 projection은 분리하며 transaction에는 암호화 envelope만 전달한다. 새 revision source `sheet_import`, current CAS/nonce reservation/entitlement rotation을 재사용한다. 전체 SQL 실행은 최종 릴리스 승인 때 수행한다.

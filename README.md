@@ -1,5 +1,9 @@
 # CASTLE THE ART 객실관리 백엔드
 
+> 2026-10-04 최신 작업: #367/PR369·#368/PR370은 `dev@e9fcc564`까지 통합했다. v0.8.0 후보 `release/v0.8.0@5408c54`는 고정하며 운영 gate를 유지한다. 사용자 승인 별도 개발 [#329 기존 세션의 제한 업무 재진입](docs/LIMITED_SESSION_REENTRY.md)은 새 SHA에서 Node1275·Edge477·Python95·LF fresh101·upgrade27/SQL79·4774·KST145·경합7·추가 권한4·합성복구 PASS, 독립 소스 QA 새 확정 P0/P1/P2=0이다. strict 신규0/기존17 FAIL과 최초 전체SQL FAIL·동일 소스 재실행 PASS 이력을 보존한다. 승인된 진단용 commit·push·Draft PR 공유 단계이며 CI·dev 통합·운영 제공·프런트 UAT는 미완료다. 프런트 source·새 로그인 권한·Auth 설정·키/PIN/송금은 변경하지 않는다. 아래 선행 작업/후보 상태는 과거 checkpoint다.
+
+> 릴리스 CI `37127623239`는 application PASS / migration FAIL이다. 전체26 upgrade·SQL78/4641·KST145는 PASS지만 알림 delivery fixture drain이 실패했고 뒤5개 경합 script는 NOT RUN이다. [#371](https://github.com/wrongstory/room-management-system-backend/issues/371)에서 테스트 종료 판정·claim 조건 정합화를 별도로 처리한다. 실패 CI와 실제 운영 백업·보안 DB 연결 gate가 해소되기 전 병합·배포하지 않는다.
+
 > 2026-10-03 최신: #331 PR361이 `dev@eb1ec3e`로 통합됐다(required CI37111364892·독립 QA98). #329와 첫 중간 릴리스에 선행하는 [#352 공용 세션 강제 만료 검사](docs/AUTH_SESSION_HARD_EXPIRY.md)를 별도 구현 중이다. [#364 v0.8.0 점검 릴리스](https://github.com/wrongstory/room-management-system-backend/issues/364)는 release/main 검증·병합 후 승인된 pending DB→API/예약 스케줄러를 승격한다. 아래 source 후보·운영 수치는 과거 checkpoint이며 배포/UAT 완료가 아니다. 프런트 개발·Node fallback 활성화·Auth 설정·키·실제 PIN/송금은 포함하지 않는다.
 
 > 2026-10-03 #331 구현 후보: #324 [PR #359](https://github.com/wrongstory/room-management-system-backend/pull/359)가 통합된 `dev@8481e219d7fbd92fe3587081efca9f3bc632bba6`/98 migrations를 기준으로 송금 표시 on/off와 금액 근거 재확인 API를 추가했다. 후보는 99 migrations·137 paths/148 operations이며, 실제 지급 원장은 변경하지 않는다. 검증·독립 QA·CI·통합 상태는 [표시 계약](docs/PAYROLL_REMITTANCE_MARKER.md)을 따른다. 아래 과거 dev/운영 수치는 당시 checkpoint이며 이번 작업의 운영 배포를 뜻하지 않는다.

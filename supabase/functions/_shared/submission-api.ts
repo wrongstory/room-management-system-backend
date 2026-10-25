@@ -101,6 +101,8 @@ export function submissionDatabaseError(
   const code = error?.message ?? "";
   const status: Record<string, number> = {
     MAID_REQUIRED: 403,
+    SESSION_REVOKED: 401,
+    PASSWORD_CHANGE_REQUIRED: 403,
     ADMIN_REQUIRED: 403,
     CAPABILITY_ACCESS_REQUIRED: 403,
     SUBMISSION_ACCESS_REQUIRED: 403,
@@ -393,6 +395,7 @@ export async function createSubmission(
   clients: EdgeClients,
   actor: EdgeActor,
   attemptId: string,
+  sessionId?: string,
 ) {
   maid(actor);
   if (new URL(request.url).search) invalid();
@@ -407,8 +410,9 @@ export async function createSubmission(
   };
   const key = idempotencyKey(request);
   return publicProjection(
-    await rpc(clients, "create_cleaning_submission", {
+    await rpc(clients, "create_cleaning_submission_with_session", {
       p_actor_profile_id: actor.profileId,
+      p_session_id: uuid(sessionId ?? verifiedRequestSessionId(request)),
       p_attempt_id: attemptId,
       p_client_submission_id: input.clientSubmissionId,
       p_expected_revision: input.expectedRevision,

@@ -25,5 +25,6 @@ supabase/functions/api/assets/magick.js
 supabase/functions/api/assets/magick.d.ts
 supabase/functions/api/assets/magick.ts
 supabase/functions/api/assets/magick.NOTICE
+supabase/functions/_shared/post-approval-report.bundle.js
 supabase/.temp/
 supabase/.branches/

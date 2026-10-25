@@ -1,4 +1,5 @@
 import { idempotencyKey, readJsonBody } from "./account-api.ts";
+import { projectLimitedDiscovery } from "../../../src/modules/limited-attempts/limited-attempt-contract.ts";
 import { attemptDatabaseError, projectAttempt } from "./attempt-api.ts";
 import {
   type EdgeActor,
@@ -99,7 +100,10 @@ export function lifecycleDatabaseError(
   const codes: Record<string, number> = {
     ADMIN_REQUIRED: 403,
     CAPABILITY_ACCESS_REQUIRED: 403,
+    PASSWORD_CHANGE_REQUIRED: 403,
     SESSION_REVOKED: 401,
+    LIMITED_DISCOVERY_LIMIT_EXCEEDED: 500,
+    LIMITED_SESSION_LIMIT_EXCEEDED: 500,
     ACCOUNT_VERSION_CONFLICT: 409,
     ACCOUNT_EXECUTION_LIFECYCLE_REQUIRED: 409,
     ASSIGNMENT_SCHEDULE_INVALID: 409,
@@ -141,8 +145,9 @@ function capability(value: unknown, attempt: ReturnType<typeof safeAttempt>) {
     row.attemptId !== attempt.attemptId ||
     row.assignmentId !== attempt.assignmentId ||
     row.assignmentRevision !== attempt.assignmentRevision ||
+    typeof row.kind !== "string" ||
     !["finish_current", "upload_submit", "evidence_upload"].includes(
-      String(row.kind),
+      row.kind,
     ) ||
     !Array.isArray(row.allowedActions) ||
     row.allowedActions.length !== capabilityActions[String(row.kind)]?.length ||
@@ -176,6 +181,7 @@ function projection(value: unknown, actor: EdgeActor, allowInactive = false) {
   const row = value as Record<string, unknown>;
   const attempt = safeAttempt(row.attempt, actor);
   if (
+    typeof row.profileStatus !== "string" ||
     !(allowInactive
       ? [
         "active",
@@ -185,7 +191,7 @@ function projection(value: unknown, actor: EdgeActor, allowInactive = false) {
         "departed",
       ]
       : ["active", "deactivation_pending", "upload_only"]).includes(
-        String(row.profileStatus),
+        row.profileStatus,
       )
   ) throw attemptDatabaseError(null);
   return {
@@ -395,6 +401,31 @@ export async function getLimitedAttempt(
     result.capability === null
   ) throw attemptDatabaseError(null);
   return result;
+}
+
+export async function listLimitedAttempts(
+  request: Request,
+  clients: EdgeClients,
+  identity: LimitedAttemptIdentity,
+) {
+  if (new URL(request.url).search) invalid();
+  const { data, error } = await clients.admin.rpc(
+    "list_limited_cleaning_attempts",
+    {
+      p_actor_profile_id: identity.actor.profileId,
+      p_session_id: identity.sessionId,
+    },
+  );
+  if (error) throw lifecycleDatabaseError(error);
+  try {
+    const result = projectLimitedDiscovery(data);
+    if (result.profileStatus !== identity.profileStatus) {
+      throw attemptDatabaseError(null);
+    }
+    return result;
+  } catch {
+    throw attemptDatabaseError(null);
+  }
 }
 
 export async function completeLimitedAttempt(

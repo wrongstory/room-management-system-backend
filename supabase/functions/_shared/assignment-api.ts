@@ -2,7 +2,9 @@ import { idempotencyKey, readJsonBody } from "./account-api.ts";
 import type { EdgeActor, EdgeClients } from "./runtime.ts";
 import {
   type AssignmentScheduleRead,
+  indexAssignmentSchedules,
   parseAssignmentScheduleReads,
+  summarizeAssignmentRollover,
 } from "./assignment-schedule-core.ts";
 import {
   assignmentCancellationCapability,
@@ -97,6 +99,7 @@ export interface AssignmentProjection {
 }
 
 export interface AssignmentCardProjection extends AssignmentProjection {
+  planningDate?: string;
   scheduleSnapshot: AssignmentScheduleRead["scheduleSnapshot"];
   currentDeparture: AssignmentScheduleRead["currentDeparture"];
   cleaningKind: string;
@@ -231,7 +234,7 @@ export async function prestartCommand(
       : []),
   ];
   const optional = action === "change"
-    ? ["availableFrom", "dueAt"]
+    ? ["availableFrom", "dueAt", "serviceDate"]
     : action === "cancellation-requests"
     ? ["reasonDetail"]
     : [];
@@ -292,6 +295,9 @@ export async function prestartCommand(
     payload.p_decision = body.decision;
   } else payload.p_cleaning_target_id = uuidValue(id, "cleaningTargetId");
   if (action === "change") {
+    if (body.serviceDate !== undefined) {
+      payload.p_service_date = dateValue(body.serviceDate, "serviceDate");
+    }
     payload.p_maid_profile_id = uuidValue(body.maidProfileId, "maidProfileId");
     payload.p_sequence_number = integerValue(
       body.sequenceNumber,
@@ -319,7 +325,9 @@ export async function prestartCommand(
     payload.p_reason_detail = body.reasonDetail ?? null;
   }
   const rpc = {
-    change: "change_cleaning_assignment_prestart",
+    change: body.serviceDate === undefined
+      ? "change_cleaning_assignment_prestart"
+      : "change_cleaning_assignment_for_plan",
     unassign: "unassign_cleaning_assignment_prestart",
     "unavailable-cancel": "cancel_unavailable_cleaning_assignment",
     "cancellation-requests": "request_assignment_cancellation",
@@ -1025,10 +1033,6 @@ function assignmentCardSnapshot(target: TargetRow) {
   };
 }
 
-const rolloverReasonCodes = new Set([
-  "ROLLED_OVER_UNASSIGNED",
-  "ROLLED_OVER_NOT_STARTED",
-]);
 const assignmentReadLimit = 1000;
 const assignmentHydrationBatchSize = 100;
 
@@ -1084,73 +1088,27 @@ function assignmentRolloverSnapshot(
   ) {
     throw assignmentDatabaseError(null);
   }
-  const evidence = schedules
-    .filter((candidate) =>
-      candidate.cleaning_target_id === row.cleaning_target_id &&
-      candidate.revision <= row.revision &&
-      rolloverReasonCodes.has(candidate.reason_code)
-    )
-    .sort((left, right) => right.revision - left.revision);
-  const rolloverCount = Math.min(target.carryover_count, evidence.length);
-  return {
-    rolloverCount,
-    rolloverReason: rolloverCount === 0
-      ? null
-      : evidence[0]?.reason_code ?? null,
-  };
+  return summarizeAssignmentRollover(
+    schedules,
+    row.cleaning_target_id,
+    row.revision,
+    target.carryover_count,
+  );
 }
 
-async function hydrateAssignments(
+async function assignmentAttemptRead(
   clients: EdgeClients,
-  rows: AssignmentRow[],
-  actor: EdgeActor,
-  request: Request,
-  includeCurrent: boolean,
-): Promise<AssignmentCardProjection[]> {
-  if (rows.length === 0) return [];
-  const targetIds = [...new Set(rows.map((row) => row.cleaning_target_id))];
-  const maidIds = [...new Set(rows.map((row) => row.maid_profile_id))];
-  const assignmentIds = rows.map((row) => row.id);
-  const [targetRows, maidRows, attemptRows, scheduleRows] = await Promise.all([
-    assignmentRelatedRows(
-      clients,
-      "cleaning_targets",
-      "id,room_id,cleaning_kind,source,original_service_date,effective_service_date,carryover_count,status,assignment_version,room_type_snapshot,fee_snapshot,template_snapshot,rooms!inner(room_number)",
-      "id",
-      targetIds,
-    ),
-    assignmentRelatedRows(
-      clients,
-      "profiles",
-      "id,display_name",
-      "id",
-      maidIds,
-    ),
-    assignmentRelatedRows(
-      clients,
-      "cleaning_attempts",
-      "id,assignment_id,attempt_number,status,started_at",
-      "assignment_id",
-      assignmentIds,
-      "attempt_number",
-    ),
-    assignmentRelatedRows(
-      clients,
-      "cleaning_target_schedule_revisions",
-      "cleaning_target_id,revision,effective_service_date,reason_code",
-      "cleaning_target_id",
-      targetIds,
-      "revision",
-    ),
-  ]);
-  const targets = new Map(
-    (targetRows as TargetRow[]).map((row) => [
-      row.id,
-      row,
-    ]),
-  );
-  const maids = new Map(
-    (maidRows as MaidRow[]).map((row) => [row.id, row]),
+  assignmentIds: string[],
+) {
+  // Submissions depend only on the latest attempts, not on target/profile/history reads.
+  // Keep all attempts for cancellation guards and the final authority RPC in hydration.
+  const attemptRows = await assignmentRelatedRows(
+    clients,
+    "cleaning_attempts",
+    "id,assignment_id,attempt_number,status,started_at",
+    "assignment_id",
+    assignmentIds,
+    "attempt_number",
   );
   const attempts = new Map<string, AttemptRow>();
   const capabilityAttempts = new Map<string, AttemptRow[]>();
@@ -1171,13 +1129,64 @@ async function hydrateAssignments(
     attemptIds,
     "version",
   );
+  return { attempts, capabilityAttempts, submissionRows };
+}
+
+async function hydrateAssignments(
+  clients: EdgeClients,
+  rows: AssignmentRow[],
+  actor: EdgeActor,
+  request: Request,
+  includeCurrent: boolean,
+): Promise<AssignmentCardProjection[]> {
+  if (rows.length === 0) return [];
+  const targetIds = [...new Set(rows.map((row) => row.cleaning_target_id))];
+  const maidIds = [...new Set(rows.map((row) => row.maid_profile_id))];
+  const assignmentIds = rows.map((row) => row.id);
+  const [targetRows, maidRows, attemptData, scheduleRows] = await Promise.all([
+    assignmentRelatedRows(
+      clients,
+      "cleaning_targets",
+      "id,room_id,cleaning_kind,source,original_service_date,effective_service_date,carryover_count,status,assignment_version,room_type_snapshot,fee_snapshot,template_snapshot,rooms!inner(room_number)",
+      "id",
+      targetIds,
+    ),
+    assignmentRelatedRows(
+      clients,
+      "profiles",
+      "id,display_name",
+      "id",
+      maidIds,
+    ),
+    assignmentAttemptRead(clients, assignmentIds),
+    assignmentRelatedRows(
+      clients,
+      "cleaning_target_schedule_revisions",
+      "cleaning_target_id,revision,effective_service_date,reason_code",
+      "cleaning_target_id",
+      targetIds,
+      "revision",
+    ),
+  ]);
+  const targets = new Map(
+    (targetRows as TargetRow[]).map((row) => [
+      row.id,
+      row,
+    ]),
+  );
+  const maids = new Map(
+    (maidRows as MaidRow[]).map((row) => [row.id, row]),
+  );
+  const { attempts, capabilityAttempts, submissionRows } = attemptData;
   const submissions = new Map<string, SubmissionRow>();
   for (const submission of submissionRows as SubmissionRow[]) {
     if (!submissions.has(submission.cleaning_attempt_id)) {
       submissions.set(submission.cleaning_attempt_id, submission);
     }
   }
-  const schedules = scheduleRows as TargetScheduleRow[];
+  const schedules = indexAssignmentSchedules(
+    scheduleRows as TargetScheduleRow[],
+  );
   // Revalidate actor/session/exact assignment ownership after bounded
   // hydration. Historical cards never request live reservation facts.
   const scheduleReads = new Map<string, AssignmentScheduleRead>();
@@ -1190,13 +1199,16 @@ async function hydrateAssignments(
     const ids = rows.slice(offset, offset + assignmentHydrationBatchSize).map((
       row,
     ) => row.id);
-    const response = await clients.admin.rpc("get_assignment_schedule_read", {
-      p_actor_profile_id: actor.profileId,
-      p_session_id: sessionId,
-      p_assignment_ids: ids,
-      p_include_current: includeCurrent,
-      p_expected_actor_role: actor.role,
-    });
+    const response = await clients.admin.rpc(
+      "get_assignment_schedule_read_for_plan",
+      {
+        p_actor_profile_id: actor.profileId,
+        p_session_id: sessionId,
+        p_assignment_ids: ids,
+        p_include_current: includeCurrent,
+        p_expected_actor_role: actor.role,
+      },
+    );
     if (response.error) {
       const code = response.error.message;
       if (code === "ASSIGNMENT_ACCESS_REQUIRED") {
@@ -1236,7 +1248,11 @@ async function hydrateAssignments(
     const attempt = attempts.get(row.id);
     const submission = attempt ? submissions.get(attempt.id) : undefined;
     const card = assignmentCardSnapshot(target);
-    const rollover = assignmentRolloverSnapshot(target, row, schedules);
+    const rollover = assignmentRolloverSnapshot(
+      target,
+      row,
+      schedules.get(row.cleaning_target_id) ?? [],
+    );
     const targetMatchesRevision = row.is_current &&
       target.assignment_version === row.revision &&
       target.effective_service_date === row.service_date;
@@ -1319,7 +1335,11 @@ export async function listAssignments(
 
   const today = new Date(clock().getTime() + 9 * 60 * 60 * 1000).toISOString()
     .slice(0, 10);
-  const includeOverdue = !includeHistory && serviceDate === today;
+  const tomorrow = new Date(Date.parse(`${today}T00:00:00Z`) + 86400000)
+    .toISOString().slice(0, 10);
+  const tomorrowPlanning = actor.role === "admin" && serviceDate === tomorrow;
+  const includeOverdue = !includeHistory &&
+    (serviceDate === today || serviceDate === tomorrow);
   let query = accessTokenClient(request, clients)
     .from("cleaning_assignments")
     .select(assignmentColumns, { count: "exact" })
@@ -1347,8 +1367,14 @@ export async function listAssignments(
       .select(`${assignmentColumns},cleaning_targets!inner(status)`, {
         count: "exact",
       })
-      .lt("service_date", today).eq("is_current", true)
-      .not("cleaning_targets.status", "in", "(approved,cancelled)")
+      .lt("service_date", serviceDate).eq("is_current", true)
+      .not(
+        "cleaning_targets.status",
+        "in",
+        tomorrowPlanning
+          ? "(approved,cancelled,inspection_pending,upload_pending,rejected)"
+          : "(approved,cancelled)",
+      )
       .order("service_date").order("sequence_number").order("revision").order(
         "id",
       );
@@ -1374,13 +1400,26 @@ export async function listAssignments(
       left.revision - right.revision || left.id.localeCompare(right.id)
     );
   }
-  return hydrateAssignments(
+  const hydrated = await hydrateAssignments(
     clients,
     rows,
     actor,
     request,
     !includeHistory,
   );
+  if (includeHistory || !includeOverdue) {
+    return hydrated;
+  }
+  return hydrated.filter((row) => {
+    const card = snapshotObject(row);
+    const planningDate = card.planningDate ?? card.serviceDate;
+    if (typeof planningDate !== "string") throw assignmentDatabaseError(null);
+    return serviceDate === today
+      ? planningDate <= today
+      : actor.role === "admin"
+      ? planningDate <= serviceDate
+      : planningDate === serviceDate;
+  });
 }
 
 export async function assignmentHistory(

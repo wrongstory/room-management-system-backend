@@ -2,7 +2,7 @@ import type { Actor } from '../../domain/actor.js';
 import { AppError } from '../../lib/app-error.js';
 import type { SupabaseClients } from '../../lib/supabase.js';
 import { assignmentCancellationCapability, parseRoomTypeSnapshot } from './assignment-preview-core.js';
-import { type AssignmentScheduleRead, parseAssignmentScheduleReads } from './assignment-schedule-core.js';
+import { type AssignmentScheduleRead, indexAssignmentSchedules, parseAssignmentScheduleReads, summarizeAssignmentRollover } from './assignment-schedule-core.js';
 
 export interface AssignmentListInput {
   serviceDate: string;
@@ -56,7 +56,6 @@ function roomNumber(target: TargetRow): string {
   return room.room_number;
 }
 
-const rolloverReasonCodes = new Set(['ROLLED_OVER_UNASSIGNED', 'ROLLED_OVER_NOT_STARTED']);
 const readLimit = 1000;
 const hydrationBatchSize = 100;
 
@@ -73,15 +72,7 @@ function rolloverSnapshot(target: TargetRow, row: AssignmentRow, schedules: Sche
   if (!Number.isSafeInteger(target.carryover_count) || target.carryover_count < 0) {
     throw databaseError(null);
   }
-  const evidence = schedules
-    .filter((candidate) => candidate.cleaning_target_id === row.cleaning_target_id &&
-      candidate.revision <= row.revision && rolloverReasonCodes.has(candidate.reason_code))
-    .sort((left, right) => right.revision - left.revision);
-  const rolloverCount = Math.min(target.carryover_count, evidence.length);
-  return {
-    rolloverCount,
-    rolloverReason: rolloverCount === 0 ? null : evidence[0]?.reason_code ?? null
-  };
+  return summarizeAssignmentRollover(schedules, row.cleaning_target_id, row.revision, target.carryover_count);
 }
 
 export class SupabaseAssignmentService implements AssignmentService {
@@ -93,7 +84,9 @@ export class SupabaseAssignmentService implements AssignmentService {
       throw new AppError(403, 'ASSIGNMENT_ACCESS_REQUIRED', '다른 메이드의 청소 배정은 조회할 수 없습니다.');
     }
     const today = new Date(this.clock().getTime() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
-    const includeOverdue = !input.includeHistory && input.serviceDate === today;
+    const tomorrow = new Date(Date.parse(`${today}T00:00:00Z`) + 86400000).toISOString().slice(0, 10);
+    const tomorrowPlanning = actor.role === 'admin' && input.serviceDate === tomorrow;
+    const includeOverdue = !input.includeHistory && (input.serviceDate === today || input.serviceDate === tomorrow);
     let query = this.clients.forAccessToken(actor.accessToken).from('cleaning_assignments')
       .select(this.assignmentColumns(), { count: 'exact' }).eq('service_date', input.serviceDate)
       .order('sequence_number').order('revision');
@@ -105,8 +98,8 @@ export class SupabaseAssignmentService implements AssignmentService {
     if (includeOverdue) {
       let overdue = this.clients.forAccessToken(actor.accessToken).from('cleaning_assignments')
         .select(`${this.assignmentColumns()},cleaning_targets!inner(status)`, { count: 'exact' })
-        .lt('service_date', today).eq('is_current', true)
-        .not('cleaning_targets.status', 'in', '(approved,cancelled)')
+        .lt('service_date', input.serviceDate).eq('is_current', true)
+        .not('cleaning_targets.status', 'in', tomorrowPlanning ? '(approved,cancelled,inspection_pending,upload_pending,rejected)' : '(approved,cancelled)')
         .order('service_date').order('sequence_number').order('revision').order('id');
       if (actor.role === 'maid') {
         overdue = overdue.eq('maid_profile_id', actor.profileId).not('notified_at', 'is', null);
@@ -116,7 +109,15 @@ export class SupabaseAssignmentService implements AssignmentService {
       rows.sort((left, right) => left.service_date.localeCompare(right.service_date) ||
         left.sequence_number - right.sequence_number || left.revision - right.revision || left.id.localeCompare(right.id));
     }
-    return this.hydrate(actor, rows, !input.includeHistory);
+    const hydrated = await this.hydrate(actor, rows, !input.includeHistory);
+    if (input.includeHistory || !includeOverdue) return hydrated;
+    return hydrated.filter(row => {
+      const card = object(row);
+      const planningDate = card.planningDate ?? card.serviceDate;
+      if (typeof planningDate !== 'string') throw databaseError(null);
+      return input.serviceDate === today ? planningDate <= today
+        : actor.role === 'admin' ? planningDate <= input.serviceDate : planningDate === input.serviceDate;
+    });
   }
 
   async history(actor: Actor, cleaningTargetId: string): Promise<unknown[]> {
@@ -179,7 +180,7 @@ export class SupabaseAssignmentService implements AssignmentService {
     const result = new Map<string, AssignmentScheduleRead>();
     for (let offset = 0; offset < rows.length; offset += hydrationBatchSize) {
       const ids = rows.slice(offset, offset + hydrationBatchSize).map((row) => row.id);
-      const response = await this.clients.admin.rpc('get_assignment_schedule_read', {
+      const response = await this.clients.admin.rpc('get_assignment_schedule_read_for_plan', {
         p_actor_profile_id: actor.profileId, p_session_id: sessionId,
         p_assignment_ids: ids, p_include_current: includeCurrent, p_expected_actor_role: actor.role
       });
@@ -196,31 +197,22 @@ export class SupabaseAssignmentService implements AssignmentService {
     const targetIds = [...new Set(rows.map((row) => row.cleaning_target_id))];
     const maidIds = [...new Set(rows.map((row) => row.maid_profile_id))];
     const assignmentIds = rows.map((row) => row.id);
-    const [targetRows, profileRows, attemptRows, scheduleRows] = await Promise.all([
+    const [targetRows, profileRows, attemptData, scheduleRows] = await Promise.all([
       this.relatedRows('cleaning_targets',
         'id,room_id,cleaning_kind,source,original_service_date,effective_service_date,carryover_count,status,assignment_version,room_type_snapshot,fee_snapshot,template_snapshot,rooms!inner(room_number)'
       , 'id', targetIds),
       this.relatedRows('profiles', 'id,display_name', 'id', maidIds),
-      this.relatedRows('cleaning_attempts', 'id,assignment_id,attempt_number,status,started_at', 'assignment_id', assignmentIds, 'attempt_number'),
+      this.attemptRead(assignmentIds),
       this.relatedRows('cleaning_target_schedule_revisions', 'cleaning_target_id,revision,effective_service_date,reason_code', 'cleaning_target_id', targetIds, 'revision')
     ]);
     const targets = new Map((targetRows as TargetRow[]).map((row) => [row.id, row]));
     const profiles = new Map((profileRows as ProfileRow[]).map((row) => [row.id, row]));
-    const attempts = new Map<string, AttemptRow>();
-    const capabilityAttempts = new Map<string, AttemptRow[]>();
-    for (const attempt of attemptRows as AttemptRow[]) {
-      if (!attempts.has(attempt.assignment_id)) attempts.set(attempt.assignment_id, attempt);
-      const all = capabilityAttempts.get(attempt.assignment_id) ?? [];
-      all.push(attempt);
-      capabilityAttempts.set(attempt.assignment_id, all);
-    }
-    const attemptIds = [...attempts.values()].map((attempt) => attempt.id);
-    const submissionRows = await this.relatedRows('cleaning_submissions', 'cleaning_attempt_id,version,status', 'cleaning_attempt_id', attemptIds, 'version');
+    const { attempts, capabilityAttempts, submissionRows } = attemptData;
     const submissions = new Map<string, SubmissionRow>();
     for (const submission of submissionRows as SubmissionRow[]) {
       if (!submissions.has(submission.cleaning_attempt_id)) submissions.set(submission.cleaning_attempt_id, submission);
     }
-    const schedules = scheduleRows as ScheduleRow[];
+    const schedules = indexAssignmentSchedules(scheduleRows as ScheduleRow[]);
     // Revalidate actor/session/ownership last, in the same DB snapshot as the
     // new facts. History never hydrates current reservation/occupancy state.
     const scheduleReads = await this.scheduleReads(actor, rows, includeCurrent);
@@ -237,7 +229,7 @@ export class SupabaseAssignmentService implements AssignmentService {
         (duration !== null && duration !== undefined && (!Number.isSafeInteger(duration) || (duration as number) <= 0))) {
         throw databaseError(null);
       }
-      const rollover = rolloverSnapshot(target, row, schedules);
+      const rollover = rolloverSnapshot(target, row, schedules.get(row.cleaning_target_id) ?? []);
       const attempt = attempts.get(row.id);
       const submission = attempt ? submissions.get(attempt.id) : undefined;
       const targetMatchesRevision = row.is_current && target.assignment_version === row.revision &&
@@ -268,5 +260,22 @@ export class SupabaseAssignmentService implements AssignmentService {
         notifiedAt: row.notified_at, endedAt: row.ended_at, createdAt: row.created_at
       };
     });
+  }
+
+  private async attemptRead(assignmentIds: string[]) {
+    // Submissions depend only on the latest attempts, not on target/profile/history reads.
+    // Keep all attempts for cancellation guards and the final authority RPC in hydrate.
+    const attemptRows = await this.relatedRows('cleaning_attempts', 'id,assignment_id,attempt_number,status,started_at', 'assignment_id', assignmentIds, 'attempt_number');
+    const attempts = new Map<string, AttemptRow>();
+    const capabilityAttempts = new Map<string, AttemptRow[]>();
+    for (const attempt of attemptRows as AttemptRow[]) {
+      if (!attempts.has(attempt.assignment_id)) attempts.set(attempt.assignment_id, attempt);
+      const all = capabilityAttempts.get(attempt.assignment_id) ?? [];
+      all.push(attempt);
+      capabilityAttempts.set(attempt.assignment_id, all);
+    }
+    const attemptIds = [...attempts.values()].map((attempt) => attempt.id);
+    const submissionRows = await this.relatedRows('cleaning_submissions', 'cleaning_attempt_id,version,status', 'cleaning_attempt_id', attemptIds, 'version');
+    return { attempts, capabilityAttempts, submissionRows };
   }
 }

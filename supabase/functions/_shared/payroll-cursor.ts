@@ -116,10 +116,10 @@ function secret(): Uint8Array {
 export function assertPayrollCursorConfigured(): void {
   secret();
 }
-async function key(): Promise<CryptoKey> {
+async function key(bytes = secret()): Promise<CryptoKey> {
   return await crypto.subtle.importKey(
     "raw",
-    secret(),
+    bytes,
     { name: "HMAC", hash: "SHA-256" },
     false,
     ["sign", "verify"],
@@ -149,6 +149,40 @@ export async function encodePayrollCursor(
   scope: CursorScope,
   after: CursorPosition,
 ): Promise<string> {
+  return await encodeWithKey(scope, after, key);
+}
+
+/** One encoder per response, never shared across requests or used for authorization. */
+export function createPayrollCursorEncoder(): typeof encodePayrollCursor {
+  let cached: { bytes: Uint8Array; promise: Promise<CryptoKey> } | undefined;
+  return async (scope, after) => {
+    let bytes: Uint8Array;
+    try {
+      bytes = secret(); // Recheck rotation and secret reuse restrictions on every call.
+    } catch (error) {
+      cached = undefined;
+      throw error;
+    }
+    if (
+      !cached || cached.bytes.length !== bytes.length ||
+      !cached.bytes.every((value, index) => value === bytes[index])
+    ) {
+      const entry = { bytes, promise: key(bytes) };
+      cached = entry;
+      void entry.promise.catch(() => {
+        if (cached === entry) cached = undefined;
+      });
+    }
+    const pending = cached.promise;
+    return await encodeWithKey(scope, after, () => pending);
+  };
+}
+
+async function encodeWithKey(
+  scope: CursorScope,
+  after: CursorPosition,
+  signingKey: () => Promise<CryptoKey>,
+): Promise<string> {
   const payload = base64url(
     new TextEncoder().encode(JSON.stringify({ v: 1, scope, after })),
   );
@@ -156,7 +190,7 @@ export async function encodePayrollCursor(
     new Uint8Array(
       await crypto.subtle.sign(
         "HMAC",
-        await key(),
+        await signingKey(),
         new TextEncoder().encode(payload),
       ),
     ),

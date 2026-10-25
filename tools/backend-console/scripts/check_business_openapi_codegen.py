@@ -8,12 +8,122 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from typing import Any
 
 ENUM_VALUE_PATTERN = re.compile(r'^\s+[A-Z][A-Z0-9_]+ = "([^"]+)"$', re.MULTILINE)
 
 
 def generated_enum_values(path: Path) -> list[str]:
     return ENUM_VALUE_PATTERN.findall(path.read_text(encoding="utf-8"))
+
+
+def check_post_approval_contract(document: dict[str, Any]) -> None:
+    base = "/v1/cleaning-history/submissions/{sourceSubmissionId}/supplemental-room-issues"
+    expected = {
+        "getPostApprovalRoomIssueSource": (base + "/source", "get"),
+        "savePostApprovalRoomIssueDraft": (base + "/drafts", "post"),
+        "getPostApprovalRoomIssueDraft": (base + "/drafts/{clientReportId}", "get"),
+        "listPostApprovalRoomIssueReports": (base, "get"),
+        "finalizePostApprovalRoomIssueReport": (base, "post"),
+        "getPostApprovalRoomIssueReport": (base + "/{reportId}", "get"),
+        "closePostApprovalRoomIssueReport": (base + "/{reportId}/close", "post"),
+        "uploadPostApprovalRoomIssueEvidence": (
+            base + "/drafts/{clientReportId}/evidence/{evidenceId}/upload",
+            "post",
+        ),
+        "getPostApprovalRoomIssueEvidenceUpload": (
+            "/v1/post-approval-room-issue-evidence-uploads/{operationId}",
+            "get",
+        ),
+        "getPostApprovalRoomIssueEvidenceContent": (
+            "/v1/post-approval-room-issue-evidence/{evidenceId}/versions/{revision}/content",
+            "get",
+        ),
+        "handoverPostApprovalRoomIssueEvidenceUpload": (
+            "/v1/post-approval-room-issue-evidence-uploads/{operationId}/handover",
+            "post",
+        ),
+    }
+    paths = document["paths"]
+    for operation_id, (path, method) in expected.items():
+        operation = paths.get(path, {}).get(method, {})
+        roles = (
+            ["admin"]
+            if operation_id
+            in {"closePostApprovalRoomIssueReport", "handoverPostApprovalRoomIssueEvidenceUpload"}
+            else ["admin", "maid"]
+        )
+        if (
+            operation.get("operationId") != operation_id
+            or operation.get("security") != [{"bearerAuth": []}]
+            or operation.get("x-required-roles") != roles
+            or operation.get("x-implementation-status") != "deployed"
+            or operation.get("x-deployed-release") != "v0.9.0"
+            or operation.get("tags") != ["Post-approval Room Issues"]
+        ):
+            raise RuntimeError("#336 정식 source 등록/권한 계약이 잘못됐습니다: " + operation_id)
+        parameters = operation.get("parameters", [])
+        if method == "post" and not any(
+            p.get("in") == "header"
+            and p.get("name") == "Idempotency-Key"
+            and p.get("required") is True
+            for p in parameters
+        ):
+            raise RuntimeError("#336 명령 멱등성 계약 누락: " + operation_id)
+        for status, response in operation["responses"].items():
+            if (
+                response.get("headers", {}).get("Cache-Control", {}).get("schema", {}).get("const")
+                != "no-store"
+            ):
+                raise RuntimeError("#336 캐시 금지 계약 누락: " + operation_id)
+            if int(status) >= 400 and response.get("content", {}).get("application/json", {}).get(
+                "schema"
+            ) != {"$ref": "#/components/schemas/ErrorEnvelope"}:
+                raise RuntimeError("#336 공통 safe error envelope 누락: " + operation_id)
+    draft = paths[base + "/drafts/{clientReportId}"]["get"]["responses"]["200"]["content"][
+        "application/json"
+    ]["schema"]
+    if (
+        draft.get("additionalProperties") is not False
+        or draft.get("required") != ["source", "draft", "evidence", "reportId"]
+        or draft["properties"]["reportId"].get("anyOf")
+        != [{"type": "string", "format": "uuid"}, {"type": "null"}]
+    ):
+        raise RuntimeError("#336 초안 복구 nullable reportId 계약이 잘못됐습니다.")
+    upload = paths[expected["uploadPostApprovalRoomIssueEvidence"][0]]["post"]
+    headers = [p for p in upload["parameters"] if p["in"] == "header"]
+    if [p["name"] for p in headers] != [
+        "Idempotency-Key",
+        "If-Draft-Revision",
+        "If-Evidence-Revision",
+        "If-Item-Revision",
+    ] or not all(p.get("required") is True and p.get("x-single-header") is True for p in headers):
+        raise RuntimeError("#336 증빙 단일 헤더/CAS 계약이 잘못됐습니다.")
+    for header, minimum, maximum in zip(
+        headers[1:], [1, 0, 0], [9007199254740991, 9007199254740990, 9007199254740990], strict=True
+    ):
+        if header["schema"].get("pattern") != "^[0-9]+$" or (
+            header["schema"].get("x-integer-minimum"),
+            header["schema"].get("x-integer-maximum"),
+        ) != (minimum, maximum):
+            raise RuntimeError("#336 증빙 CAS safe integer 경계가 잘못됐습니다.")
+    content = upload["requestBody"]["content"]
+    if set(content) != {"image/jpeg", "image/webp", "image/heic", "image/heif"} or not all(
+        item["schema"]
+        == {"type": "string", "format": "binary", "maxLength": 5242880, "x-max-bytes": 5242880}
+        for item in content.values()
+    ):
+        raise RuntimeError("#336 원본 바이너리 MIME/5MiB 계약이 잘못됐습니다.")
+    codes = document["components"]["schemas"]["ErrorCode"]["enum"]
+    if (
+        len(codes) != 342
+        or len(set(codes)) != 342
+        or "POST_APPROVAL_ROOM_ISSUE_EVIDENCE_RETRY_REQUIRED" not in codes
+        or "AUTH_CONTEXT_UNAVAILABLE" not in codes
+    ):
+        raise RuntimeError(
+            "#442 공통 safe error code union은 신규 인증 오류를 포함한 정확342개여야 합니다."
+        )
 
 
 def check_template_permutation_roundtrip(
@@ -78,6 +188,54 @@ print('Python template codegen: six shared permutations preserve every field and
     )
 
 
+def check_photo_operation_roundtrip(npm: str, repository_root: Path, destination: Path) -> None:
+    fixture_result = subprocess.run(  # noqa: S603
+        [
+            npm,
+            "exec",
+            "--",
+            "tsx",
+            "-e",
+            "import { photoOperationRetentionCases } from "
+            "'./tests/fixtures/photo-operation-retention.ts'; "
+            "process.stdout.write(JSON.stringify(photoOperationRetentionCases()));",
+        ],
+        cwd=repository_root,
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    # The generated consumer must retain explicit None, not invent an enum/default.
+    # Conditional state validation remains in Ajv/runtime, not this DTO generator.
+    source = """\
+import json
+import sys
+sys.path.insert(0, sys.argv[1])
+from generated.models.photo_upload_operation import PhotoUploadOperation
+from generated.models.photo_upload_response import PhotoUploadResponse
+cases = json.load(sys.stdin)
+if len(cases) != 8:
+    raise RuntimeError('Expected eight actual operation projections')
+for case in cases:
+    body = case['body']
+    if PhotoUploadOperation.from_dict(body).to_dict() != body:
+        raise RuntimeError('Operation retention roundtrip failed: ' + case['name'])
+    uploaded = dict(body, quotaWarning=False)
+    if PhotoUploadResponse.from_dict(uploaded).to_dict() != uploaded:
+        raise RuntimeError('Upload retention roundtrip failed: ' + case['name'])
+print('Python photo operation codegen: eight state/retention roundtrips PASS')
+"""
+    subprocess.run(  # noqa: S603
+        [sys.executable, "-c", source, str(destination)],
+        cwd=repository_root,
+        input=fixture_result.stdout,
+        text=True,
+        encoding="utf-8",
+        check=True,
+    )
+
+
 def main() -> None:
     console_root = Path(__file__).resolve().parents[1]
     repository_root = console_root.parents[1]
@@ -96,8 +254,8 @@ def main() -> None:
     if document.get("info", {}).get("version") != "0.6.0":
         raise RuntimeError("전체 source OpenAPI version이 0.6.0이 아닙니다.")
     paths = document.get("paths")
-    if not isinstance(paths, dict) or len(paths) != 137:
-        raise RuntimeError("전체 source OpenAPI path 수가 137이 아닙니다.")
+    if not isinstance(paths, dict) or len(paths) != 154:
+        raise RuntimeError("전체 source OpenAPI path 수가 154가 아닙니다.")
     methods = {"get", "post", "put", "patch", "delete"}
     operation_count = sum(
         1
@@ -106,9 +264,47 @@ def main() -> None:
         for method in path_item
         if method in methods
     )
-    if operation_count != 148:
-        raise RuntimeError("전체 source OpenAPI operation 수가 148이 아닙니다.")
+    if operation_count != 166:
+        raise RuntimeError("전체 source OpenAPI operation 수가 166이 아닙니다.")
     schemas = document.get("components", {}).get("schemas", {})
+    check_post_approval_contract(document)
+    discovery_fields = [
+        "attemptId",
+        "assignmentId",
+        "assignmentRevision",
+        "executionVersion",
+        "status",
+        "kind",
+        "allowedActions",
+        "issuedAt",
+        "expiresAt",
+    ]
+    discovery_item = schemas.get("LimitedAttemptDiscoveryItem", {})
+    discovery = schemas.get("LimitedAttemptDiscovery", {})
+    if (
+        discovery_item.get("required") != discovery_fields
+        or list(discovery_item.get("properties", {})) != discovery_fields
+        or discovery_item.get("additionalProperties") is not False
+        or discovery.get("required") != ["profileStatus", "evaluatedAt", "items"]
+        or discovery.get("additionalProperties") is not False
+        or discovery.get("properties", {}).get("items", {}).get("maxItems") != 1000
+    ):
+        raise RuntimeError("기존 세션 제한 조회의 정확 9필드/1000건 계약이 잘못됐습니다.")
+    discovery_operation = paths.get("/v1/limited/attempts", {}).get("get", {})
+    if (
+        discovery_operation.get("operationId") != "listLimitedAttempts"
+        or discovery_operation.get("x-required-roles") != ["maid"]
+        or discovery_operation.get("security") != [{"bearerAuth": []}]
+        or discovery_operation.get("parameters")
+        or discovery_operation.get("responses", {})
+        .get("200", {})
+        .get("headers", {})
+        .get("Cache-Control", {})
+        .get("schema", {})
+        .get("const")
+        != "no-store"
+    ):
+        raise RuntimeError("기존 세션 제한 조회의 인증/no-store/무 query 계약이 누락됐습니다.")
     adjustment_book = schemas.get("PayrollAdjustmentBook", {})
     book_fields = ["maidProfileId", "weekStart", "currentBookVersion"]
     if (
@@ -184,6 +380,32 @@ def main() -> None:
         )
         package = destination / "generated"
         required = [
+            *[
+                package / "api" / "post_approval_room_issues" / (name + ".py")
+                for name in [
+                    "get_post_approval_room_issue_source",
+                    "save_post_approval_room_issue_draft",
+                    "get_post_approval_room_issue_draft",
+                    "list_post_approval_room_issue_reports",
+                    "finalize_post_approval_room_issue_report",
+                    "get_post_approval_room_issue_report",
+                    "close_post_approval_room_issue_report",
+                    "get_post_approval_room_issue_evidence_upload",
+                    "handover_post_approval_room_issue_evidence_upload",
+                ]
+            ],
+            package / "api" / "rooms" / "list_room_reports.py",
+            package / "models" / "room_reports_envelope.py",
+            package / "models" / "registered_room_report.py",
+            package / "models" / "registered_report_evidence.py",
+            package / "api" / "rooms" / "list_room_candles.py",
+            package / "models" / "room_candle_item.py",
+            package / "models" / "room_candle_page.py",
+            package / "api" / "attempts" / "list_limited_attempts.py",
+            package / "api" / "attempts" / "get_limited_attempt.py",
+            package / "api" / "attempts" / "complete_limited_field_work.py",
+            package / "models" / "limited_attempt_discovery.py",
+            package / "models" / "limited_attempt_discovery_item.py",
             package / "api" / "assignments" / "list_assignments.py",
             package / "api" / "assignments" / "get_assignment_history.py",
             package / "models" / "assignment_card.py",
@@ -252,6 +474,8 @@ def main() -> None:
             package / "api" / "payroll" / "get_payroll_adjustment_book.py",
             package / "api" / "payroll" / "list_payroll_work_details.py",
             package / "api" / "payroll" / "get_payroll_remittance_marker.py",
+            package / "api" / "payroll" / "list_payroll_remittance_markers.py",
+            package / "models" / "payroll_remittance_batch.py",
             package / "api" / "payroll" / "set_payroll_remittance_marker.py",
             package / "api" / "payroll" / "reconfirm_payroll_remittance_marker.py",
             package / "api" / "payroll" / "list_payroll_remittance_marker_history.py",
@@ -364,6 +588,48 @@ def main() -> None:
         missing = [str(path.relative_to(destination)) for path in required if not path.is_file()]
         if missing:
             raise RuntimeError(f"업무 Python codegen 결과가 누락됐습니다: {', '.join(missing)}")
+        for model_name, fields in (
+            ("limited_attempt_discovery", ("profile_status", "evaluated_at", "items")),
+            (
+                "limited_attempt_discovery_item",
+                (
+                    "attempt_id",
+                    "assignment_id",
+                    "assignment_revision",
+                    "execution_version",
+                    "status",
+                    "kind",
+                    "allowed_actions",
+                    "issued_at",
+                    "expires_at",
+                ),
+            ),
+        ):
+            model = (package / "models" / f"{model_name}.py").read_text(encoding="utf-8")
+            for field in fields:
+                declaration = re.search(rf"^\s+{field}:\s+([^\r\n=]+)", model, re.MULTILINE)
+                if declaration is None or "Unset" in declaration.group(1):
+                    raise RuntimeError(f"제한 조회 codegen 필수 필드 누락: {model_name}.{field}")
+            for forbidden in (
+                "session_id:",
+                "session_digest:",
+                "capability_id:",
+                "room_id:",
+                "room_number:",
+                "pin:",
+                "guest_name:",
+                "request_hash:",
+            ):
+                if re.search(rf"^\s+{re.escape(forbidden)}", model, re.MULTILINE):
+                    raise RuntimeError(f"제한 조회 codegen 비공개 필드 노출: {forbidden}")
+        discovery_api = (package / "api" / "attempts" / "list_limited_attempts.py").read_text(
+            encoding="utf-8"
+        )
+        if '"/v1/limited/attempts"' not in discovery_api:
+            raise RuntimeError("기존 세션 제한 조회 codegen 정확한 URL이 누락됐습니다.")
+        for forbidden in ("session_id:", "limit:", "cursor:", "attempt_id:"):
+            if re.search(rf"^\s+{re.escape(forbidden)}", discovery_api, re.MULTILINE):
+                raise RuntimeError(f"제한 조회 codegen 임의 scope/query 노출: {forbidden}")
         template_request = (package / "models" / "publish_cleaning_template_request.py").read_text(
             encoding="utf-8"
         )
@@ -376,6 +642,27 @@ def main() -> None:
             if field not in template_request:
                 raise RuntimeError(f"사진 템플릿 게시 codegen 필드가 누락됐습니다: {field}")
         check_template_permutation_roundtrip(npm, repository_root, destination)
+        batch_roundtrip = """
+import sys
+from datetime import date
+from uuid import UUID
+import httpx
+sys.path.insert(0, sys.argv[1])
+from generated.api.payroll.list_payroll_remittance_markers import _get_kwargs
+ids = [UUID('c1000000-0000-4000-8000-000000000003'),
+       UUID('c1000000-0000-4000-8000-000000000004')]
+kwargs = _get_kwargs(maid_profile_ids=','.join(map(str, ids)), week_start=date(2026, 9, 21))
+params = httpx.QueryParams(kwargs['params'])
+if params.get_list('maidProfileIds') != [','.join(map(str, ids))]:
+    raise RuntimeError('Generated batch client must send one CSV query, not repeated keys')
+print('Python remittance batch codegen CSV serialization PASS')
+"""
+        subprocess.run(  # noqa: S603
+            [sys.executable, "-c", batch_roundtrip, str(destination)],
+            cwd=repository_root,
+            check=True,
+        )
+        check_photo_operation_roundtrip(npm, repository_root, destination)
         for book_model_name, book_expected_fields in (
             (
                 "payroll_adjustment_book",
@@ -568,6 +855,16 @@ def main() -> None:
             raise RuntimeError("PIN prepare codegen request에 pinDigits가 누락됐습니다.")
         if "credential: str" not in reveal_model or '"credential": credential' not in reveal_model:
             raise RuntimeError("PIN reveal codegen response에 credential이 누락됐습니다.")
+        for operation in ("export_room_pins", "preview_room_pin_import", "apply_room_pin_import"):
+            api = package / "api" / "rooms" / f"{operation}.py"
+            if not api.is_file() or "sync_detailed" not in api.read_text(encoding="utf-8"):
+                raise RuntimeError(f"PIN transfer codegen API 누락: {operation}")
+        export_api = (package / "api" / "rooms" / "export_room_pins.py").read_text(encoding="utf-8")
+        if (
+            "response.status_code == 200" not in export_api
+            or "BytesIO(response.content)" not in export_api
+        ):
+            raise RuntimeError("PIN Excel codegen이 200 바이너리 응답을 누락했습니다.")
         room_move_preview_path = package / "models" / "reservation_room_move_preview.py"
         room_move_preview_model = room_move_preview_path.read_text(encoding="utf-8")
         room_move_result_model = (package / "models" / "reservation_room_move_result.py").read_text(

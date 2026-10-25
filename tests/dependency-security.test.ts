@@ -1,10 +1,117 @@
 import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
+import { spawnSync } from 'node:child_process';
+import Fastify from 'fastify';
+import { z } from 'zod';
 import { describe, expect, it, vi } from 'vitest';
 import { buildApp, type AppServices } from '../src/app.js';
 import type { AppEnv } from '../src/config/env.js';
 
 const require = createRequire(import.meta.url);
+
+describe('#487 collection and URI security boundaries', () => {
+  it('rejects oversized constrained collections before validating their elements', () => {
+    const element = vi.fn(() => true);
+    const schema = z.array(z.string().refine(element)).max(10);
+    const result = schema.safeParse(Array.from({ length: 10000 }, () => 'synthetic'));
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues).toHaveLength(1);
+      expect(result.error.issues[0]?.code).toBe('too_big');
+    }
+    expect(element).not.toHaveBeenCalled();
+    expect(schema.safeParse(['synthetic']).success).toBe(true);
+    expect(element).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['ajv', '@fastify/ajv-compiler', 'fast-json-stringify'])('preserves URI boundaries through %s', consumer => {
+    const consumerRequire = createRequire(require.resolve(`${consumer}/package.json`));
+    const uri = consumerRequire('fast-uri');
+    for (const encoded of ['%6Aavascript:alert(1)', '%u006Aavascript:alert(1)']) {
+      expect(uri.parse(encoded).scheme).not.toBe('javascript');
+      expect(uri.normalize(encoded)).not.toBe('javascript:alert(1)');
+      expect(() => uri.resolve('https://example.test/', encoded)).toThrow('URI scheme is malformed');
+    }
+    expect(uri.equal('%68ttp://example.test/', 'http://example.test/')).toBe(false);
+    expect(uri.normalize('a/../b')).toBe('b');
+    expect(uri.equal('../x', 'x')).toBe(false);
+    expect(uri.normalize('./a:b')).toBe('./a:b');
+    const malformed = 'https://trusted.test\\@evil.test/';
+    expect(uri.parse(malformed).error).toBeDefined();
+    expect(uri.normalize(malformed)).toBe(malformed);
+    expect(uri.resolve('https://example.test/a/', '../b')).toBe('https://example.test/b');
+  });
+});
+
+describe('#478 runtime dependency security patch', () => {
+  it.each([
+    { not: { enum: ['X-Debug-Override'] } },
+    { not: { const: 'X-Debug-Override' } }
+  ])('normalizes propertyNames header denial before handler execution', async propertyNames => {
+    const app = Fastify({ logger: false });
+    const handler = vi.fn(async () => ({ ok: true }));
+    app.get('/synthetic-header-boundary', { schema: { headers: { type: 'object', propertyNames } } }, handler);
+    try {
+      for (const name of ['X-Debug-Override', 'x-debug-override', 'X-DEBUG-OVERRIDE']) {
+        const response = await app.inject({ url: '/synthetic-header-boundary', headers: { [name]: 'synthetic' } });
+        expect(response.statusCode).toBe(400);
+      }
+      expect(handler).not.toHaveBeenCalled();
+      expect((await app.inject({ url: '/synthetic-header-boundary', headers: { 'x-safe-header': 'synthetic' } })).statusCode).toBe(200);
+      expect(handler).toHaveBeenCalledTimes(1);
+    } finally { await app.close(); }
+  });
+
+  it('bounds malformed IPv6 zone parsing in an isolated process through the rate-limit dependency', () => {
+    const consumer = createRequire(require.resolve('@fastify/rate-limit/package.json'));
+    const modulePath = consumer.resolve('ip-address');
+    // A timeout terminates only this synthetic child; no server or real request is used.
+    const result = spawnSync(process.execPath, ['-e', `
+      const assert = require('node:assert/strict');
+      const { Address6 } = require(process.argv[1]);
+      assert.equal(new Address6('fe80::1%eth0').zone, '%eth0');
+      for (const terminator of ['\\n', '\\r', '\\u2028', '\\u2029']) {
+        assert.equal(Address6.isValid('%'.repeat(262144) + terminator), false);
+      }
+    `, modulePath], { timeout: 6000, encoding: 'utf8', windowsHide: true });
+    expect(result.error).toBeUndefined();
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe('');
+  }, 10000);
+});
+
+describe('#465 development tool security patch', () => {
+  it('pins patched Vite and the complete Vitest family as development-only packages', async () => {
+    const manifest = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
+    const lock = JSON.parse(await readFile(new URL('../package-lock.json', import.meta.url), 'utf8')) as {
+      packages: Record<string, { version?: string; dev?: boolean }>;
+    };
+    expect(manifest.devDependencies.vitest).toBe('4.1.12');
+    expect(manifest.overrides.vite).toBe('8.2.4');
+    expect(manifest.dependencies.vite).toBeUndefined();
+    expect(manifest.dependencies.vitest).toBeUndefined();
+    for (const [name, version] of [['vite', '8.2.4'], ['vitest', '4.1.12'], ['@vitest/mocker', '4.1.12']] as const) {
+      const copies = Object.entries(lock.packages).filter(([path]) =>
+        path === `node_modules/${name}` || path.endsWith(`/node_modules/${name}`));
+      expect(copies.length, name).toBeGreaterThan(0);
+      for (const [, entry] of copies) {
+        expect(entry.version, name).toBe(version);
+        expect(entry.dev, name).toBe(true);
+      }
+      const installed = JSON.parse(await readFile(require.resolve(`${name}/package.json`), 'utf8'));
+      expect(installed.version, name).toBe(version);
+    }
+    for (const [path, entry] of Object.entries(lock.packages)) {
+      if (path.includes('node_modules/@vitest/')) {
+        expect(entry.version, path).toBe('4.1.12');
+        expect(entry.dev, path).toBe(true);
+      }
+    }
+    expect(manifest.scripts.dev).toBe('tsx watch src/server.ts');
+    expect(manifest.scripts.test).toBe('vitest run');
+  });
+});
+
 const env: AppEnv = {
   APP_ENV: 'local', NODE_ENV: 'test', HOST: '127.0.0.1', PORT: 3000, LOG_LEVEL: 'silent',
   CORS_ORIGINS: 'http://127.0.0.1:4173', corsOrigins: ['http://127.0.0.1:4173'],
@@ -43,28 +150,32 @@ describe('#334 dependency security patch', () => {
     const lock = JSON.parse(await readFile(new URL('../package-lock.json', import.meta.url), 'utf8')) as {
       packages: Record<string, { version?: string; dependencies?: Record<string, string> }>;
     };
-    expect(manifest.dependencies.fastify).toBe('5.12.5');
+    expect(manifest.dependencies.fastify).toBe('5.12.7');
     expect(manifest.overrides).toEqual({
-      'fast-uri@^3.0.0': '3.1.8', 'fast-uri@^4.0.0': '4.1.5', 'ip-address': '10.7.1'
+      'fast-uri@^3.0.0': '3.1.9', 'fast-uri@^4.0.0': '4.2.3', 'ip-address': '10.7.4',
+      'source-map-js': '1.2.2', 'vite': '8.2.4'
     });
-    expect(lock.packages['']?.dependencies?.fastify).toBe('5.12.5');
+    expect(lock.packages['']?.dependencies?.fastify).toBe('5.12.7');
     // Overrides can move copies underneath consumers; do not assume root hoisting.
     const versions = (name: string) => Object.entries(lock.packages)
       .filter(([path]) => path.endsWith(`/node_modules/${name}`) || path === `node_modules/${name}`)
       .map(([, metadata]) => metadata.version);
-    expect(versions('fastify')).toEqual(['5.12.5']);
-    expect(new Set(versions('fast-uri'))).toEqual(new Set(['3.1.8', '4.1.5']));
+    expect(versions('fastify')).toEqual(['5.12.7']);
+    expect(new Set(versions('fast-uri'))).toEqual(new Set(['3.1.9', '4.2.3']));
     expect(versions('ip-address').length).toBeGreaterThan(0);
-    expect(versions('ip-address').every(version => version === '10.7.1')).toBe(true);
+    expect(versions('ip-address').every(version => version === '10.7.4')).toBe(true);
+    expect(versions('source-map-js').length).toBeGreaterThan(0);
+    expect(versions('source-map-js').every(version => version === '1.2.2')).toBe(true);
     expect(lock.packages['node_modules/ajv']?.dependencies?.['fast-uri']).toBe('^3.0.1');
   });
 
   it('resolves patched installed packages through their real consumers', async () => {
     for (const [consumer, dependency, version] of [
-      ['ajv', 'fast-uri', '3.1.8'],
-      ['@fastify/ajv-compiler', 'fast-uri', '4.1.5'],
-      ['fast-json-stringify', 'fast-uri', '4.1.5'],
-      ['@fastify/rate-limit', 'ip-address', '10.7.1']
+      ['ajv', 'fast-uri', '3.1.9'],
+      ['@fastify/ajv-compiler', 'fast-uri', '4.2.3'],
+      ['fast-json-stringify', 'fast-uri', '4.2.3'],
+      ['@fastify/rate-limit', 'ip-address', '10.7.4'],
+      ['postcss', 'source-map-js', '1.2.2']
     ] as const) {
       const consumerRequire = createRequire(require.resolve(`${consumer}/package.json`));
       const installed = JSON.parse(await readFile(consumerRequire.resolve(`${dependency}/package.json`), 'utf8'));
@@ -72,7 +183,7 @@ describe('#334 dependency security patch', () => {
     }
     const { app } = await fixture();
     try {
-      expect(app.version).toBe('5.12.5');
+      expect(app.version).toBe('5.12.7');
       const health = await app.inject({ method: 'GET', url: '/health', headers: { origin: env.corsOrigins[0] } });
       expect(health.statusCode).toBe(200);
       expect(health.json().status).toBe('ok');

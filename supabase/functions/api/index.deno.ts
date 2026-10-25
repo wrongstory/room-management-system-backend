@@ -4,6 +4,327 @@ import { EdgeError } from "../_shared/runtime.ts";
 import { PhotoError } from "../_shared/photo-binary.ts";
 import type { PhotoService } from "../_shared/photo-service.ts";
 
+Deno.test("#317 PIN 5xx logs correlate server UUID without secrets across all operations", async () => {
+  const paths = [
+    "pins/bootstrap",
+    "room/pin/reveal",
+    "room/pin/generated/confirm",
+    "room/pin-changes/prepare",
+    "room/pin-changes/lease/confirm",
+    "room/pin-changes/lease/rollback",
+  ];
+  const records: unknown[][] = [];
+  const original = console.error;
+  console.error = (...args: unknown[]) => {
+    records.push(args);
+  };
+  const supplied = "10000000-0000-4000-8000-000000000001";
+  try {
+    for (const path of paths) {
+      for (
+        const failure of [
+          new EdgeError(503, "ROOM_PIN_KEY_UNAVAILABLE", "safe"),
+          new Error("synthetic-secret-raw"),
+          new EdgeError(503, "synthetic-secret-code", "safe"),
+        ]
+      ) {
+        const deps: ApiHandlerDependencies = {
+          createClients: () => ({}) as EdgeClients,
+          authenticateRequest: () => Promise.reject(failure),
+        };
+        const before = records.length;
+        const response = await handleApiRequest(
+          new Request(
+            `https://api.example/api/v1/rooms/${path}?pin=synthetic-secret-query`,
+            {
+              method: "POST",
+              headers: {
+                "x-request-id": supplied,
+                authorization: "Bearer synthetic-secret-token",
+                "content-type": "application/json",
+              },
+              body: "{}",
+            },
+          ),
+          deps,
+        );
+        const body = await response.json();
+        assert(
+          response.status === (failure instanceof EdgeError ? 503 : 500),
+          "expected failure",
+        );
+        assert(
+          response.headers.get("cache-control") === "no-store",
+          "no cache",
+        );
+        assert(
+          body.requestId !== supplied &&
+            /^[0-9a-f-]{14}4[0-9a-f-]{21}$/.test(body.requestId),
+          "server UUID",
+        );
+        assert(records.length === before + 1, "exactly one diagnostic");
+        const record = JSON.parse(String(records.at(-1)?.[0]));
+        assert(
+          record.requestId === body.requestId &&
+            record.status === response.status,
+          "response correlation",
+        );
+        assert(
+          Object.keys(record).sort().join(",") ===
+            "code,operation,requestId,status",
+          "closed projection",
+        );
+        assert(
+          record.code ===
+            (failure instanceof EdgeError &&
+                failure.code === "ROOM_PIN_KEY_UNAVAILABLE"
+              ? failure.code
+              : "INTERNAL_SERVER_ERROR"),
+          "allowlist",
+        );
+      }
+    }
+    const before = records.length;
+    const denied = await handleApiRequest(
+      new Request("https://api.example/api/v1/rooms/room/pin/reveal", {
+        method: "POST",
+      }),
+      {
+        createClients: () => ({}) as EdgeClients,
+        authenticateRequest: () =>
+          Promise.reject(new EdgeError(401, "INVALID_ACCESS_TOKEN", "denied")),
+      },
+    );
+    assert(
+      denied.status === 401 && records.length === before,
+      "4xx not logged",
+    );
+    await denied.body?.cancel();
+    assert(
+      !JSON.stringify(records).includes("synthetic-secret"),
+      "no secret canaries in logs",
+    );
+  } finally {
+    console.error = original;
+  }
+});
+
+Deno.test("common timing exposes only fixed duration on successful business responses", async () => {
+  const deps: ApiHandlerDependencies = {
+    createClients: () =>
+      ({
+        admin: { rpc: () => Promise.resolve({ data: [], error: null }) },
+      }) as unknown as EdgeClients,
+    authenticateRequest: () =>
+      Promise.resolve({
+        authUserId: "synthetic",
+        profileId: "synthetic",
+        displayName: "synthetic",
+        role: "admin",
+        mustChangePassword: false,
+      }),
+  };
+  const token = `h.${
+    btoa(JSON.stringify({ session_id: "10000000-0000-4000-8000-000000000001" }))
+  }.synthetic`;
+  for (const prefix of ["/api", "/functions/v1/api"]) {
+    const response = await handleApiRequest(
+      new Request(`https://api.example${prefix}/v1/rooms`, {
+        headers: {
+          authorization: `Bearer ${token}`,
+          "server-timing": "private-secret",
+        },
+      }),
+      deps,
+    );
+    assert(response.status === 200, "success");
+    assert(
+      /^api_total;dur=\d+\.\d$/.test(
+        response.headers.get("server-timing") ?? "",
+      ),
+      "numeric only",
+    );
+    assert(
+      response.headers.get("access-control-expose-headers") === "Server-Timing",
+      "browser-readable",
+    );
+    assert(
+      JSON.stringify(await response.json()) === JSON.stringify({ rooms: [] }),
+      "same payload",
+    );
+  }
+  const denied = await handleApiRequest(
+    new Request("https://api.example/api/v1/rooms"),
+    {
+      ...deps,
+      authenticateRequest: () =>
+        Promise.reject(new EdgeError(401, "INVALID_ACCESS_TOKEN", "denied")),
+    },
+  );
+  assert(
+    denied.status === 401 && !denied.headers.has("server-timing"),
+    "no denial timing",
+  );
+  await denied.body?.cancel();
+});
+
+Deno.test("#406 PUT preflight preserves exact origins and all CAS headers without auth or DB", async () => {
+  const previous = Deno.env.get("CORS_ORIGINS");
+  const origins = [
+    "https://room-management-system-prod.vercel.app",
+    "https://synthetic-preview.example",
+  ];
+  Deno.env.set("CORS_ORIGINS", origins.join(","));
+  let calls = 0;
+  const dependencies: ApiHandlerDependencies = {
+    createClients: () => {
+      calls++;
+      throw new Error("preflight must not create clients");
+    },
+    authenticateRequest: () => {
+      calls++;
+      throw new Error("preflight must not authenticate");
+    },
+  };
+  const headers =
+    "authorization,content-type,idempotency-key,if-draft-revision,if-evidence-revision,if-item-revision";
+  try {
+    for (
+      const origin of [
+        ...origins,
+        "https://untrusted.example",
+        origins[0] + ".evil.example",
+      ]
+    ) {
+      const response = await handleApiRequest(
+        new Request("https://api.example/v1/payroll/remittance-marker", {
+          method: "OPTIONS",
+          headers: {
+            origin,
+            "access-control-request-method": "PUT",
+            "access-control-request-headers": headers,
+          },
+        }),
+        dependencies,
+      );
+      if (origins.includes(origin)) {
+        assert(response.status === 204, "allowed preflight");
+        assert(
+          response.headers.get("access-control-allow-origin") === origin,
+          "exact origin",
+        );
+        assert(
+          response.headers.get("access-control-allow-methods")?.split(",")
+            .includes("PUT"),
+          "PUT advertised",
+        );
+        for (const header of headers.split(",")) {
+          assert(
+            response.headers.get("access-control-allow-headers")?.split(",")
+              .includes(header),
+            header,
+          );
+        }
+        assert(
+          response.headers.get("vary") === "Origin",
+          "cache origin separation",
+        );
+      } else {
+        assert(response.status === 403, "unlisted origin rejected");
+        assert(
+          !response.headers.has("access-control-allow-origin"),
+          "no reflected untrusted origin",
+        );
+      }
+      await response.body?.cancel();
+    }
+    assert(calls === 0, "no auth or DB effects");
+  } finally {
+    if (previous === undefined) Deno.env.delete("CORS_ORIGINS");
+    else Deno.env.set("CORS_ORIGINS", previous);
+  }
+});
+
+Deno.test("candle HTTP routes allow maid minimal reads and writes without opening general room access", async () => {
+  const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+  const clients = {
+    admin: {
+      rpc(name: string, args: Record<string, unknown>) {
+        calls.push({ name, args });
+        const data = name === "list_room_candles"
+          ? {
+            items: [{
+              roomId,
+              roomNumber: "117",
+              count: 0,
+              roomStateVersion: 8,
+            }],
+            nextCursor: null,
+          }
+          : {
+            entity_id: issueId,
+            room_id: roomId,
+            room_state_version: 8,
+            recorded_at: "2026-09-30T00:00:00Z",
+          };
+        return Promise.resolve({ data, error: null });
+      },
+    },
+  } as unknown as EdgeClients;
+  const dependencies: ApiHandlerDependencies = {
+    createClients: () => clients,
+    authenticateRequest: () => Promise.resolve({ ...actor, role: "maid" }),
+  };
+  const read = await handleApiRequest(
+    request("GET", `/v1/rooms/candles?roomId=${roomId}`),
+    dependencies,
+  );
+  assert(
+    read.status === 200 && read.headers.get("cache-control") === "no-store",
+    "exact static route and no-store",
+  );
+  assert((await read.json()).items[0].count === 0, "minimal page envelope");
+  const write = await handleApiRequest(
+    request("POST", `/v1/rooms/${roomId}/candles`, {
+      expectedRoomVersion: 7,
+      reasonCode: "CANDLE_ADJUSTED",
+      count: 0,
+      physicallyVerified: true,
+    }),
+    dependencies,
+  );
+  assert(
+    write.status === 201 && write.headers.get("cache-control") === "no-store",
+    "maid write and no-store",
+  );
+  assert(
+    (await write.json()).operation.roomStateVersion === 8,
+    "existing operation envelope",
+  );
+  assert(
+    calls.length === 2 && calls[0].name === "list_room_candles" &&
+      calls[1].name === "set_room_candle_count",
+    "only narrow RPCs",
+  );
+  assert(
+    calls.every((call) =>
+      call.args.p_session_id === "70000000-0000-4000-8000-000000000001"
+    ),
+    "verified session binding",
+  );
+  for (const path of [`/v1/rooms/${roomId}`, `/v1/rooms/${roomId}/issues`]) {
+    const response = await handleApiRequest(request("GET", path), dependencies);
+    assert(response.status === 403, "maid cannot read general room data");
+    await response.body?.cancel();
+  }
+  assert(
+    calls.slice().length === 4 &&
+      calls.slice(2).every((call) =>
+        call.name === "record_authorization_denial"
+      ),
+    "forbidden requests only record denial, never access room RPC",
+  );
+});
 for (const stream of ["issues", "operation-blocks"] as const) {
   Deno.test(`room pagination entry route: ${stream} validates query and page bounds`, async () => {
     const status = stream === "issues" ? "open" : "actionable";
@@ -356,7 +677,9 @@ Deno.test("photo failure logs only bounded status/code/request ID and preserves 
         }) as unknown as EdgeClients,
       authenticateRequest: () => Promise.resolve(actor),
       photoService: () =>
-        ({ upload: () => Promise.reject(error) }) as unknown as PhotoService,
+        ({
+          withTiming: () => ({ upload: () => Promise.reject(error) }),
+        }) as unknown as PhotoService,
     });
     const body = await response.json();
     assert(
@@ -1004,7 +1327,7 @@ Deno.test("assignment GET routes expose only own notified revisions and preserve
             : [{ id: maid.profileId, display_name: "메이드" }],
         ),
       rpc: (name: string, args: Record<string, unknown>) => {
-        if (name !== "get_assignment_schedule_read") {
+        if (name !== "get_assignment_schedule_read_for_plan") {
           return Promise.resolve({ data: null, error: null });
         }
         assert(
@@ -1034,6 +1357,7 @@ Deno.test("assignment GET routes expose only own notified revisions and preserve
         return Promise.resolve({
           data: ids.map((assignmentId) => ({
             assignmentId,
+            planningDate: "2026-09-04",
             scheduleSnapshot: null,
             currentDeparture: null,
           })),
@@ -1267,7 +1591,7 @@ function routeDependencies(calls: string[]): ApiHandlerDependencies {
             error: null,
           };
         }
-        if (name === "get_room_operational_projection") {
+        if (name === "get_room_board_projection") {
           return { data: [roomRow], error: null };
         }
         if (name === "list_room_operation_blocks_page") {
@@ -1288,6 +1612,19 @@ function routeDependencies(calls: string[]): ApiHandlerDependencies {
               nextCursor: null,
             },
             error: null,
+          };
+        }
+        if (name === "list_room_reports_page") {
+          return {
+            error: null,
+            data: {
+              roomId,
+              roomStateVersion: 3,
+              evaluatedAt: "2026-09-20T00:00:00Z",
+              items: [],
+              hasMore: false,
+              nextCursor: null,
+            },
           };
         }
         if (name === "list_room_issues_page") {
@@ -1464,12 +1801,14 @@ Deno.test("limited upload_only submission route uses capability auth and preserv
   };
   const route = `/v1/attempts/${attemptId}/submissions`;
   const successCalls: string[] = [];
+  const successArgs: Record<string, unknown>[] = [];
   const successClients = {
     admin: {
-      rpc(name: string) {
+      rpc(name: string, args: Record<string, unknown>) {
         successCalls.push(name);
+        successArgs.push(args);
         return Promise.resolve({
-          data: name === "create_cleaning_submission"
+          data: name === "create_cleaning_submission_with_session"
             ? {
               id: submissionId,
               attemptId,
@@ -1498,8 +1837,14 @@ Deno.test("limited upload_only submission route uses capability auth and preserv
   });
   assert(success.status === 201, "live upload_submit route succeeds");
   assert(
-    successCalls.join(",") === "create_cleaning_submission",
+    successCalls.join(",") === "create_cleaning_submission_with_session",
     "limited route delegates exact capability decision to submission RPC",
+  );
+  assert(
+    successArgs[0].p_actor_profile_id === maid.profileId &&
+      successArgs[0].p_session_id === "93000000-0000-4000-8000-000000000003" &&
+      Object.keys(successArgs[0]).length === 8,
+    "dedicated verified identity session is forwarded, never recovered from an unbound fallback",
   );
 
   for (
@@ -1549,7 +1894,7 @@ Deno.test("limited upload_only submission route uses capability auth and preserv
     );
     assert(
       calls.join(",") ===
-        "create_cleaning_submission,record_authorization_denial",
+        "create_cleaning_submission_with_session,record_authorization_denial",
       `${fixture} denial is bounded without replacing the intended response`,
     );
   }
@@ -2071,6 +2416,11 @@ Deno.test("Room list, exact detail, and mutation routes remain reachable", async
     { method: "GET", path: "/v1/room-types", status: 200 },
     { method: "GET", path: "/v1/rooms", status: 200 },
     { method: "GET", path: `/v1/rooms/${roomId}`, status: 200 },
+    {
+      method: "GET",
+      path: `/v1/rooms/${roomId}/reports?limit=1&status=registered`,
+      status: 200,
+    },
     {
       method: "GET",
       path: `/v1/rooms/${roomId}/operation-blocks?status=actionable`,

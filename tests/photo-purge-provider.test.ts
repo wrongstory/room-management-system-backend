@@ -24,6 +24,12 @@ describe('purge Drive adapter fake-only boundaries', () => {
   it.each([200, 302, 401, 403, 429, 500, 503])('DELETE %i never becomes success', async status => {
     await expect(setup(status).provider.purgeRemove(fileId)).rejects.toMatchObject({ code: 'PHOTO_PURGE_PROVIDER_UNAVAILABLE' });
   });
+  it.each([403, 429, 500, 503])('DELETE %i preserves provider reason classification', async status => {
+    await expect(setup(status).provider.purgeRemove(fileId)).rejects.toMatchObject({
+      reason: status === 429 ? 'RATE_LIMITED' : 'PROVIDER_ERROR',
+      message: 'PHOTO_PURGE_PROVIDER_UNAVAILABLE'
+    });
+  });
   it('network/response loss and 404 lookup never reflect raw provider errors', async () => {
     await expect(setup(204, { network: true }).provider.purgeRemove(fileId)).rejects.toMatchObject({ reason: 'NETWORK_ERROR', message: 'PHOTO_PURGE_PROVIDER_UNAVAILABLE' });
     expect(await setup(404).provider.purgeExists(fileId)).toBe(false);

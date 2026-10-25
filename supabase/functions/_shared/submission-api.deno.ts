@@ -126,7 +126,11 @@ Deno.test("maid submission commands preserve scoped actor hash and redact raw ex
     maid,
     attemptId,
   );
-  assert(calls[0].name === "create_cleaning_submission", "exact RPC");
+  assert(
+    calls[0].name === "create_cleaning_submission_with_session",
+    "exact RPC",
+  );
+  assert(calls[0].args.p_session_id === sessionId, "exact verified session");
   assert(
     calls[0].args.p_actor_profile_id === maid.profileId &&
       /^[a-f0-9]{64}$/.test(String(calls[0].args.p_request_hash)),

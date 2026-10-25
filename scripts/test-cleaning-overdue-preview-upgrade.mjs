@@ -53,9 +53,12 @@ try {
     'ASSIGNMENT_DRAFT_STALE_SCHEDULE', 'Real snapshot staleness remains blocked');
   assert.equal(current.targets.find((t) => t.cleaningTargetId === id(1014)).blockedReason,
     'PREVIOUS_ROOM_WORKFLOW_ACTIVE', 'Real previous room workflow remains blocked');
-  assert.equal(preview('2038-06-08').targets.length, 4, 'Tomorrow does not duplicate old no-attempt candidates');
+  const tomorrow = preview('2038-06-08');
+  assert.deepEqual(tomorrow.targets.map(t => t.cleaningTargetId).sort(),
+    [1001,1002,1003,1004,1005,1006,1011,1012,1013,1014].map(id).sort(),
+    'Latest head includes tomorrow and unfinished backlog, not approved/cancelled history');
   assert.equal(snapshot(), before, 'Installing and reading89 cannot rewrite history or produce notifications');
-  console.log('Cleaning overdue preview upgrade88→89: PASS; exact history preserved, today4→8, tomorrow4, terminal max60, no writes.');
+  console.log('Cleaning overdue preview upgrade88→latest: PASS; exact history preserved, today4→8, tomorrow10, terminal max60, no writes.');
 } finally {
   run(process.execPath, [cli, 'db', 'reset', '--local', '--no-seed']);
 }

@@ -73,7 +73,7 @@ const targets = targetIds.map((id, index) => ({
 
 type Row = Record<string, unknown>;
 
-function query(initialRows: Row[], countOverride?: number | null, onIds?: (ids: unknown[]) => void) {
+function query(initialRows: Row[], countOverride?: number | null, onIds?: (ids: unknown[]) => void, beforeRead?: () => Promise<void>) {
   let rows = [...initialRows];
   let maximum = 1000;
   const builder = {
@@ -82,9 +82,9 @@ function query(initialRows: Row[], countOverride?: number | null, onIds?: (ids: 
       rows = rows.filter((row) => row[column] === value);
       return builder;
     },
-    not: (column: string, operator: string) => {
+    not: (column: string, operator: string, value?: string) => {
       if (operator === 'is') rows = rows.filter((row) => row[column] !== null);
-      if (column === 'cleaning_targets.status') rows = rows.filter((row) => !['approved', 'cancelled'].includes((row.cleaning_targets as Row).status as string));
+      if (column === 'cleaning_targets.status') rows = rows.filter((row) => !(value ?? '').slice(1, -1).split(',').includes((row.cleaning_targets as Row).status as string));
       return builder;
     },
     lt: (column: string, value: string) => {
@@ -100,13 +100,14 @@ function query(initialRows: Row[], countOverride?: number | null, onIds?: (ids: 
     order: () => builder,
     // biome-ignore lint/suspicious/noThenProperty: Supabase query builders are intentionally awaitable.
     then: (resolve: (value: { data: Row[]; error: null; count: number | null }) => unknown) =>
-      Promise.resolve({ data: rows.slice(0, maximum), error: null, count: countOverride === undefined ? rows.length : countOverride }).then(resolve)
+      Promise.resolve().then(beforeRead).then(() => ({ data: rows.slice(0, maximum), error: null, count: countOverride === undefined ? rows.length : countOverride })).then(resolve)
   };
   return builder;
 }
 
 function service(overrides: Partial<Record<string, Row[]>> = {}, clock: () => Date = () => new Date(), counts: Partial<Record<string, number | null>> = {}, onIds?: (ids: unknown[]) => void,
-  read?: (args: Record<string, unknown>) => { data: unknown; error: { message: string } | null }) {
+  read?: (args: Record<string, unknown>) => { data: unknown; error: { message: string } | null },
+  beforeRead?: (table: string) => Promise<void>) {
   const tables: Record<string, Row[]> = {
     cleaning_assignments: assignments,
     cleaning_targets: targets,
@@ -137,10 +138,10 @@ function service(overrides: Partial<Record<string, Row[]>> = {}, clock: () => Da
   };
   const from = (table: string) => query(table === 'cleaning_assignments'
     ? (tables[table] ?? []).map((row) => ({ ...row, cleaning_targets: tables.cleaning_targets?.find((target) => target.id === row.cleaning_target_id) }))
-    : tables[table] ?? [], counts[table], onIds);
+    : tables[table] ?? [], counts[table], onIds, () => beforeRead?.(table) ?? Promise.resolve());
   return new SupabaseAssignmentService({
     admin: { from, rpc: vi.fn(async (name: string, args: Record<string, unknown>) => {
-      expect(name).toBe('get_assignment_schedule_read');
+      expect(name).toBe('get_assignment_schedule_read_for_plan');
       expect(args.p_session_id).toBe(sessionId);
       expect(['admin', 'maid']).toContain(args.p_expected_actor_role);
       return read?.(args) ?? { data: (args.p_assignment_ids as string[]).map((assignmentId) =>
@@ -150,6 +151,66 @@ function service(overrides: Partial<Record<string, Row[]>> = {}, clock: () => Da
     forAccessToken: () => ({ from })
   } as never, clock);
 }
+
+describe('assignment hydration dependency pipeline', () => {
+  it.each(['cleaning_targets', 'profiles', 'cleaning_target_schedule_revisions'])(
+    'reads submissions before slow %s finishes, but revalidates authority last', async (slowTable) => {
+      let release = () => {};
+      const gate = new Promise<void>((resolve) => { release = resolve; });
+      const events: string[] = [];
+      const read = vi.fn(() => { events.push('authority'); return { data: [], error: { message: 'SESSION_REVOKED' } }; });
+      const pending = service({}, undefined, {}, undefined, read, async (table) => {
+        events.push(`start:${table}`);
+        if (table === slowTable) await gate;
+        events.push(`end:${table}`);
+      }).list(admin, { serviceDate: '2026-09-20' });
+      const rejection = expect(pending).rejects.toMatchObject({ code: 'SESSION_REVOKED' });
+      try {
+        await vi.waitFor(() => expect(events).toContain('end:cleaning_submissions'));
+        expect(events).not.toContain(`end:${slowTable}`);
+        expect(read).not.toHaveBeenCalled();
+      } finally { release(); }
+      await rejection;
+      expect(events.at(-1)).toBe('authority');
+    }
+  );
+
+  it.each([null, 1001, 2])('rejects incomplete submissions (%s), without returning partial cards', async (count) => {
+    const read = vi.fn();
+    await expect(service({}, undefined, { cleaning_submissions: count }, undefined, read)
+      .list(admin, { serviceDate: '2026-09-20' })).rejects.toMatchObject({ code: 'ASSIGNMENT_QUERY_FAILED' });
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it.each([1, 100, 1000])('keeps bounded calls, order and payload for %s complete cards', async (size) => {
+    const rows = Array.from({ length: size }, (_, i) => ({ ...assignments[0], id: `assignment-${i}`, cleaning_target_id: `target-${i}`, sequence_number: i + 1 }));
+    const targetRows = rows.map((row) => ({ ...targets[0], id: row.cleaning_target_id }));
+    const attempts = rows.map((row, i) => ({ id: `attempt-${i}`, assignment_id: row.id, attempt_number: 1, status: 'in_progress' }));
+    const submissions = attempts.map((row) => ({ cleaning_attempt_id: row.id, version: 1, status: 'submitted' }));
+    const calls: string[] = [];
+    const batches: number[] = [];
+    const authorityBatches: number[] = [];
+    const result = await service({ cleaning_assignments: rows, cleaning_targets: targetRows, cleaning_attempts: attempts,
+      cleaning_submissions: submissions, cleaning_target_schedule_revisions: [] }, () => new Date('2026-09-19T00:00:00Z'), {},
+      (ids) => batches.push(ids.length), (args) => {
+        const ids = args.p_assignment_ids as string[];
+        authorityBatches.push(ids.length);
+        return { data: ids.map((assignmentId) => ({ assignmentId, scheduleSnapshot: null, currentDeparture: null })), error: null };
+      }, async (table) => { calls.push(table); })
+      .list(admin, { serviceDate: '2026-09-20' });
+    expect(result).toHaveLength(size);
+    expect(batches.every((size) => size <= 100)).toBe(true);
+    // Assignment read + one profile read + four batched relation reads; final RPC is unchanged.
+    // Tomorrow planning adds one bounded backlog query, not one query per card.
+    expect(calls).toHaveLength(3 + 4 * Math.ceil(size / 100));
+    expect(authorityBatches).toHaveLength(Math.ceil(size / 100));
+    expect(authorityBatches.every((size) => size <= 100)).toBe(true);
+    for (let i = 0; i < size; i++) {
+      expect(result[i]).toEqual({ ...(result[0] as Row), assignmentId: `assignment-${i}`, cleaningTargetId: `target-${i}`, sequenceNumber: i + 1 });
+      expect(result[i]).toMatchObject({ attemptStatus: 'in_progress', submissionStatus: 'submitted', scheduleSnapshot: null, currentDeparture: null });
+    }
+  });
+});
 
 describe('today current assignment backlog', () => {
   const midnight = () => new Date('2026-09-20T15:00:00Z');
@@ -171,19 +232,38 @@ describe('today current assignment backlog', () => {
     expect(result[0]).toMatchObject({ assignmentId: todayRow.id });
   });
 
-  it('keeps tomorrow and history exact-date and captures KST clock once', async () => {
+  it('expands admin tomorrow backlog but keeps history and maid tomorrow exact-date', async () => {
     const clock = vi.fn(midnight);
     const subject = service({ cleaning_assignments: [oldRow, todayRow], cleaning_targets: currentTargets }, clock);
-    expect(await subject.list(admin, { serviceDate: '2026-09-22' })).toEqual([]);
+    expect(await subject.list(admin, { serviceDate: '2026-09-22' })).toHaveLength(1);
     expect(await subject.list(admin, { serviceDate: '2026-09-21', includeHistory: true })).toHaveLength(1);
     expect(clock).toHaveBeenCalledTimes(2);
     expect(await service({ cleaning_assignments: [oldRow, todayRow], cleaning_targets: currentTargets }, () => new Date('2026-09-20T14:59:59.999Z'))
-      .list(admin, { serviceDate: '2026-09-21' })).toHaveLength(1);
+      .list(admin, { serviceDate: '2026-09-21' })).toHaveLength(2);
+    expect(await subject.list(maid, { serviceDate: '2026-09-22' })).toEqual([]);
+    expect(await subject.list(admin, { serviceDate: '2026-09-23' })).toEqual([]);
+    expect(await service({ cleaning_assignments: [oldRow], cleaning_targets: currentTargets.map(row => ({ ...row, status: 'inspection_pending' })) }, midnight)
+      .list(admin, { serviceDate: '2026-09-22' })).toEqual([]);
+  });
+
+  it('shows a past assignment on the maid notified planning day, not prematurely on today', async () => {
+    const subject = service({ cleaning_assignments: [oldRow], cleaning_targets: currentTargets }, midnight, {}, undefined,
+      args => ({ data: (args.p_assignment_ids as string[]).map(assignmentId => ({ assignmentId,
+        scheduleSnapshot: null, currentDeparture: null, planningDate: '2026-09-22' })), error: null }));
+    expect(await subject.list(maid, { serviceDate: '2026-09-21' })).toEqual([]);
+    const tomorrow = await subject.list(maid, { serviceDate: '2026-09-22' });
+    expect(tomorrow).toHaveLength(1);
+    expect(tomorrow[0]).toMatchObject({ serviceDate: oldRow.service_date, planningDate: '2026-09-22' });
   });
 
   it.each([null, 1001, 2])('rejects unavailable, excessive or truncated counts (%s) without returning partial cards', async (count) => {
     await expect(service({ cleaning_assignments: [oldRow] }, midnight, { cleaning_assignments: count })
       .list(admin, { serviceDate: '2026-09-20' })).rejects.toMatchObject({ code: 'ASSIGNMENT_QUERY_FAILED' });
+  });
+
+  it.each(['approved', 'cancelled', 'inspection_pending', 'upload_pending', 'rejected'])('excludes past %s from admin tomorrow planning', async (status) => {
+    expect(await service({ cleaning_assignments: [oldRow], cleaning_targets: currentTargets.map(row => ({ ...row, status })) }, midnight)
+      .list(admin, { serviceDate: '2026-09-22' })).toEqual([]);
   });
 
   it('rejects truncated related histories rather than projecting a wrong attempt or rollover', async () => {
@@ -314,6 +394,22 @@ describe('assignment card projection', () => {
     expect(result[1]).toMatchObject({ durationMinutes: 31, attemptStatus: null, submissionStatus: null });
   });
 
+  it('keeps per-target rollover facts separate in a multi-card read', async () => {
+    const result = await service({
+      cleaning_targets: targets.map(target => ({ ...target, carryover_count: 5 })),
+      cleaning_target_schedule_revisions: [
+        { cleaning_target_id: targetIds[0], revision: 1, effective_service_date: '2026-09-20', reason_code: 'ROLLED_OVER_NOT_STARTED' },
+        { cleaning_target_id: targetIds[1], revision: 1, effective_service_date: '2026-09-20', reason_code: 'ROLLED_OVER_UNASSIGNED' },
+        { cleaning_target_id: targetIds[0], revision: 2, effective_service_date: '2026-09-21', reason_code: 'ROLLED_OVER_UNASSIGNED' },
+        { cleaning_target_id: targetIds[2], revision: 1, effective_service_date: '2026-09-20', reason_code: 'RESERVATION_CHANGED' }
+      ]
+    }).list(admin, { serviceDate: '2026-09-20', includeHistory: true });
+    expect(result.map(value => {
+      const card = value as Row;
+      return [card.rolloverCount, card.rolloverReason];
+    })).toEqual([[1, 'ROLLED_OVER_NOT_STARTED'], [1, 'ROLLED_OVER_UNASSIGNED'], [0, null]]);
+  });
+
   it('keeps a historical maid card on its notified room and assignment revision', async () => {
     const result = await service().history(maid, '20000000-0000-4000-8000-000000000004');
 
@@ -383,6 +479,21 @@ describe('assignment card projection', () => {
 });
 
 describe('assignment schedule reads', () => {
+  it.each([admin, maid])('moves the same notified planning day from tomorrow to today at KST midnight ($role)', async (actor) => {
+    let instant = '2026-09-20T14:59:59.999Z';
+    const row = { ...assignments[0], service_date: '2026-09-20' } as Row;
+    const subject = service({ cleaning_assignments: [row] }, () => new Date(instant), {}, undefined,
+      args => ({ data: (args.p_assignment_ids as string[]).map(assignmentId => ({ assignmentId,
+        scheduleSnapshot: null, currentDeparture: null, planningDate: '2026-09-21' })), error: null }));
+    expect(await subject.list(actor, { serviceDate: '2026-09-20' })).toEqual([]);
+    const before = await subject.list(actor, { serviceDate: '2026-09-21' });
+    expect(before).toHaveLength(1);
+    instant = '2026-09-20T15:00:00.000Z';
+    const after = await subject.list(actor, { serviceDate: '2026-09-21' });
+    expect(after).toEqual(before);
+    expect(after[0]).toMatchObject({ assignmentId: assignmentIds[0], serviceDate: '2026-09-20', planningDate: '2026-09-21' });
+  });
+
   it('requests current actual facts only for current list, never target history or includeHistory', async () => {
     const modes: unknown[] = [];
     const currentDeparture = { evaluatedAt: '2026-10-02T03:00:00Z', actualCheckoutAt: '2026-10-02T02:00:00Z', actualRoomDepartureAt: null };

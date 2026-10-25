@@ -1,27 +1,20 @@
-import { readFile } from 'node:fs/promises';
 import { Readable } from 'node:stream';
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import type { AppEnv } from '../../config/env.js';
 import type { SupabaseClients } from '../../lib/supabase.js';
-import { PhotoError, PHOTO_INPUT_MAX_BYTES, initializePhotoDecoder } from './photo-binary.js';
-import { GoogleDriveProvider } from './google-drive.js';
+import { PhotoError, PHOTO_INPUT_MAX_BYTES } from './photo-binary.js';
 import { PhotoService, photoError, photoRoute, type PhotoIdentity } from './photo-service.js';
+import { createPhotoRuntimeDependencies, type PhotoRuntimeDependencies } from './photo.runtime.js';
 
 export interface PhotoHttpServices {
   service: PhotoService;
   authenticate(request: Request, read: boolean): Promise<PhotoIdentity>;
   denied(identity: PhotoIdentity, code: string): Promise<void>;
 }
-export function createPhotoHttpServices(clients: SupabaseClients, env: AppEnv): PhotoHttpServices {
-  let provider: GoogleDriveProvider | undefined, decoder: Promise<void> | undefined;
+export function createPhotoHttpServices(clients: SupabaseClients, env: AppEnv,
+  runtime: PhotoRuntimeDependencies = createPhotoRuntimeDependencies(env)): PhotoHttpServices {
   return {
-    service: new PhotoService(clients.admin, () => {
-      provider ??= new GoogleDriveProvider({ clientId: env.GOOGLE_DRIVE_CLIENT_ID ?? '', clientSecret: env.GOOGLE_DRIVE_CLIENT_SECRET ?? '', refreshToken: env.GOOGLE_DRIVE_REFRESH_TOKEN ?? '', rootFolderId: env.GOOGLE_DRIVE_ROOT_FOLDER_ID ?? '' });
-      return provider;
-    }, () => {
-      decoder ??= readFile(new URL(import.meta.resolve('@imagemagick/magick-wasm/magick.wasm'))).then(initializePhotoDecoder);
-      return decoder;
-    }),
+    service: new PhotoService(clients.admin, runtime.provider, runtime.initializeDecoder),
     async authenticate(request, read) {
       const auth = request.headers.get('authorization');
       if (!auth?.startsWith('Bearer ') || !auth.slice(7).trim()) throw new PhotoError(401, 'MISSING_ACCESS_TOKEN');
@@ -83,14 +76,17 @@ export function createPhotoRoutes(services: PhotoHttpServices): FastifyPluginAsy
       handler: async (request, reply) => {
         const web = webRequest(request, method === 'POST'), route = photoRoute(method, new URL(web.url).pathname), identity = identities.get(request);
         if (!route || !identity) throw new PhotoError(404, 'ROUTE_NOT_FOUND');
+        const service = services.service.withTiming();
         if (route.kind === 'content') {
-          const result = await services.service.content(web, identity, route.photoId);
+          const result = await service.content(web, identity, route.photoId);
           result.headers.forEach((value, name) => { reply.header(name, value); });
+          reply.header('server-timing', service.timingHeader() ?? '').header('access-control-expose-headers', 'Content-Disposition, Server-Timing');
           return reply.code(result.status).send(Buffer.from(await result.arrayBuffer()));
         }
-        const result = route.kind === 'upload' ? await services.service.upload(web, identity, route.attemptId, route.slotId, route.photoItemId)
-          : route.kind === 'delete-item' ? await services.service.deleteItem(web, identity, route.attemptId, route.slotId, route.photoItemId)
-          : route.kind === 'slots' ? await services.service.slots(web, identity, route.attemptId) : await services.service.status(web, identity, route.operationId);
+        const result = route.kind === 'upload' ? await service.upload(web, identity, route.attemptId, route.slotId, route.photoItemId)
+          : route.kind === 'delete-item' ? await service.deleteItem(web, identity, route.attemptId, route.slotId, route.photoItemId)
+          : route.kind === 'slots' ? await service.slots(web, identity, route.attemptId) : await service.status(web, identity, route.operationId);
+        reply.header('server-timing', service.timingHeader() ?? '').header('access-control-expose-headers', 'Server-Timing');
         return reply.header('cache-control', 'no-store').send(result);
       }
     });

@@ -9,6 +9,7 @@ import {
   resetAccountPassword,
   unlockAccount,
 } from "../_shared/account-api.ts";
+import { apiTimingEligible, apiTimingHeaders } from "../_shared/api-timing.ts";
 import { recordAuthorizationDenied } from "../_shared/activity-api.ts";
 import {
   authorizationSourceForPath,
@@ -40,6 +41,7 @@ import {
   lifecycleImpact,
   lifecyclePath,
   limitedAttemptPath,
+  listLimitedAttempts,
   manageAttemptLifecycle,
 } from "../_shared/attempt-lifecycle-api.ts";
 import {
@@ -121,8 +123,16 @@ import {
 } from "../_shared/payroll-api.ts";
 import { assertPayrollResponseSize } from "../_shared/payroll-cursor.ts";
 import { listPayrollWorkDetails } from "../_shared/payroll-work-details-api.ts";
-import { payrollRemittanceMarker } from "../_shared/payroll-remittance-marker-api.ts";
-import { createPhotoService } from "../_shared/photo-api.ts";
+import {
+  payrollRemittanceMarker,
+  payrollRemittanceMarkers,
+} from "../_shared/payroll-remittance-marker-api.ts";
+import {
+  configuredPhotoProvider,
+  createPhotoService,
+  initializePhotoDecoder,
+} from "../_shared/photo-api.ts";
+import { createSupabasePostApprovalModuleEdgeHandler } from "../_shared/post-approval-report.bundle.js";
 import { PhotoError, photoFailureDiagnostic } from "../_shared/photo-binary.ts";
 import {
   photoError,
@@ -152,9 +162,11 @@ import {
   correctRoomOccupancy,
   createRoomOperationBlock,
   getRoom,
+  listRoomCandles,
   listRoomEvents,
   listRoomIssues,
   listRoomOperationBlocks,
+  listRoomReports,
   listRooms,
   listRoomTypes,
   overrideRoomDisplayStatus,
@@ -163,6 +175,7 @@ import {
   reportRoomIssue,
   resolveRoomIssue,
   roomDetailIdFromPath,
+  roomListServiceDate,
   roomPathIds,
   setRoomCandleCount,
 } from "../_shared/room-api.ts";
@@ -220,6 +233,107 @@ function routePath(url: string): string {
   return `/${segments.slice(functionIndex + 1).join("/")}`;
 }
 
+function postApprovalFamily(path: string): boolean {
+  return (/^\/v1\/cleaning-history\/submissions\//.test(path) &&
+    /\/supplemental-room-issues(?:\/|$)/.test(path)) ||
+    /^\/v1\/post-approval-room-issue-evidence(?:-uploads)?(?:\/|$)/.test(path);
+}
+function postApprovalRoute(method: string, path: string): boolean {
+  const base =
+    "^/v1/cleaning-history/submissions/[^/]+/supplemental-room-issues";
+  const patterns = method === "GET"
+    ? [
+      new RegExp(`${base}$`),
+      new RegExp(`${base}/source$`),
+      new RegExp(`${base}/drafts/[^/]+$`),
+      // source/drafts are reserved report siblings, not report identities.
+      new RegExp(`${base}/(?!source$|drafts$)[^/]+$`),
+      /^\/v1\/post-approval-room-issue-evidence-uploads\/[^/]+$/,
+      /^\/v1\/post-approval-room-issue-evidence\/[^/]+\/versions\/[^/]+\/content$/,
+    ]
+    : method === "POST"
+    ? [
+      new RegExp(`${base}$`),
+      new RegExp(`${base}/drafts$`),
+      new RegExp(`${base}/(?!source/|drafts/)[^/]+/close$`),
+      new RegExp(`${base}/drafts/[^/]+/evidence/[^/]+/upload$`),
+      /^\/v1\/post-approval-room-issue-evidence-uploads\/[^/]+\/handover$/,
+    ]
+    : [];
+  return patterns.some((pattern) => pattern.test(path));
+}
+
+/** Read only during recovery, never startup/read/preflight. No secret values are
+ * returned, logged, placed in errors, or borrowed from another key purpose. */
+export function configuredPostApprovalHandoverKey(): Uint8Array | undefined {
+  try {
+    const encoded = Deno.env.get(
+      "POST_APPROVAL_ROOM_ISSUE_HANDOVER_KEY_BASE64",
+    );
+    if (!encoded || !/^[A-Za-z0-9+/]{43}=$/.test(encoded)) return undefined;
+    const decoded = atob(encoded);
+    if (decoded.length !== 32 || btoa(decoded) !== encoded) return undefined;
+    const otherSecrets = [
+      "SUPABASE_ANON_KEY",
+      "SUPABASE_PUBLISHABLE_KEY",
+      "SUPABASE_SERVICE_ROLE_KEY",
+      "SUPABASE_SECRET_KEY",
+      "ACCOUNT_PHONE_PEPPER",
+      "RESERVATION_PII_KEY_BASE64",
+      "RESERVATION_GUEST_NAME_PEPPER",
+      "ROOM_PIN_KEY_BASE64",
+      "PAYROLL_CURSOR_HMAC_SECRET",
+      "NOTIFICATION_CURSOR_HMAC_SECRET",
+      "INSPECTION_CURSOR_HMAC_SECRET",
+      "WEB_PUSH_SUBSCRIPTION_KEY_BASE64",
+      "WEB_PUSH_BINDING_DIGEST_SECRET",
+      "GOOGLE_DRIVE_CLIENT_ID",
+      "GOOGLE_DRIVE_CLIENT_SECRET",
+      "GOOGLE_DRIVE_REFRESH_TOKEN",
+      "GOOGLE_DRIVE_ROOT_FOLDER_ID",
+      "GOOGLE_SHEETS_SERVICE_ACCOUNT_PRIVATE_KEY",
+      "SCHEDULER_INVOKE_SECRET",
+      "PHOTO_PURGE_INVOKE_SECRET",
+      "NOTIFICATION_DELIVERY_INVOKE_SECRET",
+      "ROOM_PIN_SHEET_SYNC_INVOKE_SECRET",
+      "VAPID_PRIVATE_KEY",
+    ];
+    if (otherSecrets.some((name) => Deno.env.get(name) === encoded)) {
+      return undefined;
+    }
+    for (
+      const name of [
+        "ROOM_PIN_KEYRING_JSON",
+        "RESERVATION_PII_KEYRING_JSON",
+        "WEB_PUSH_SUBSCRIPTION_KEYRING_JSON",
+      ]
+    ) {
+      const keyring: unknown = JSON.parse(Deno.env.get(name) || "{}");
+      if (
+        !keyring || typeof keyring !== "object" || Array.isArray(keyring) ||
+        Object.values(keyring).some((value) =>
+          typeof value !== "string" || value === encoded
+        )
+      ) return undefined;
+    }
+    const vapid: unknown = JSON.parse(
+      Deno.env.get("VAPID_KEYRING_JSON") || "{}",
+    );
+    if (!vapid || typeof vapid !== "object" || Array.isArray(vapid)) {
+      return undefined;
+    }
+    for (const value of Object.values(vapid)) {
+      if (
+        !value || typeof value !== "object" || Array.isArray(value) ||
+        ("privateKey" in value && value.privateKey === encoded)
+      ) return undefined;
+    }
+    return Uint8Array.from(decoded, (character) => character.charCodeAt(0));
+  } catch {
+    return undefined;
+  }
+}
+
 export interface ApiHandlerDependencies {
   createClients: () => EdgeClients;
   authenticateRequest: (
@@ -229,26 +343,125 @@ export interface ApiHandlerDependencies {
   authenticateLimitedRequest?: typeof authenticateLimitedAttempt;
   photoService?: (clients: EdgeClients) => PhotoService;
   webPushCryptoConfig?: WebPushCryptoConfig;
+  /** Override for isolated tests; the default uses the reviewed generated JS bundle. */
+  supplementalRoomIssueHandler?: (
+    request: Request,
+    path: string,
+    clients: EdgeClients,
+  ) => Promise<Response | null>;
 }
 
 const defaultDependencies: ApiHandlerDependencies = {
   createClients: createEdgeClients,
   authenticateRequest: authenticate,
+  supplementalRoomIssueHandler: async (request, path, clients) =>
+    await createSupabasePostApprovalModuleEdgeHandler({
+      clients,
+      provider: configuredPhotoProvider,
+      initializeDecoder: initializePhotoDecoder,
+      handoverFenceKey: configuredPostApprovalHandoverKey,
+    })(request, path) ?? null,
 };
 
 export async function handleApiRequest(
   request: Request,
   dependencies: ApiHandlerDependencies = defaultDependencies,
 ): Promise<Response> {
-  const id = requestId(request);
+  const started = performance.now();
+  const response = await handleApiRequestCore(request, dependencies);
+  const path = routePath(request.url);
+  if (!apiTimingEligible(request.method, path, response.status)) {
+    return response;
+  }
+  const headers = new Headers(response.headers);
+  for (
+    const [name, value] of Object.entries(apiTimingHeaders(
+      performance.now() - started,
+      headers.get("server-timing") ?? "",
+      headers.get("access-control-expose-headers") ?? "",
+    ))
+  ) headers.set(name, value);
+  // Preserve the body stream. Timing never reads, clones or logs business payloads.
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
+async function handleApiRequestCore(
+  request: Request,
+  dependencies: ApiHandlerDependencies,
+): Promise<Response> {
+  let id = requestId(request);
   let corsHeaders: Record<string, string> = {};
   let clients: EdgeClients | undefined;
   let actor: EdgeActor | undefined;
   let path = "/";
   try {
-    corsHeaders = cors(request);
     path = routePath(request.url);
+    if (roomPinOperation(request.method, path)) id = crypto.randomUUID();
+    corsHeaders = cors(request);
+    const decodedLimitedPath = path.split("/").map((segment) => {
+      try {
+        return decodeURIComponent(segment);
+      } catch {
+        return segment;
+      }
+    }).join("/");
+    // Decode/collapse for family recognition only. Raw spelling remains the
+    // authority; routePath must not turn aliases into accepted commands.
+    const supplementalFamilyPath = decodedLimitedPath.replace(/\/+/g, "/")
+      .replace(/\/+$/, "");
+    const decodedMountSegments = new URL(request.url).pathname.split("/")
+      .map((segment) => {
+        try {
+          return decodeURIComponent(segment);
+        } catch {
+          return segment;
+        }
+      }).join("/").split("/").filter(Boolean);
+    const decodedFunctionIndex = decodedMountSegments.lastIndexOf("api");
+    const decodedMountPath = decodedFunctionIndex < 0
+      ? "/"
+      : `/${decodedMountSegments.slice(decodedFunctionIndex + 1).join("/")}`;
+    const supplementalFamily = postApprovalFamily(supplementalFamilyPath) ||
+      postApprovalFamily(decodedMountPath);
+    if (supplementalFamily) {
+      corsHeaders["cache-control"] = "no-store";
+      const pathname = new URL(request.url).pathname;
+      const rawPath = pathname.slice(pathname.lastIndexOf("/api") + 4);
+      if (
+        request.method !== "OPTIONS" &&
+        (rawPath !== path || path !== supplementalFamilyPath ||
+          !postApprovalRoute(request.method, rawPath))
+      ) {
+        throw new EdgeError(
+          404,
+          "ROUTE_NOT_FOUND",
+          "요청한 API 경로를 찾을 수 없습니다.",
+        );
+      }
+    }
+    if (
+      decodedLimitedPath === "/v1/limited/attempts" ||
+      decodedLimitedPath.startsWith("/v1/limited/attempts/")
+    ) {
+      corsHeaders["cache-control"] = "no-store";
+      const pathname = new URL(request.url).pathname;
+      if (
+        path !== decodedLimitedPath ||
+        pathname.slice(pathname.lastIndexOf("/api") + 4) !== path
+      ) {
+        throw new EdgeError(
+          404,
+          "ROUTE_NOT_FOUND",
+          "요청한 API 경로를 찾을 수 없습니다.",
+        );
+      }
+    }
     const markerPath = "/v1/payroll/remittance-marker";
+    const markerBatchPath = "/v1/payroll/remittance-markers";
     const markerFamily = path.split("/").map((segment) => {
       try {
         return decodeURIComponent(segment);
@@ -257,12 +470,15 @@ export async function handleApiRequest(
       }
     }).join("/").replace(/\/+/g, "/").replace(/\/+$/, "");
     if (
-      markerFamily === markerPath || markerFamily.startsWith(`${markerPath}/`)
+      [markerPath, markerBatchPath].some((prefix) =>
+        markerFamily === prefix || markerFamily.startsWith(`${prefix}/`)
+      )
     ) {
       corsHeaders["cache-control"] = "no-store";
       const pathname = new URL(request.url).pathname;
       const rawPath = pathname.slice(pathname.lastIndexOf("/api") + 4);
       const allowed =
+        (rawPath === markerBatchPath && request.method === "GET") ||
         (rawPath === markerPath && ["GET", "PUT"].includes(request.method)) ||
         (rawPath === `${markerPath}/reconfirm` && request.method === "POST") ||
         (rawPath === `${markerPath}/history` && request.method === "GET");
@@ -354,6 +570,33 @@ export async function handleApiRequest(
     }
 
     clients = dependencies.createClients();
+    if (supplementalFamily) {
+      const handler = dependencies.supplementalRoomIssueHandler ??
+        defaultDependencies.supplementalRoomIssueHandler;
+      if (!handler) {
+        throw new EdgeError(
+          404,
+          "ROUTE_NOT_FOUND",
+          "요청한 API 경로를 찾을 수 없습니다.",
+        );
+      }
+      const supplemental = await handler(
+        request,
+        path,
+        clients,
+      );
+      if (supplemental) {
+        for (const [key, value] of Object.entries(corsHeaders)) {
+          supplemental.headers.set(key, value);
+        }
+        return supplemental;
+      }
+      throw new EdgeError(
+        404,
+        "ROUTE_NOT_FOUND",
+        "요청한 API 경로를 찾을 수 없습니다.",
+      );
+    }
     if (request.method === "POST" && path === "/v1/auth/login") {
       return jsonResponse(await login(request, clients), 200, corsHeaders);
     }
@@ -367,12 +610,13 @@ export async function handleApiRequest(
           "요청한 API 경로를 찾을 수 없습니다.",
         );
       }
-      const service = (dependencies.photoService ?? createPhotoService)(
+      let service = (dependencies.photoService ?? createPhotoService)(
         clients,
       );
       if (photo.kind === "content") {
         actor = await dependencies.authenticateRequest(request, clients);
         requirePasswordChanged(actor);
+        service = service.withTiming();
         const result = await service.content(request, {
           profileId: actor.profileId,
           sessionId: verifiedRequestSessionId(request),
@@ -382,10 +626,16 @@ export async function handleApiRequest(
         for (const [key, value] of Object.entries(corsHeaders)) {
           result.headers.set(key, value);
         }
+        result.headers.set("server-timing", service.timingHeader() ?? "");
+        result.headers.set(
+          "access-control-expose-headers",
+          "Content-Disposition, Server-Timing",
+        );
         return result;
       }
       const identity = await authenticateLimitedAttempt(request, clients);
       actor = identity.actor;
+      service = service.withTiming();
       const context = {
         profileId: actor.profileId,
         sessionId: identity.sessionId,
@@ -411,7 +661,11 @@ export async function handleApiRequest(
         : photo.kind === "slots"
         ? await service.slots(request, context, photo.attemptId)
         : await service.status(request, context, photo.operationId);
-      return jsonResponse(result, 200, corsHeaders);
+      return jsonResponse(result, 200, {
+        ...corsHeaders,
+        "server-timing": service.timingHeader() ?? "",
+        "access-control-expose-headers": "Server-Timing",
+      });
     }
 
     // 늦은 기록 수신은 수행 권한이 아니다. 이 단일 경로만 3-state identity를 검증한 뒤 DB에서 lease를 다시 검사한다.
@@ -425,7 +679,25 @@ export async function handleApiRequest(
       );
     }
 
-    // 제한 capability는 정확히 이 두 경로만 사용한다. 일반 인증의 active-only 조건은 변경하지 않는다.
+    // 기존 세션 전용 discovery. 인증 결과만으로 capability를 부여하지 않는다.
+    if (request.method === "GET" && path === "/v1/limited/attempts") {
+      const pathname = new URL(request.url).pathname;
+      if (pathname.slice(pathname.lastIndexOf("/api") + 4) !== path) {
+        throw new EdgeError(
+          404,
+          "ROUTE_NOT_FOUND",
+          "요청한 API 경로를 찾을 수 없습니다.",
+        );
+      }
+      const identity = await authenticateLimitedAttempt(request, clients);
+      actor = identity.actor;
+      return jsonResponse(
+        await listLimitedAttempts(request, clients, identity),
+        200,
+        corsHeaders,
+      );
+    }
+    // 제한 capability는 전용 경로만 사용한다. 일반 인증의 active-only 조건은 변경하지 않는다.
     const limited = limitedAttemptPath(path);
     if (
       limited && ((limited.action === "read" && request.method === "GET") ||
@@ -461,6 +733,7 @@ export async function handleApiRequest(
             clients,
             actor,
             limitedSubmissionRoute.attemptId,
+            identity.sessionId,
           ),
         },
         201,
@@ -469,6 +742,19 @@ export async function handleApiRequest(
     }
 
     actor = await dependencies.authenticateRequest(request, clients);
+    if (
+      (request.method === "GET" && path === "/v1/rooms/pins/export") ||
+      (request.method === "POST" &&
+        ["/v1/rooms/pins/import/preview", "/v1/rooms/pins/import/apply"]
+          .includes(path))
+    ) {
+      return await roomPinTransferResponse(
+        request,
+        clients,
+        actor,
+        corsHeaders,
+      );
+    }
     if (request.method === "POST" && path === "/v1/rooms/pins/bootstrap") {
       const response = jsonResponse(
         {
@@ -1328,6 +1614,17 @@ export async function handleApiRequest(
       return jsonResponse(response, 200, corsHeaders);
     }
     if (
+      path === markerBatchPath
+    ) {
+      const response = await payrollRemittanceMarkers(
+        request,
+        clients,
+        actor,
+        verifiedRequestSessionId(request),
+      );
+      return jsonResponse(response, 200, corsHeaders);
+    }
+    if (
       path === markerPath || path === `${markerPath}/history` ||
       path === `${markerPath}/reconfirm`
     ) {
@@ -1705,12 +2002,30 @@ export async function handleApiRequest(
       response.headers.set("Cache-Control", "no-store");
       return response;
     }
-    if (request.method === "GET" && path === "/v1/rooms") {
-      return jsonResponse(
-        { rooms: await listRooms(clients, actor) },
+    if (request.method === "GET" && path === "/v1/rooms/candles") {
+      const response = jsonResponse(
+        await listRoomCandles(request, clients, actor),
         200,
         corsHeaders,
       );
+      response.headers.set("Cache-Control", "no-store");
+      return response;
+    }
+    if (request.method === "GET" && path === "/v1/rooms") {
+      const response = jsonResponse(
+        {
+          rooms: await listRooms(
+            request,
+            clients,
+            actor,
+            roomListServiceDate(request),
+          ),
+        },
+        200,
+        corsHeaders,
+      );
+      response.headers.set("Cache-Control", "no-store");
+      return response;
     }
     const operationBlocksReadMatch = request.method === "GET"
       ? /^\/v1\/rooms\/([^/]+)\/operation-blocks$/.exec(path)
@@ -1723,6 +2038,18 @@ export async function handleApiRequest(
           actor,
           operationBlocksReadMatch[1],
         ),
+        200,
+        corsHeaders,
+      );
+      response.headers.set("Cache-Control", "no-store");
+      return response;
+    }
+    const roomReportsMatch = request.method === "GET"
+      ? /^\/v1\/rooms\/([^/]+)\/reports$/.exec(path)
+      : null;
+    if (roomReportsMatch) {
+      const response = jsonResponse(
+        await listRoomReports(request, clients, actor, roomReportsMatch[1]),
         200,
         corsHeaders,
       );
@@ -1882,13 +2209,15 @@ export async function handleApiRequest(
       path.startsWith("/v1/rooms/") && path.endsWith("/candles")
     ) {
       const { roomId } = roomPathIds(path);
-      return jsonResponse(
+      const response = jsonResponse(
         {
           operation: await setRoomCandleCount(request, clients, actor, roomId),
         },
         201,
         corsHeaders,
       );
+      response.headers.set("Cache-Control", "no-store");
+      return response;
     }
     if (
       request.method === "POST" &&
@@ -1943,7 +2272,7 @@ export async function handleApiRequest(
       : null;
     if (roomDetailId) {
       return jsonResponse(
-        { room: await getRoom(clients, actor, roomDetailId) },
+        { room: await getRoom(request, clients, actor, roomDetailId) },
         200,
         corsHeaders,
       );
@@ -1984,6 +2313,26 @@ export async function handleApiRequest(
         responseError = activityError;
       }
     }
+    const pinOperation = roomPinOperation(request.method, path);
+    if (pinOperation) {
+      const diagnostic = roomPinFailureDiagnostic(
+        pinOperation,
+        id,
+        responseError instanceof EdgeError ? responseError.status : 500,
+        responseError instanceof EdgeError
+          ? responseError.code
+          : "INTERNAL_SERVER_ERROR",
+      );
+      if (diagnostic) console.error(JSON.stringify(diagnostic));
+      // The generic handler must not emit a second unbounded error record.
+      if (!(responseError instanceof EdgeError)) {
+        responseError = new EdgeError(
+          500,
+          "INTERNAL_SERVER_ERROR",
+          "서버 오류가 발생했습니다.",
+        );
+      }
+    }
     return errorResponse(responseError, id, corsHeaders);
   }
 }
@@ -1991,3 +2340,8 @@ export async function handleApiRequest(
 if (import.meta.main) {
   Deno.serve((request) => handleApiRequest(request));
 }
+import { roomPinTransferResponse } from "../_shared/room-pin-transfer-api.ts";
+import {
+  roomPinFailureDiagnostic,
+  roomPinOperation,
+} from "../_shared/room-pin-diagnostic.ts";

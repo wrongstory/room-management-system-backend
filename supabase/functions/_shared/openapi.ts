@@ -1,7 +1,14 @@
+import {
+  postApprovalOpenApiErrorCodes,
+  postApprovalOpenApiFragment,
+} from "./post-approval-openapi.js";
+
 // #331: display-only remittance contracts, never actual payout commands.
 const integer = { type: "integer", minimum: 0, maximum: 9007199254740991 };
 const signed = { ...integer, minimum: -9007199254740991 };
 const uuid = { type: "string", format: "uuid" };
+const batchUuid =
+  "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}";
 const date = {
   type: "string",
   format: "date",
@@ -78,6 +85,33 @@ function responses(ref: string) {
 }
 const common = { tags: ["Payroll"], security: [{ bearerAuth: [] }] };
 const payrollRemittancePaths = {
+  "/v1/payroll/remittance-markers": {
+    get: {
+      ...common,
+      operationId: "listPayrollRemittanceMarkers",
+      summary: "주차별 송금 표시 일괄 조회 (최대 10명)",
+      "x-required-roles": ["admin", "maid"],
+      description:
+        "관리자는 최대 10명, 메이드는 본인만 조회합니다. maidProfileIds는 쉼표로 구분한 UUID이며 중복(대소문자 포함)·빈 값·반복 query는 거부합니다. 입력 순서를 유지하고 내부 조회 동시성은 3입니다. 각 항목은 기존 세션·권한 검사와 basisFingerprint/version/needsReconfirmation을 유지합니다. 항목 간 동일 DB snapshot은 보장하지 않으며 DB RPC 개수는 인원수와 같습니다. 한 항목이라도 실패하면 전체 오류이며 미조회 항목을 marked=false로 추측하지 마세요. 기존 단건 GET은 유지합니다. 조회는 지급·표시를 변경하지 않고 128KiB/no-store를 적용합니다.",
+      parameters: [
+        {
+          name: "maidProfileIds",
+          in: "query",
+          required: true,
+          style: "form",
+          explode: false,
+          schema: {
+            type: "string",
+            minLength: 36,
+            maxLength: 369,
+            pattern: `^${batchUuid}(,${batchUuid}){0,9}$`,
+          },
+        },
+        readParameters[1],
+      ],
+      responses: responses("PayrollRemittanceBatch"),
+    },
+  },
   "/v1/payroll/remittance-marker": {
     get: {
       ...common,
@@ -206,6 +240,15 @@ function exact<T extends Record<string, unknown>>(properties: T) {
   };
 }
 const payrollRemittanceSchemas = {
+  PayrollRemittanceBatch: exact({
+    weekStart: date,
+    markers: {
+      type: "array",
+      minItems: 1,
+      maxItems: 10,
+      items: { $ref: "#/components/schemas/PayrollRemittanceMarker" },
+    },
+  }),
   PayrollRemittanceBasis: exact(basisFields),
   PayrollRemittanceMarker: exact(markerFields),
   PayrollRemittanceSetInput: exact({ ...command, marked: { type: "boolean" } }),
@@ -498,6 +541,14 @@ const photoPathId = (name: string) => ({
   required: true,
   schema: { type: "string", format: "uuid" },
 });
+const includePhotoSlotsParameter = {
+  name: "includePhotoSlots",
+  in: "query",
+  required: false,
+  schema: { type: "boolean", enum: [true] },
+  description:
+    "선택적 true만 허용. accepted 후 같은 actor/session으로 조회한 photoSlots를 반환합니다. 조회 실패·배정 변경이면 null이며 accepted를 취소하지 않습니다. null/미지원은 GET photo-slots로 복구하고 새 key로 업로드하지 않습니다. snapshot은 별도 조회 시점이며 다음 CAS 성공 보장이 아닙니다.",
+};
 function photoOperation(
   operationId: string,
   summary: string,
@@ -514,7 +565,14 @@ function photoOperation(
       "200": {
         description:
           "최신 DB 권한과 상태를 검증한 안전한 결과. Drive ID·locator·OAuth·원문 hash는 반환하지 않습니다.",
-        headers: { "Cache-Control": noStoreHeader },
+        headers: {
+          "Cache-Control": noStoreHeader,
+          "Server-Timing": {
+            schema: { type: "string" },
+            description:
+              "인증된 성공 응답의 요청별 고정 단계 duration(ms). photo_total은 인증 후 서비스 범위이며 전체 사용자 대기시간이 아닙니다. 사용자/파일/Drive ID·URL·비밀정보는 포함하지 않습니다.",
+          },
+        },
         content: {
           "application/json": {
             schema: { $ref: `#/components/schemas/${schema}` },
@@ -805,11 +863,15 @@ export const openApiDocument = {
       "3. `mustChangePassword=true`이면 계정·객실 화면으로 보내지 말고 `POST /v1/auth/password`만 허용합니다.",
       "4. 변경 API에는 사용자 동작별 `Idempotency-Key`를 보내며, 같은 본문 재시도에만 같은 키를 재사용합니다.",
       "5. 실패 처리는 HTTP 상태와 함께 안정적인 `error.code`를 기준으로 분기합니다.",
+      "공통 인증 확인 장애는 503 AUTH_CONTEXT_UNAVAILABLE입니다. 계정 폐기/로그인 만료(401 SESSION_REVOKED)와 다르므로 자동 로그아웃하거나 빈 데이터로 대체하지 마세요. 재시도 UI를 제공하고 변경 요청은 같은 본문·Idempotency-Key를 유지합니다.",
       "",
       "## 역할 경계",
       "- `developer`: 계정 관리·운영 상태와 별도의 안전한 객실 기준정보 카탈로그만 관리할 수 있으며 예약·점유·청소·PIN 운영 데이터는 금지됩니다.",
       "- `admin`: 계정 관리와 객실 업무가 가능합니다.",
       "- `maid`: 계정·전체 객실 API는 사용할 수 없고 본인의 주간 가능일만 조회·제출·변경 요청할 수 있습니다.",
+      "",
+      "## 성능 계측",
+      "선택 업무 경로의 성공 응답은 Server-Timing: api_total;dur=<ms>를 제공합니다. 허용된 브라우저 Origin에서 응답 헤더를 읽을 수 있습니다. 오류·인증/공개 경로·HEAD/OPTIONS는 제외하며 고정 숫자만 반환합니다. api_total은 handler 시작부터 응답 생성까지이며 전체 업로드/다운로드·렌더링·콜드 시작 시간 또는 DB 단독 시간이 아닙니다. 계약·권한·캐시 정책은 바뀌지 않습니다. 운영 적용 여부와 경로 목록은 docs/API_PERFORMANCE_413.md를 확인하세요.",
       "",
       "프론트 구현 절차와 타입 생성 명령은 저장소의 `docs/FRONTEND_API_INTEGRATION.md`를 참고하세요.",
     ].join("\n"),
@@ -822,6 +884,11 @@ export const openApiDocument = {
   "x-adapters": ["fastify", "supabase-edge"],
   servers: [{ url: ".", description: "현재 Edge api Function" }],
   tags: [
+    {
+      name: "Post-approval Room Issues",
+      description:
+        "제출·승인 뒤 별도 특이사항 신고·증빙·관리자 공동 처리를 제공하는 source 등록 계약입니다. 현재 운영 배포 완료를 뜻하지 않습니다.",
+    },
     {
       name: "Push Subscriptions",
       description:
@@ -898,6 +965,350 @@ export const openApiDocument = {
     },
   ],
   paths: {
+    ...postApprovalOpenApiFragment.paths,
+    "/v1/rooms/pins/export": {
+      get: {
+        tags: ["Rooms"],
+        operationId: "exportRoomPins",
+        "x-required-roles": ["admin"],
+        security: [{ bearerAuth: [] }],
+        summary: "객실 번호·비밀번호 Excel 내보내기",
+        description:
+          "active admin 전용. 시트 1의 B/C열에 문자열로 저장합니다. 미설정 PIN은 빈 셀입니다. 현재 저장값이며 도어락 확인을 의미하지 않습니다. no-store 다운로드만 허용하며 원본 Drive에 쓰지 않습니다.",
+        responses: {
+          "200": {
+            description: "Excel 파일",
+            headers: {
+              "Cache-Control": {
+                schema: { type: "string", const: "no-store" },
+              },
+            },
+            content: {
+              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
+                { schema: { type: "string", format: "binary" } },
+            },
+          },
+          "401": {
+            description: "세션 만료",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ErrorEnvelope" },
+              },
+            },
+          },
+          "403": {
+            description: "관리자 권한 필요",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ErrorEnvelope" },
+              },
+            },
+          },
+          "409": {
+            description: "객실 변경 또는 미해결 PIN 변경 lease",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ErrorEnvelope" },
+              },
+            },
+          },
+          "503": {
+            description: "설정 오류",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ErrorEnvelope" },
+              },
+            },
+          },
+        },
+      },
+    },
+    "/v1/rooms/pins/import/preview": {
+      post: {
+        tags: ["Rooms"],
+        operationId: "previewRoomPinImport",
+        "x-required-roles": ["admin"],
+        security: [{ bearerAuth: [] }],
+        summary: "지정 Drive 시트 객실 비밀번호 검증",
+        description:
+          "active admin 전용. 서버 설정의 정확한 시트 1 B2:C1001만 읽습니다. PIN 원문 없이 행 번호·오류 코드·건수 및 5분 유효 previewToken을 반환합니다. 요일·특이사항은 읽지 않습니다. 최대 300실/1000행이며 숫자나 수식 PIN 셀을 거절합니다.",
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: { type: "object", additionalProperties: false },
+            },
+          },
+        },
+        responses: {
+          "200": {
+            description: "no-store 검증 결과",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["preview"],
+                  properties: {
+                    preview: {
+                      type: "object",
+                      additionalProperties: false,
+                      required: [
+                        "valid",
+                        "total",
+                        "changed",
+                        "unchanged",
+                        "ignored",
+                        "issues",
+                        "expiresAt",
+                        "previewToken",
+                      ],
+                      properties: {
+                        valid: { type: "boolean" },
+                        total: { type: "integer", minimum: 0, maximum: 300 },
+                        changed: { type: "integer", minimum: 0, maximum: 300 },
+                        unchanged: {
+                          type: "integer",
+                          minimum: 0,
+                          maximum: 300,
+                        },
+                        ignored: { type: "integer", minimum: 0, maximum: 1000 },
+                        expiresAt: { type: "string", format: "date-time" },
+                        previewToken: {
+                          type: ["string", "null"],
+                          maxLength: 160,
+                        },
+                        issues: {
+                          type: "array",
+                          maxItems: 1000,
+                          items: {
+                            type: "object",
+                            additionalProperties: false,
+                            required: ["row", "code"],
+                            properties: {
+                              row: {
+                                type: "integer",
+                                minimum: 0,
+                                maximum: 1001,
+                              },
+                              code: {
+                                type: "string",
+                                enum: [
+                                  "INVALID_SHEET_HEADER",
+                                  "UNKNOWN_ROOM",
+                                  "DUPLICATE_ROOM",
+                                  "INVALID_ROOM_CREDENTIAL",
+                                  "NO_ROOM_ROWS",
+                                ],
+                              },
+                            },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          "400": {
+            description: "요청 형식 오류",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ErrorEnvelope" },
+              },
+            },
+          },
+          "401": {
+            description: "세션 만료",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ErrorEnvelope" },
+              },
+            },
+          },
+          "403": {
+            description: "관리자 권한 필요",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ErrorEnvelope" },
+              },
+            },
+          },
+          "409": {
+            description: "객실 정보 변경/lease 충돌",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ErrorEnvelope" },
+              },
+            },
+          },
+          "503": {
+            description: "Google 연결·시트 형식·서버 설정 확인 필요",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ErrorEnvelope" },
+              },
+            },
+          },
+        },
+      },
+    },
+    "/v1/rooms/pins/import/apply": {
+      post: {
+        tags: ["Rooms"],
+        operationId: "applyRoomPinImport",
+        "x-required-roles": ["admin"],
+        security: [{ bearerAuth: [] }],
+        summary: "검증한 Drive 비밀번호를 원자 적용",
+        description:
+          "active admin 전용. 동일 actor/session의 previewToken과 Idempotency-Key가 필요합니다. 원본·객실/PIN 버전 변경 또는 5분 만료 시 409로 재검증합니다. 동일 요청 재시도는 receipt를 반환합니다. 변경한 객실은 물리 확인 전 mismatch이며 기존 ACTUAL_PIN_REENTRY 절차로 도어락 확인을 완료합니다. 자동 Sheet 쓰기 없음.",
+        parameters: [{
+          in: "header",
+          name: "Idempotency-Key",
+          required: true,
+          schema: { type: "string", pattern: "^[A-Za-z0-9._:-]{8,128}$" },
+        }],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                additionalProperties: false,
+                required: ["previewToken"],
+                properties: {
+                  previewToken: {
+                    type: "string",
+                    pattern: "^\\d{13}\\.[a-f0-9]{64}\\.[a-f0-9]{64}$",
+                    maxLength: 160,
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          "200": {
+            description: "no-store 적용 결과",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["imported"],
+                  properties: {
+                    imported: {
+                      type: "object",
+                      additionalProperties: false,
+                      required: ["updated", "unchanged"],
+                      properties: {
+                        updated: { type: "integer", minimum: 0, maximum: 300 },
+                        unchanged: {
+                          type: "integer",
+                          minimum: 0,
+                          maximum: 300,
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          "400": {
+            description: "잘못된 token/요청",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ErrorEnvelope" },
+              },
+            },
+          },
+          "401": {
+            description: "세션 만료",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ErrorEnvelope" },
+              },
+            },
+          },
+          "403": {
+            description: "관리자 권한 필요",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ErrorEnvelope" },
+              },
+            },
+          },
+          "409": {
+            description: "미리보기 만료·변경·lease 충돌·멱등키 재사용",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ErrorEnvelope" },
+              },
+            },
+          },
+          "503": {
+            description: "Google 연결/서버 설정 오류",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ErrorEnvelope" },
+              },
+            },
+          },
+        },
+      },
+    },
+    "/v1/rooms/{roomId}/reports": {
+      get: {
+        tags: ["Rooms"],
+        operationId: "listRoomReports",
+        summary: "등록된 청소 신고와 증빙 조회",
+        description:
+          "active business admin 전용 읽기 API입니다. 제출 전부터 실제 등록된 room_issue·bomb_room 신고만 조회하며 미신고 업로드는 제외합니다. 기존 room issue ID를 재사용합니다. reportedAt,id 내림차순, limit 기본 5·최대 10, actor/room/stream별 서명 cursor입니다. 해결·판정 뒤에도 이력을 보존하며 빈 items는 등록된 신고 없음입니다. readState는 증빙 열람 가능/만료/삭제/미준비 상태이고 provider 장애는 content 요청에서 별도 오류로 반환합니다. 사진은 기존 GET /v1/photos/{photoId}/content로 읽습니다. 조회만으로 제출·검수·수익이 생성되지 않습니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin"],
+        parameters: [
+          roomIdParameter(),
+          {
+            name: "status",
+            in: "query",
+            schema: {
+              type: "string",
+              enum: ["registered"],
+              default: "registered",
+            },
+          },
+          {
+            name: "limit",
+            in: "query",
+            schema: { type: "integer", minimum: 1, maximum: 10, default: 5 },
+          },
+          {
+            name: "cursor",
+            in: "query",
+            schema: { type: "string", minLength: 1, maxLength: 1024 },
+          },
+        ],
+        responses: {
+          "200": {
+            description: "등록 신고의 immutable evidence와 현재 보존 상태",
+            headers: { "Cache-Control": noStoreHeader },
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/RoomReportsEnvelope" },
+              },
+            },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "404": errorResponse,
+          "500": errorResponse,
+        },
+      },
+    },
+
     ...payrollRemittancePaths,
     "/v1/attempts/{attemptId}/room-issues": {
       post: {
@@ -1128,11 +1539,12 @@ export const openApiDocument = {
           },
         },
         description:
-          "multipart/base64가 아닌 raw binary body입니다. Content-Length 유무와 무관하게 JPEG/WebP/HEIC/HEIF 원문 최대 5242880 bytes(5MiB)를 허용하고 초과 byte에서 취소합니다. 원본 magic·전체 decode·자원상한을 검사하고 방향 보정·EXIF 등 metadata 제거·축소/품질 조정 후 JPEG/WebP 최종본 307200 bytes(300KiB) 이하와 output decode/SHA를 다시 검증합니다. HEIC/HEIF는 JPEG로 저장합니다. assignmentId/assignmentRevision/expectedPhotoRevision의 3개 query만 허용합니다. Idempotency-Key는 같은 최종 효과 재시도에 재사용하며 DB에는 scoped digest만 저장합니다. quota/현재 권한 admission은 디코딩과 Drive 호출 전입니다. 업로드 응답 유실 시 같은 key 재시도 또는 operation status 조회를 사용하고 새 파일을 임의 생성하지 않습니다. accepted만 current 사진 연결 완료이며 provider_succeeded/불확실 상태는 완료가 아닙니다. Google createdTime의 KST 날짜와 사전예약 폴더 날짜가 다르면 PHOTO_PROVIDER_DATE_MISMATCH로 fail-closed합니다. 실제 운영 OAuth/배포 준비가 없으면 503이며 이 source 문서만으로 운영 활성화가 되지 않습니다.",
+          "multipart/base64가 아닌 raw binary body입니다. Content-Length 유무와 무관하게 JPEG/WebP/HEIC/HEIF 원문 최대 5242880 bytes(5MiB)를 허용하고 초과 byte에서 취소합니다. 원본 magic·전체 decode·자원상한을 검사하고 방향 보정·EXIF 등 metadata 제거·축소/품질 조정 후 JPEG/WebP 최종본 307200 bytes(300KiB) 이하와 output decode/SHA를 다시 검증합니다. HEIC/HEIF는 JPEG로 저장합니다. assignmentId/assignmentRevision/expectedPhotoRevision 및 선택 includePhotoSlots=true query만 허용합니다. Idempotency-Key는 같은 최종 효과 재시도에 재사용하며 DB에는 scoped digest만 저장합니다. quota/현재 권한 admission은 디코딩과 Drive 호출 전입니다. 업로드 응답 유실 시 같은 key 재시도 또는 operation status 조회를 사용하고 새 파일을 임의 생성하지 않습니다. accepted만 current 사진 연결 완료이며 provider_succeeded/불확실 상태는 완료가 아닙니다. Google createdTime의 KST 날짜와 사전예약 폴더 날짜가 다르면 PHOTO_PROVIDER_DATE_MISMATCH로 fail-closed합니다. 실제 운영 OAuth/배포 준비가 없으면 503이며 이 source 문서만으로 운영 활성화가 되지 않습니다.",
         parameters: [
           photoPathId("attemptId"),
           photoPathId("slotId"),
           idempotencyHeader,
+          includePhotoSlotsParameter,
           {
             name: "assignmentId",
             in: "query",
@@ -1216,6 +1628,7 @@ export const openApiDocument = {
             photoPathId("slotId"),
             photoPathId("photoItemId"),
             idempotencyHeader,
+            includePhotoSlotsParameter,
             {
               name: "assignmentId",
               in: "query",
@@ -1376,6 +1789,11 @@ export const openApiDocument = {
               "검증 완료된 저장본 JPEG/WebP(최대 300KiB). 스마트폰 입력 원본은 저장하지 않으며 Drive 응답 header/Location/filename은 전달하지 않습니다.",
             headers: {
               "Cache-Control": noStoreHeader,
+              "Server-Timing": {
+                schema: { type: "string" },
+                description:
+                  "권한 재검증 성공 후 photo_db/photo_drive/photo_total의 duration(ms)만 제공.",
+              },
               "X-Content-Type-Options": { schema: { const: "nosniff" } },
               "Content-Disposition": {
                 description:
@@ -2228,7 +2646,7 @@ export const openApiDocument = {
         operationId: "listAvailability",
         summary: "현재 주간 가능일 조회",
         description:
-          "비밀번호 변경을 완료한 active maid 또는 active business admin 전용입니다. maid는 본인 자료만 조회할 수 있으며, admin만 maidProfileId로 특정 메이드를 선택할 수 있습니다. weekStart는 조회할 주의 월요일 날짜입니다.",
+          "비밀번호 변경을 완료한 active maid 또는 active business admin 전용입니다. maid는 본인 자료만 조회할 수 있으며, admin만 maidProfileId로 특정 메이드를 선택할 수 있습니다. weekStart는 조회할 주의 월요일 날짜입니다. 최대 1,000건의 전체 결과만 성공하며 DB 행 제한으로 잘리거나 7일 상세가 불완전하면 500 AVAILABILITY_COMMAND_FAILED로 거부합니다. 오류를 미제출이나 근무 불가로 해석하지 않습니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["maid", "admin"],
         parameters: [
@@ -2321,7 +2739,7 @@ export const openApiDocument = {
         operationId: "listAvailabilityChangeRequests",
         summary: "가능일 변경 요청 목록 조회",
         description:
-          "active maid는 본인 요청만, active business admin은 전체 요청을 조회합니다. status·weekStart·maidProfileId 필터는 모두 선택이며 maid가 다른 profile ID를 전달하면 403입니다.",
+          "active maid는 본인 요청만, active business admin은 전체 요청을 조회합니다. status·weekStart·maidProfileId 필터는 모두 선택이며 maid가 다른 profile ID를 전달하면 403입니다. 최대 1,000건의 전체 결과만 성공하며 DB 행 제한으로 잘리거나 전체 건수를 확인할 수 없으면 500 AVAILABILITY_COMMAND_FAILED입니다. 필요하면 기존 주차·상태·메이드 필터로 범위를 좁힙니다. 오류를 요청 0건으로 해석하지 않습니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["maid", "admin"],
         parameters: [
@@ -2401,7 +2819,7 @@ export const openApiDocument = {
         operationId: "listAvailabilityCandidates",
         summary: "날짜별 배정 가능 메이드 후보 조회",
         description:
-          "비밀번호 변경을 완료한 active business admin 전용입니다. 해당 날짜가 가능하다고 제출한 현재 version의 active maid만 반환하며 developer와 maid는 조회할 수 없습니다.",
+          "비밀번호 변경을 완료한 active business admin 전용입니다. 해당 날짜가 가능하다고 제출한 현재 version의 active maid만 반환하며 developer와 maid는 조회할 수 없습니다. 최대 1,000건의 전체 결과만 성공하며 DB 행 제한으로 잘리거나 전체 건수를 확인할 수 없으면 500 AVAILABILITY_COMMAND_FAILED입니다. 오류를 후보 없음으로 해석하지 않습니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin"],
         parameters: [
@@ -2694,12 +3112,23 @@ export const openApiDocument = {
         },
       },
     },
+    "/v1/limited/attempts": {
+      get: {
+        ...lifecycleOperation(
+          "listLimitedAttempts",
+          "기존 로그인 세션의 본인 제한 업무 찾기",
+          "최초 제한 전환 때 동결한 기존 live Supabase session만 허용합니다. 새 로그인·bearer 복구 credential·TTL 연장은 없으며 일반 login/me는 active-only입니다. 본인 live capability의 최소 ID/version/status/kind/actions/발급·만료 metadata만 UUID 오름차순으로 반환합니다. query는 없으며 1000건 초과는 partial response 대신 안전하게 실패합니다. 적격 세션에 live grant가 없으면 items=[]입니다. PIN·객실·고객정보·raw grant/session/digest를 반환하지 않습니다. 프런트 cold-boot 복원 구현·운영 제공은 별도입니다.",
+          "maid",
+          "LimitedAttemptDiscovery",
+        ),
+      },
+    },
     "/v1/limited/attempts/{attemptId}": {
       get: {
         ...lifecycleOperation(
           "getLimitedAttempt",
           "본인 제한 수행 범위 조회",
-          "기존 Supabase Auth 사용자와 유효 세션, 최신 maid profile, 정확한 attempt/revision, 미만료 DB capability를 모두 확인합니다. active(인계 뒤 증빙 범위)·deactivation_pending·upload_only만 후보이며 상태만으로 허용하지 않습니다. 별도 bearer capability token을 발급하지 않고 PIN·사진·현재 target 상세를 노출하지 않습니다. upload/validate/submit allowedActions는 후속 계약이며 실행 endpoint가 아닙니다.",
+          "기존 Supabase Auth 사용자와 최초 제한 전환 때 동결한 유효 세션, 최신 maid profile, 정확한 attempt/revision, 미만료 DB capability를 모두 확인합니다. active(인계 뒤 증빙 범위)·deactivation_pending·upload_only만 후보이며 상태만으로 허용하지 않습니다. 별도 bearer capability token을 발급하지 않고 PIN·사진·현재 target 상세를 노출하지 않습니다. 이 조회는 실행 endpoint가 아닙니다. upload/validate/submit은 각각 현재 photo/submission 전용 경로에서 다시 검증하며 evidence_upload로 전체 제출하거나 사진 원본을 읽을 수 없습니다.",
           "maid",
           "LimitedAttempt",
         ),
@@ -4948,11 +5377,21 @@ export const openApiDocument = {
       get: {
         tags: ["Rooms"],
         operationId: "listRooms",
-        summary: "전체 객실 운영 projection 조회",
+        summary: "날짜별 전체 객실 운영 projection 조회",
         description:
-          "active business admin 전용입니다. `evaluatedAt`의 서버 시각을 기준으로 `reservationPhase`와 현재 점유·청소·배정 가능 축을 계산합니다. `occupied`, `cleaningRequired`, `allocationBlocked`, `allocationReady`는 서로 독립된 축이며 하나의 영구 status enum으로 합치지 않습니다. `allocationReady=false`의 근거는 `reasonCodes`로 표시하세요. `pinSyncStatus`는 별도 운영 경고이며 예약 등록 가능 여부에는 포함되지 않습니다.",
+          "active business admin 전용입니다. `serviceDate`를 생략하면 오늘의 LIVE projection을 반환합니다. 과거 날짜는 Asia/Seoul 영업일 종료 시점, 미래 날짜는 영업일 시작 시점을 기준으로 계산합니다. `occupied`, `cleaningRequired`, `allocationBlocked`, `allocationReady`는 서로 독립된 축이며 하나의 영구 status enum으로 합치지 않습니다. `detailConditionCodes`는 관리자 객실 현황의 상세 조건 필터 계약입니다. `pinSyncStatus`는 별도 운영 경고이며 예약 등록 가능 여부에는 포함되지 않습니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin"],
+        parameters: [
+          {
+            name: "serviceDate",
+            in: "query",
+            required: false,
+            schema: { type: "string", format: "date" },
+            description:
+              "객실 현황 기준 영업일(YYYY-MM-DD). 생략=오늘 LIVE, 과거=Asia/Seoul 23:59:59.999999, 미래=Asia/Seoul 00:00:00 기준입니다.",
+          },
+        ],
         responses: {
           "200": {
             description: "active business admin 전용 객실 projection",
@@ -4972,6 +5411,7 @@ export const openApiDocument = {
               },
             },
           },
+          "400": errorResponse,
           "401": errorResponse,
           "403": errorResponse,
           "500": errorResponse,
@@ -5139,6 +5579,55 @@ export const openApiDocument = {
         "표시/운영 분류만 append-only override로 조정하거나 null로 해제합니다. canonicalPrimaryDisplayStatus와 점유·예약·readiness·bookability 원장은 바뀌지 않습니다. BLOCKED 표시만으로 실제 배정을 막지 않으며 실제 차단에는 operation-block command를 사용해야 합니다.",
       ),
     },
+    "/v1/rooms/candles": {
+      get: {
+        tags: ["Rooms"],
+        operationId: "listRoomCandles",
+        summary: "객실 촛불 최소 정보 조회",
+        description:
+          "active/password-complete 관리자와 모든 메이드의 live session 전용. 담당·제출·승인·7일 조건 없이 객실 식별/현재 수량/CAS만 조회합니다. UUID 오름차순 keyset, 기본/최대 50건이며 nextCursor가 null일 때 종료합니다. roomId 단건 필터와 cursor는 함께 사용할 수 없습니다. 다른 객실 정보·이력·PIN 권한은 부여하지 않습니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin", "maid"],
+        parameters: [
+          {
+            name: "roomId",
+            in: "query",
+            required: false,
+            schema: { type: "string", format: "uuid" },
+          },
+          {
+            name: "cursor",
+            in: "query",
+            required: false,
+            schema: { type: "string", format: "uuid" },
+          },
+          {
+            name: "limit",
+            in: "query",
+            required: false,
+            schema: {
+              type: "string",
+              pattern: "^(?:[1-9]|[1-4]\\d|50)$",
+              default: "50",
+            },
+          },
+        ],
+        responses: {
+          "200": {
+            description: "촛불 최소 조회 page",
+            headers: { "Cache-Control": noStoreHeader },
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/RoomCandlePage" },
+              },
+            },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+        },
+      },
+    },
     "/v1/rooms/{roomId}/candles": {
       post: roomMutationOperation(
         "setRoomCandleCount",
@@ -5146,7 +5635,9 @@ export const openApiDocument = {
         "RoomCandleRequest",
         "operation",
         201,
-        "현재 수량을 append-only event로 기록합니다. physicallyVerified를 생략하면 false이며 count는 0 이상입니다.",
+        "active/password-complete 관리자와 모든 메이드가 live session으로 현재 수량을 조정합니다. 담당 여부·제출·승인·7일 제한이나 관리자 재승인은 없습니다. 감소/0 초기화는 실제 회수 확인인 physicallyVerified=true를 요구하며 관리자 승인 필드가 아닙니다. CAS와 기존 멱등 receipt를 유지합니다. 0은 촛불 사유만 해소하며 다른 차단·준비 조건과 제출/검수/수익 이력은 바꾸지 않습니다.",
+        undefined,
+        ["admin", "maid"],
       ),
     },
     "/v1/rooms/{roomId}/issues": {
@@ -5319,7 +5810,7 @@ export const openApiDocument = {
         operationId: "prepareRoomPinChange",
         summary: "물리 도어락 PIN 변경 준비",
         description:
-          "서버가 현재 roomNumber와 4~8자리 pinDigits를 결합해 암호화한 뒤 5분 이하 변경 lease를 만듭니다. current PIN version이 0인 최초 등록에서 admin client가 일반 수정 사유 ADMIN_PHYSICAL_CHANGE를 보내도 서버가 ADMIN_INITIAL_PIN으로 정규화하며, request hash와 감사 사유도 정규화된 값을 사용합니다. 이 단계는 current PIN을 바꾸지 않고 즉시 mismatch로 전환하므로 실제 체크인과 admin 일반 reveal은 차단하지만 현재 통보된 담당 메이드의 일반 reveal과 예약 등록은 차단하지 않습니다. maid mismatch reveal은 authoritative current stored PIN을 반환하며 물리 도어락 일치를 의미하지 않습니다. maid는 본인의 현재 통보 assignment·in_progress attempt·현재 pinVersion의 unrevoked accessLeaseId를 모두 보내야 합니다. 응답 유실 시 같은 Idempotency-Key와 같은 PIN을 재전송하며, 다른 PIN은 IDEMPOTENCY_KEY_REUSED입니다.",
+          "서버가 현재 roomNumber와 128 UTF-8 바이트 이하 pinDigits를 결합해 암호화한 뒤 5분 이하 변경 lease를 만듭니다. current PIN version이 0인 최초 등록에서 admin client가 일반 수정 사유 ADMIN_PHYSICAL_CHANGE를 보내도 서버가 ADMIN_INITIAL_PIN으로 정규화하며, request hash와 감사 사유도 정규화된 값을 사용합니다. 이 단계는 current PIN을 바꾸지 않고 즉시 mismatch로 전환하므로 실제 체크인과 admin 일반 reveal은 차단하지만 현재 통보된 담당 메이드의 일반 reveal과 예약 등록은 차단하지 않습니다. maid mismatch reveal은 authoritative current stored PIN을 반환하며 물리 도어락 일치를 의미하지 않습니다. maid는 본인의 현재 통보 assignment·in_progress attempt·현재 pinVersion의 unrevoked accessLeaseId를 모두 보내야 합니다. 응답 유실 시 같은 Idempotency-Key와 같은 PIN을 재전송하며, 다른 PIN은 IDEMPOTENCY_KEY_REUSED입니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin", "maid"],
         parameters: [roomIdParameter(), idempotencyHeader],
@@ -6425,7 +6916,7 @@ export const openApiDocument = {
                 collectionRevision: {
                   anyOf: [{ type: "integer", minimum: 0 }, { type: "null" }],
                 },
-                photoCount: { type: "integer", minimum: 0, maximum: 10 },
+                photoCount: { type: "integer", minimum: 0, maximum: 20 },
                 uploadStatus: {
                   type: "string",
                   enum: [
@@ -6461,7 +6952,7 @@ export const openApiDocument = {
           { type: "object", required: ["quotaWarning"] },
         ],
         description:
-          "초기 업로드와 동일 key 재시도 모두 quotaWarning을 반환합니다. quota raw 사용량/Google 계정 정보는 반환하지 않습니다.",
+          "초기 업로드와 동일 key 재시도 모두 quotaWarning을 반환합니다. includePhotoSlots=true일 때만 photoSlots를 포함합니다. accepted 이외 또는 후속 조회 실패·배정 변경이면 null입니다. 재시도의 photoSlots는 새 조회 시점 결과이며 불변 receipt가 아닙니다. quota raw 사용량/Google 계정 정보는 반환하지 않습니다.",
       },
       AttemptPhotoItem: {
         type: "object",
@@ -6522,6 +7013,41 @@ export const openApiDocument = {
       PhotoUploadOperation: {
         type: "object",
         additionalProperties: false,
+        // Only pre-provider/uncertain operations may lack retention metadata.
+        // Keep the shared photo-item retention contract non-nullable.
+        allOf: [
+          {
+            if: {
+              properties: {
+                status: {
+                  enum: [
+                    "provider_succeeded",
+                    "accepted",
+                    "compensation_pending",
+                    "compensated",
+                  ],
+                },
+              },
+            },
+            // biome-ignore lint/suspicious/noThenProperty: JSON Schema conditional keyword; value is data, not a callable thenable.
+            then: {
+              properties: {
+                retentionPolicy: photoRetentionProperties.retentionPolicy,
+                mediaAvailability: photoRetentionProperties.mediaAvailability,
+              },
+            },
+          },
+          {
+            if: { properties: { retentionPolicy: { type: "null" } } },
+            // biome-ignore lint/suspicious/noThenProperty: JSON Schema conditional keyword; value is data, not a callable thenable.
+            then: { properties: { mediaAvailability: { type: "null" } } },
+            else: {
+              properties: {
+                mediaAvailability: photoRetentionProperties.mediaAvailability,
+              },
+            },
+          },
+        ],
         required: [
           "operationId",
           "objectId",
@@ -6591,6 +7117,18 @@ export const openApiDocument = {
               "호환 별칭입니다. 새 클라이언트는 expiresAt을 사용합니다.",
           },
           ...photoRetentionProperties,
+          retentionPolicy: {
+            anyOf: [photoRetentionProperties.retentionPolicy, { type: "null" }],
+            description:
+              "reserved/reconciliation_pending에서 아직 보존 메타데이터가 없으면 null. mediaAvailability와 함께 null이며 저장 후에는 기존 정책 enum을 유지합니다.",
+          },
+          mediaAvailability: {
+            anyOf: [photoRetentionProperties.mediaAvailability, {
+              type: "null",
+            }],
+            description:
+              "보존 메타데이터가 없는 미완료 operation에서만 null. 업로드 완료나 삭제 성공을 뜻하지 않습니다.",
+          },
           compensationAllowed: {
             type: "boolean",
             description:
@@ -6600,6 +7138,13 @@ export const openApiDocument = {
             type: "boolean",
             description:
               "업로드 응답에서 필수. admission 기준 decimal10GB 이상 경고이며 raw 사용량은 노출하지 않습니다. 상태 조회에는 생략됩니다.",
+          },
+          photoSlots: {
+            anyOf: [{ $ref: "#/components/schemas/AttemptPhotoSlots" }, {
+              type: "null",
+            }],
+            description:
+              "업로드 includePhotoSlots=true 전용. 기존 photo-slots GET과 같은 권한·projection. null이면 별도 GET fallback. 다음 변경은 snapshot의 최신 collection/item revision을 사용하며 409를 처리해야 합니다.",
           },
         },
       },
@@ -7321,309 +7866,322 @@ export const openApiDocument = {
         description:
           "프론트 분기용 안정적 코드입니다. 사용자 표시 문구는 message가 아니라 이 코드 기준으로 관리합니다.",
         enum: [
-          "VALIDATION_ERROR",
-          "INVALID_ROOM_ISSUE_REPORT",
-          "ROOM_ISSUE_EVIDENCE_INVALID",
-          "ROOM_ISSUE_REPORT_ACCESS_REQUIRED",
-          "INVALID_PHONE",
-          "REQUEST_TOO_LARGE",
-          "MISSING_ACCESS_TOKEN",
-          "INVALID_ACCESS_TOKEN",
-          "PROFILE_NOT_FOUND",
-          "ACCOUNT_INACTIVE",
-          "ACCOUNT_EXECUTION_LIFECYCLE_REQUIRED",
-          "ATTEMPT_ACCESS_REQUIRED",
-          "ATTEMPT_NOT_FOUND",
-          "ATTEMPT_VERSION_CONFLICT",
-          "ASSIGNMENT_NOT_NOTIFIED",
-          "ATTEMPT_INVALID_TRANSITION",
-          "MAID_ALREADY_IN_PROGRESS",
-          "ATTEMPT_COMMAND_FAILED",
-          "CAPABILITY_ACCESS_REQUIRED",
-          "PHOTO_RETENTION_DELETE_PREPARED",
-          "ACCOUNT_VERSION_CONFLICT",
-          "CLEANING_WINDOW_NOT_EXPIRED",
-          "ASSIGNMENT_SCHEDULE_INVALID",
-          "ROLLOVER_NOT_ALLOWED",
-          "INVALID_ATTEMPT_COMMAND",
-          "ATTEMPT_ACTIVATION_NOT_ALLOWED",
-          "CLEANING_SERVICE_DATE_NOT_DUE",
-          "CLEANING_SERVICE_DATE_EXPIRED",
-          "CLEANING_WINDOW_NOT_OPEN",
-          "CLEANING_WINDOW_EXPIRED",
-          "CHECKOUT_NOT_MATERIALIZED",
-          "RECLEAN_MAID_IMMUTABLE",
-          "PREVIOUS_ROOM_WORKFLOW_ACTIVE",
-          "SESSION_REVOKED",
-          "INVALID_CREDENTIALS",
-          "ACCOUNT_LOCKED",
-          "LOGIN_RATE_LIMITED",
-          "LOGIN_CLIENT_ID_UNAVAILABLE",
-          "LOGIN_RATE_LIMIT_UNAVAILABLE",
-          "ACTIVITY_LOG_UNAVAILABLE",
-          "AUTH_LOOKUP_FAILED",
-          "LOGIN_STATE_UPDATE_FAILED",
-          "INVALID_CURRENT_PASSWORD",
-          "AUTH_PASSWORD_CHANGE_FAILED",
-          "PASSWORD_STATE_INCONSISTENT",
-          "PASSWORD_STATE_UPDATE_FAILED",
-          "PASSWORD_CHANGE_RECEIPT_FAILED",
-          "PASSWORD_CHANGE_IN_PROGRESS",
-          "PASSWORD_CHANGE_SESSION_MISMATCH",
-          "PASSWORD_VERIFICATION_RATE_LIMITED",
-          "PASSWORD_VERIFICATION_RATE_LIMIT_UNAVAILABLE",
-          "PASSWORD_VERIFICATION_SESSION_REVOKE_FAILED",
-          "PASSWORD_RESET_STATE_UPDATE_FAILED",
-          "PASSWORD_CHANGE_REQUIRED",
-          "ACCOUNT_MANAGER_REQUIRED",
-          "ADMIN_REQUIRED",
-          "ASSIGNMENT_ACCESS_REQUIRED",
-          "DEVELOPER_REQUIRED",
-          "DEVELOPER_PROJECTION_FAILED",
-          "DATABASE_UNREACHABLE",
-          "MIGRATION_DRIFT",
-          "RLS_CONFIGURATION_INVALID",
-          "SCHEDULER_NOT_CONFIGURED",
-          "SCHEDULER_ACTOR_INVALID",
-          "SCHEDULER_DEGRADED",
-          "SCHEDULER_HEARTBEAT_FAILED",
-          "DIAGNOSTIC_TIMEOUT",
-          "DIAGNOSTICS_RATE_LIMITED",
-          "ACCOUNT_NOT_FOUND",
-          "DEVELOPER_ACCOUNT_PROTECTED",
-          "LAST_ACTIVE_ADMIN_REQUIRED",
-          "ACCOUNT_MUST_BE_INACTIVE",
-          "DEPARTED_ACCOUNT_IMMUTABLE",
-          "IDEMPOTENCY_KEY_REUSED",
-          "RESERVED_IDEMPOTENCY_KEY",
-          "DEACTIVATION_MUST_BE_FINISHED",
-          "PHONE_ALREADY_REGISTERED",
-          "LOGIN_ID_CONFLICT",
-          "PHONE_REQUIRED_FOR_RESET",
-          "AUTH_USER_CREATE_FAILED",
-          "AUTH_USER_UPDATE_FAILED",
-          "AUTH_PASSWORD_RESET_FAILED",
-          "ACCOUNT_AUTH_STATE_INCONSISTENT",
-          "ACCOUNT_COMMAND_FAILED",
-          "FORBIDDEN",
-          "MAID_REQUIRED",
-          "AVAILABILITY_ACCESS_REQUIRED",
-          "ACTIVE_MAID_REQUIRED",
-          "CLEANING_TARGET_NOT_FOUND",
-          "ASSIGNMENT_VERSION_CONFLICT",
-          "ASSIGNMENT_TARGET_STATE_INVALID",
-          "ASSIGNMENT_SEQUENCE_CONFLICT",
-          "ASSIGNMENT_NOT_FOUND",
-          "ASSIGNMENT_IMPACT_CHANGED",
-          "ASSIGNMENT_DRAFT_STALE_SCHEDULE",
-          "ASSIGNMENT_AVAILABILITY_REQUIRED",
-          "ASSIGNMENT_AVAILABILITY_STALE",
-          "ASSIGNMENT_MAID_UNAVAILABLE",
-          "ASSIGNMENT_WINDOW_EXPIRED",
-          "ASSIGNMENT_COMMIT_NOT_ALLOWED",
-          "ASSIGNMENT_COMMAND_FAILED",
-          "ASSIGNMENT_PREVIEW_DATE_NOT_ALLOWED",
-          "ASSIGNMENT_DURATION_POLICY_RETIRED",
-          "ASSIGNMENT_PREVIEW_LIMIT_EXCEEDED",
-          "ASSIGNMENT_PREVIEW_FAILED",
-          "INVALID_ASSIGNMENT_DURATION_POLICY",
-          "ASSIGNMENT_DURATION_POLICY_VERSION_CONFLICT",
-          "ACTIVE_ADMIN_REQUIRED",
-          "AVAILABILITY_WEEK_OUT_OF_RANGE",
-          "PAST_AVAILABILITY_DATE_NOT_ALLOWED",
-          "CHANGE_REQUEST_BEFORE_DEADLINE",
-          "STALE_VERSION",
-          "PENDING_CHANGE_REQUEST_EXISTS",
-          "INVALID_TRANSITION",
-          "AVAILABILITY_NOT_FOUND",
-          "CHANGE_REQUEST_NOT_FOUND",
-          "WEEK_START_MUST_BE_MONDAY",
-          "AVAILABILITY_DATES_MUST_BE_UNIQUE",
-          "AVAILABILITY_DATE_OUTSIDE_WEEK",
-          "AVAILABILITY_COMMAND_FAILED",
-          "INVALID_GUEST_NAME",
-          "INVALID_GUEST_COUNT",
-          "INVALID_RESERVATION_SCHEDULE",
-          "STANDARD_RESERVATION_REQUIRES_END",
-          "RESERVATION_TYPE_IMMUTABLE",
-          "RESERVATION_END_IMMUTABLE",
-          "BOOKABILITY_RANGE_TOO_LARGE",
-          "INVALID_ROOM_TYPE_FILTER",
-          "EXCLUDE_RESERVATION_NOT_FOUND",
-          "EXCLUDE_RESERVATION_NOT_ELIGIBLE",
-          "INVALID_RESERVATION_RANGE",
-          "RESERVATION_RANGE_TOO_LARGE",
-          "INVALID_RESERVATION_CURSOR",
-          "RESERVATION_CURSOR_NOT_CONFIGURED",
-          "INVALID_MOVE_EFFECTIVE_AT",
-          "RESERVATION_OVERLAP",
-          "TARGET_ROOM_OVERLAP",
-          "TARGET_ROOM_BLOCKED",
-          "TARGET_ROOM_NOT_READY",
-          "PIN_LEASE_ACTIVE",
-          "OPEN_ENDED_STAY_REQUIRES_END",
-          "ROOM_ALLOCATION_BLOCKED",
-          "RESERVATION_NOT_FOUND",
-          "CLEANING_REQUEST_NOT_FOUND",
-          "CLEANING_TEMPLATE_NOT_CONFIGURED",
-          "INVALID_CLEANING_TEMPLATE",
-          "INVALID_CLEANING_TEMPLATE_SLOTS",
-          "CLEANING_TEMPLATE_VERSION_CONFLICT",
-          "CLEANING_TEMPLATE_COMMAND_FAILED",
-          "INVALID_MANUAL_CLEANING_REQUEST",
-          "ACTIVE_STAY_RESERVATION_REQUIRED",
-          "STAYOVER_ACCESS_WINDOW_INVALID",
-          "VACANT_ROOM_REQUIRED",
-          "RESERVATION_ROOM_MISMATCH",
-          "NOT_MANUAL_CLEANING_REQUEST",
-          "REPLAN_REQUIRED",
-          "SCHEDULE_LOCKED",
-          "CONFLICT",
-          "RESERVATION_COMMAND_FAILED",
-          "RESERVATION_PII_KEY_INVALID",
-          "RESERVATION_PII_KEYRING_INVALID",
-          "RESERVATION_PII_DECRYPT_FAILED",
-          "COMPLAINT_ACCESS_REQUIRED",
-          "COMPLAINT_MAID_MISMATCH",
-          "COMPLAINT_NOT_FOUND",
-          "INVALID_COMPLAINT_CATEGORY",
-          "INVALID_COMPLAINT_FINDING",
-          "INVALID_COMPLAINT_PENALTY",
-          "INVALID_REWORK_DECISION",
-          "INVALID_COMPLAINT_RESPONSE",
-          "COMPLAINT_APPEAL_REASON_REQUIRED",
-          "COMPLAINT_APPEAL_REASON_FORBIDDEN",
-          "COMPLAINT_PERIOD_INVALID",
-          "COMPLAINT_PAGE_LIMIT_INVALID",
-          "INVALID_COMPLAINT_CURSOR",
-          "INVALID_COMPLAINT_REWORK",
-          "COMPLAINT_COMPENSATION_AMOUNT_INVALID",
-          "COMPLAINT_SOURCE_NOT_APPROVED",
-          "COMPLAINT_RESPONSE_REQUIRED",
-          "COMPLAINT_APPEAL_UNRESOLVED",
-          "COMPLAINT_RESPONSE_ALREADY_RECORDED",
-          "COMPLAINT_DECISION_REQUIRED",
-          "COMPLAINT_REWORK_MAID_UNAVAILABLE",
-          "COMPLAINT_REWORK_WINDOW_UNAVAILABLE",
-          "COMPLAINT_REWORK_NOT_CONFIRMED",
-          "COMPLAINT_REWORK_ALREADY_MATERIALIZED",
-          "COMPLAINT_REWORK_DECISION_STALE",
-          "COMPLAINT_REWORK_PRESTART_FROZEN",
-          "RECLEAN_TEMPLATE_NOT_CONFIGURED",
-          "COMPLAINT_INVALID_TRANSITION",
-          "COMPLAINT_COMMAND_FAILED",
-          "INVALID_INSPECTION_CURSOR",
-          "INSPECTION_CURSOR_NOT_CONFIGURED",
-          "INSPECTION_PAGE_LIMIT_INVALID",
-          "INSPECTION_RESPONSE_TOO_LARGE",
-          "INVALID_WORK_HISTORY_QUERY",
-          "INVALID_WORK_HISTORY_CURSOR",
-          "WORK_HISTORY_ACCESS_REQUIRED",
-          "WORK_HISTORY_MAID_SCOPE_REQUIRED",
-          "WORK_HISTORY_MAID_NOT_FOUND",
-          "WORK_HISTORY_QUERY_FAILED",
-          "INVALID_ROOM_OPERATION_QUERY",
-          "INVALID_ROOM_OPERATION_CURSOR",
-          "ROOM_OPERATION_CURSOR_NOT_CONFIGURED",
-          "ROOM_OPERATION_PAGE_LIMIT_INVALID",
-          "ROOM_OPERATION_RESPONSE_TOO_LARGE",
-          "NOTIFICATION_ACCESS_REQUIRED",
-          "NOTIFICATION_NOT_FOUND",
-          "INVALID_NOTIFICATION_CURSOR",
-          "NOTIFICATION_CURSOR_NOT_CONFIGURED",
-          "NOTIFICATION_RESPONSE_TOO_LARGE",
-          "NOTIFICATION_QUERY_FAILED",
-          "PAYROLL_ACCESS_REQUIRED",
-          "PAYROLL_MAID_NOT_FOUND",
-          "PAYROLL_WEEK_MUST_START_MONDAY",
-          "PAYROLL_PAGE_LIMIT_INVALID",
-          "PAYROLL_PAGE_KIND_INVALID",
-          "PAYROLL_CURSOR_INVALID",
-          "PAYROLL_CURSOR_NOT_CONFIGURED",
-          "PAYROLL_RESPONSE_TOO_LARGE",
-          "INVALID_EXPECTED_VERSION",
-          "PAYROLL_WEEK_NOT_CLOSED",
-          "PAYROLL_CYCLE_NOT_OPEN",
-          "NO_PAYROLL_AMOUNT",
-          "PAYROLL_NONPOSITIVE_REQUIRES_CARRY",
-          "PAYROLL_POSITIVE_REQUIRES_START",
-          "PAYROLL_CYCLE_ECONOMICALLY_FROZEN",
-          "PAYROLL_SOURCE_PAYMENT_UNCERTAIN",
-          "PAYROLL_SOURCE_ALREADY_REVERSED",
-          "PAYROLL_ROOT_ENTITLEMENT_NEGATIVE",
-          "STALE_ADJUSTMENT_VERSION",
-          "PAYROLL_LATE_EARNING_ALREADY_CARRIED",
-          "PAYROLL_EARNING_NOT_LATE",
-          "PAYROLL_LATE_CARRY_TARGET_FROZEN",
-          "PAYROLL_EARLIER_CARRY_PENDING",
-          "PAYROLL_PRIOR_LATE_EARNING_PENDING",
-          "PAYROLL_SOURCE_NOT_FOUND",
-          "PAYROLL_ADJUSTMENT_INVALID",
-          "PAYROLL_PAYMENT_ATTEMPT_NOT_FOUND",
-          "PAYROLL_PAYMENT_ATTEMPT_TERMINAL",
-          "PAYROLL_PAYMENT_TRANSITION_INVALID",
-          "PAYROLL_PAYMENT_REFERENCE_ALREADY_USED",
-          "PAYROLL_PAYMENT_REFERENCE_INVALID",
-          "PAYROLL_PAYMENT_METHOD_INVALID",
-          "PAYROLL_PAYMENT_REASON_INVALID",
-          "PAYROLL_PAYMENT_REOPEN_REASON_INVALID",
-          "PAYROLL_PAYMENT_RESULT_AMOUNT_MISMATCH",
-          "PAYROLL_COMMAND_FAILED",
-          "ROOM_NOT_FOUND",
-          "ROOM_TYPE_NOT_FOUND",
-          "ROOM_TYPE_CAPACITY_INVALID",
-          "ROOM_TYPE_CAPACITY_ACTIVE_RESERVATION_CONFLICT",
-          "ROOM_TYPE_CAPACITY_PREVIEW_STALE",
-          "ROOM_TYPE_VERSION_CONFLICT",
-          "ROOM_NUMBER_ALREADY_EXISTS",
-          "ROOM_TYPE_INACTIVE",
-          "ROOM_INACTIVE",
-          "ROOM_ALREADY_INACTIVE",
-          "ROOM_DEACTIVATION_BLOCKED",
-          "ROOM_DEACTIVATION_PREVIEW_STALE",
-          "ROOM_VERSION_CONFLICT",
-          "GUEST_COUNT_EXCEEDS_ROOM_TYPE_CAPACITY",
-          "ROOM_OPERATION_NOT_FOUND",
-          "INVALID_ROOM_PIN",
-          "INVALID_PIN_BOOTSTRAP_LIMIT",
-          "INVALID_PIN_BOOTSTRAP",
-          "ROOM_PIN_BOOTSTRAP_CONFIG_INVALID",
-          "ROOM_PIN_BOOTSTRAP_FAILED",
-          "ROOM_PIN_KEY_UNAVAILABLE",
-          "ROOM_PIN_CRYPTO_CONFIG_INVALID",
-          "ROOM_PIN_DECRYPT_FAILED",
-          "ROOM_PIN_COMMAND_FAILED",
-          "STALE_PIN_VERSION",
-          "ROOM_NUMBER_CHANGED",
-          "ROOM_PIN_REISSUE_REQUIRED",
-          "ROOM_PIN_MISMATCH_UNRESOLVED",
-          "INVALID_PIN_CHANGE_REASON",
-          "PIN_CHANGE_IN_PROGRESS_REQUIRED",
-          "PIN_CHANGE_IN_PROGRESS",
-          "PIN_CHANGE_LEASE_EXPIRED",
-          "PIN_CHANGE_LEASE_NOT_RESOLVABLE",
-          "PIN_REVEAL_AUTHORIZATION_CHANGED",
-          "GENERATED_PIN_REVEAL_NOT_ALLOWED",
-          "GENERATED_PIN_CONFIRMATION_NOT_ALLOWED",
-          "ROOM_PIN_UNCONFIGURED",
-          "ROOM_PIN_SHEET_OPERATOR_REQUIRED",
-          "ROOM_PIN_SHEET_NOT_CONFIGURED",
-          "ROOM_PIN_SHEET_OPERATION_FAILED",
-          "ROOM_PIN_SHEET_RESPONSE_TOO_LARGE",
-          "ROOM_PIN_SHEET_FULL_RESYNC_STALE",
-          "ROOM_PIN_SHEET_WORKER_BUSY",
-          "ROOM_PIN_SHEET_FULL_RESYNC_PENDING",
-          "ROOM_PIN_SHEET_ROOM_MASTER_INVALID",
-          "PIN_ACCESS_LEASE_REQUIRED",
-          "PIN_ENTITLEMENT_REQUIRED",
-          "PIN_ACCESS_REQUIRED",
-          "SENSITIVE_TEXT_NOT_ALLOWED",
-          "PIN_MATERIAL_NOT_ALLOWED",
-          "ROOM_COMMAND_FAILED",
-          "ORIGIN_NOT_ALLOWED",
-          "ROUTE_NOT_FOUND",
-          "RUNTIME_NOT_CONFIGURED",
-          "INTERNAL_SERVER_ERROR",
+          ...new Set([
+            "VALIDATION_ERROR",
+            "INVALID_ROOM_ISSUE_REPORT",
+            "ROOM_ISSUE_EVIDENCE_INVALID",
+            "ROOM_ISSUE_REPORT_ACCESS_REQUIRED",
+            "INVALID_PHONE",
+            "REQUEST_TOO_LARGE",
+            "MISSING_ACCESS_TOKEN",
+            "INVALID_ACCESS_TOKEN",
+            "PROFILE_NOT_FOUND",
+            "ACCOUNT_INACTIVE",
+            "ACCOUNT_EXECUTION_LIFECYCLE_REQUIRED",
+            "ATTEMPT_ACCESS_REQUIRED",
+            "ATTEMPT_NOT_FOUND",
+            "ATTEMPT_VERSION_CONFLICT",
+            "ASSIGNMENT_NOT_NOTIFIED",
+            "ATTEMPT_INVALID_TRANSITION",
+            "MAID_ALREADY_IN_PROGRESS",
+            "ATTEMPT_COMMAND_FAILED",
+            "CAPABILITY_ACCESS_REQUIRED",
+            "LIMITED_DISCOVERY_LIMIT_EXCEEDED",
+            "LIMITED_SESSION_LIMIT_EXCEEDED",
+            "PHOTO_RETENTION_DELETE_PREPARED",
+            "ACCOUNT_VERSION_CONFLICT",
+            "CLEANING_WINDOW_NOT_EXPIRED",
+            "ASSIGNMENT_SCHEDULE_INVALID",
+            "ROLLOVER_NOT_ALLOWED",
+            "INVALID_ATTEMPT_COMMAND",
+            "ATTEMPT_ACTIVATION_NOT_ALLOWED",
+            "CLEANING_SERVICE_DATE_NOT_DUE",
+            "CLEANING_SERVICE_DATE_EXPIRED",
+            "CLEANING_WINDOW_NOT_OPEN",
+            "CLEANING_WINDOW_EXPIRED",
+            "CHECKOUT_NOT_MATERIALIZED",
+            "RECLEAN_MAID_IMMUTABLE",
+            "PREVIOUS_ROOM_WORKFLOW_ACTIVE",
+            "SESSION_REVOKED",
+            "AUTH_CONTEXT_UNAVAILABLE",
+            "INVALID_CREDENTIALS",
+            "ACCOUNT_LOCKED",
+            "LOGIN_RATE_LIMITED",
+            "LOGIN_CLIENT_ID_UNAVAILABLE",
+            "LOGIN_RATE_LIMIT_UNAVAILABLE",
+            "ACTIVITY_LOG_UNAVAILABLE",
+            "AUTH_LOOKUP_FAILED",
+            "LOGIN_STATE_UPDATE_FAILED",
+            "INVALID_CURRENT_PASSWORD",
+            "AUTH_PASSWORD_CHANGE_FAILED",
+            "PASSWORD_STATE_INCONSISTENT",
+            "PASSWORD_STATE_UPDATE_FAILED",
+            "PASSWORD_CHANGE_RECEIPT_FAILED",
+            "PASSWORD_CHANGE_IN_PROGRESS",
+            "PASSWORD_CHANGE_SESSION_MISMATCH",
+            "PASSWORD_VERIFICATION_RATE_LIMITED",
+            "PASSWORD_VERIFICATION_RATE_LIMIT_UNAVAILABLE",
+            "PASSWORD_VERIFICATION_SESSION_REVOKE_FAILED",
+            "PASSWORD_RESET_STATE_UPDATE_FAILED",
+            "PASSWORD_CHANGE_REQUIRED",
+            "ACCOUNT_MANAGER_REQUIRED",
+            "ADMIN_REQUIRED",
+            "ASSIGNMENT_ACCESS_REQUIRED",
+            "DEVELOPER_REQUIRED",
+            "DEVELOPER_PROJECTION_FAILED",
+            "DATABASE_UNREACHABLE",
+            "MIGRATION_DRIFT",
+            "RLS_CONFIGURATION_INVALID",
+            "SCHEDULER_NOT_CONFIGURED",
+            "SCHEDULER_ACTOR_INVALID",
+            "SCHEDULER_DEGRADED",
+            "SCHEDULER_HEARTBEAT_FAILED",
+            "DIAGNOSTIC_TIMEOUT",
+            "DIAGNOSTICS_RATE_LIMITED",
+            "ACCOUNT_NOT_FOUND",
+            "DEVELOPER_ACCOUNT_PROTECTED",
+            "LAST_ACTIVE_ADMIN_REQUIRED",
+            "ACCOUNT_MUST_BE_INACTIVE",
+            "DEPARTED_ACCOUNT_IMMUTABLE",
+            "IDEMPOTENCY_KEY_REUSED",
+            "RESERVED_IDEMPOTENCY_KEY",
+            "DEACTIVATION_MUST_BE_FINISHED",
+            "PHONE_ALREADY_REGISTERED",
+            "LOGIN_ID_CONFLICT",
+            "PHONE_REQUIRED_FOR_RESET",
+            "AUTH_USER_CREATE_FAILED",
+            "AUTH_USER_UPDATE_FAILED",
+            "AUTH_PASSWORD_RESET_FAILED",
+            "ACCOUNT_AUTH_STATE_INCONSISTENT",
+            "ACCOUNT_COMMAND_FAILED",
+            "FORBIDDEN",
+            "MAID_REQUIRED",
+            "AVAILABILITY_ACCESS_REQUIRED",
+            "ACTIVE_MAID_REQUIRED",
+            "CLEANING_TARGET_NOT_FOUND",
+            "ASSIGNMENT_VERSION_CONFLICT",
+            "ASSIGNMENT_TARGET_STATE_INVALID",
+            "ASSIGNMENT_SEQUENCE_CONFLICT",
+            "ASSIGNMENT_NOT_FOUND",
+            "ASSIGNMENT_IMPACT_CHANGED",
+            "ASSIGNMENT_DRAFT_STALE_SCHEDULE",
+            "ASSIGNMENT_AVAILABILITY_REQUIRED",
+            "ASSIGNMENT_AVAILABILITY_STALE",
+            "ASSIGNMENT_MAID_UNAVAILABLE",
+            "ASSIGNMENT_WINDOW_EXPIRED",
+            "ASSIGNMENT_COMMIT_NOT_ALLOWED",
+            "ASSIGNMENT_COMMAND_FAILED",
+            "ASSIGNMENT_PREVIEW_DATE_NOT_ALLOWED",
+            "ASSIGNMENT_DURATION_POLICY_RETIRED",
+            "ASSIGNMENT_PREVIEW_LIMIT_EXCEEDED",
+            "ASSIGNMENT_PREVIEW_FAILED",
+            "INVALID_ASSIGNMENT_DURATION_POLICY",
+            "ASSIGNMENT_DURATION_POLICY_VERSION_CONFLICT",
+            "ACTIVE_ADMIN_REQUIRED",
+            "AVAILABILITY_WEEK_OUT_OF_RANGE",
+            "PAST_AVAILABILITY_DATE_NOT_ALLOWED",
+            "CHANGE_REQUEST_BEFORE_DEADLINE",
+            "STALE_VERSION",
+            "PENDING_CHANGE_REQUEST_EXISTS",
+            "INVALID_TRANSITION",
+            "AVAILABILITY_NOT_FOUND",
+            "CHANGE_REQUEST_NOT_FOUND",
+            "WEEK_START_MUST_BE_MONDAY",
+            "AVAILABILITY_DATES_MUST_BE_UNIQUE",
+            "AVAILABILITY_DATE_OUTSIDE_WEEK",
+            "AVAILABILITY_COMMAND_FAILED",
+            "INVALID_GUEST_NAME",
+            "INVALID_GUEST_COUNT",
+            "INVALID_RESERVATION_SCHEDULE",
+            "STANDARD_RESERVATION_REQUIRES_END",
+            "RESERVATION_TYPE_IMMUTABLE",
+            "RESERVATION_END_IMMUTABLE",
+            "BOOKABILITY_RANGE_TOO_LARGE",
+            "INVALID_ROOM_TYPE_FILTER",
+            "EXCLUDE_RESERVATION_NOT_FOUND",
+            "EXCLUDE_RESERVATION_NOT_ELIGIBLE",
+            "INVALID_RESERVATION_RANGE",
+            "RESERVATION_RANGE_TOO_LARGE",
+            "INVALID_RESERVATION_CURSOR",
+            "RESERVATION_CURSOR_NOT_CONFIGURED",
+            "INVALID_MOVE_EFFECTIVE_AT",
+            "RESERVATION_OVERLAP",
+            "TARGET_ROOM_OVERLAP",
+            "TARGET_ROOM_BLOCKED",
+            "TARGET_ROOM_NOT_READY",
+            "PIN_LEASE_ACTIVE",
+            "OPEN_ENDED_STAY_REQUIRES_END",
+            "ROOM_ALLOCATION_BLOCKED",
+            "RESERVATION_NOT_FOUND",
+            "CLEANING_REQUEST_NOT_FOUND",
+            "CLEANING_TEMPLATE_NOT_CONFIGURED",
+            "INVALID_CLEANING_TEMPLATE",
+            "INVALID_CLEANING_TEMPLATE_SLOTS",
+            "CLEANING_TEMPLATE_VERSION_CONFLICT",
+            "CLEANING_TEMPLATE_COMMAND_FAILED",
+            "INVALID_MANUAL_CLEANING_REQUEST",
+            "ACTIVE_STAY_RESERVATION_REQUIRED",
+            "STAYOVER_ACCESS_WINDOW_INVALID",
+            "VACANT_ROOM_REQUIRED",
+            "RESERVATION_ROOM_MISMATCH",
+            "NOT_MANUAL_CLEANING_REQUEST",
+            "REPLAN_REQUIRED",
+            "SCHEDULE_LOCKED",
+            "CONFLICT",
+            "RESERVATION_COMMAND_FAILED",
+            "RESERVATION_PII_KEY_INVALID",
+            "RESERVATION_PII_KEYRING_INVALID",
+            "RESERVATION_PII_DECRYPT_FAILED",
+            "COMPLAINT_ACCESS_REQUIRED",
+            "COMPLAINT_MAID_MISMATCH",
+            "COMPLAINT_NOT_FOUND",
+            "INVALID_COMPLAINT_CATEGORY",
+            "INVALID_COMPLAINT_FINDING",
+            "INVALID_COMPLAINT_PENALTY",
+            "INVALID_REWORK_DECISION",
+            "INVALID_COMPLAINT_RESPONSE",
+            "COMPLAINT_APPEAL_REASON_REQUIRED",
+            "COMPLAINT_APPEAL_REASON_FORBIDDEN",
+            "COMPLAINT_PERIOD_INVALID",
+            "COMPLAINT_PAGE_LIMIT_INVALID",
+            "INVALID_COMPLAINT_CURSOR",
+            "INVALID_COMPLAINT_REWORK",
+            "COMPLAINT_COMPENSATION_AMOUNT_INVALID",
+            "COMPLAINT_SOURCE_NOT_APPROVED",
+            "COMPLAINT_RESPONSE_REQUIRED",
+            "COMPLAINT_APPEAL_UNRESOLVED",
+            "COMPLAINT_RESPONSE_ALREADY_RECORDED",
+            "COMPLAINT_DECISION_REQUIRED",
+            "COMPLAINT_REWORK_MAID_UNAVAILABLE",
+            "COMPLAINT_REWORK_WINDOW_UNAVAILABLE",
+            "COMPLAINT_REWORK_NOT_CONFIRMED",
+            "COMPLAINT_REWORK_ALREADY_MATERIALIZED",
+            "COMPLAINT_REWORK_DECISION_STALE",
+            "COMPLAINT_REWORK_PRESTART_FROZEN",
+            "RECLEAN_TEMPLATE_NOT_CONFIGURED",
+            "COMPLAINT_INVALID_TRANSITION",
+            "COMPLAINT_COMMAND_FAILED",
+            "INVALID_INSPECTION_CURSOR",
+            "INSPECTION_CURSOR_NOT_CONFIGURED",
+            "INSPECTION_PAGE_LIMIT_INVALID",
+            "INSPECTION_RESPONSE_TOO_LARGE",
+            "INVALID_WORK_HISTORY_QUERY",
+            "INVALID_WORK_HISTORY_CURSOR",
+            "WORK_HISTORY_ACCESS_REQUIRED",
+            "WORK_HISTORY_MAID_SCOPE_REQUIRED",
+            "WORK_HISTORY_MAID_NOT_FOUND",
+            "WORK_HISTORY_QUERY_FAILED",
+            "INVALID_ROOM_OPERATION_QUERY",
+            "INVALID_ROOM_OPERATION_CURSOR",
+            "ROOM_OPERATION_CURSOR_NOT_CONFIGURED",
+            "ROOM_OPERATION_PAGE_LIMIT_INVALID",
+            "ROOM_OPERATION_RESPONSE_TOO_LARGE",
+            "NOTIFICATION_ACCESS_REQUIRED",
+            "NOTIFICATION_NOT_FOUND",
+            "INVALID_NOTIFICATION_CURSOR",
+            "NOTIFICATION_CURSOR_NOT_CONFIGURED",
+            "NOTIFICATION_RESPONSE_TOO_LARGE",
+            "NOTIFICATION_QUERY_FAILED",
+            "PAYROLL_ACCESS_REQUIRED",
+            "PAYROLL_MAID_NOT_FOUND",
+            "PAYROLL_WEEK_MUST_START_MONDAY",
+            "PAYROLL_PAGE_LIMIT_INVALID",
+            "PAYROLL_PAGE_KIND_INVALID",
+            "PAYROLL_CURSOR_INVALID",
+            "PAYROLL_CURSOR_NOT_CONFIGURED",
+            "PAYROLL_RESPONSE_TOO_LARGE",
+            "INVALID_EXPECTED_VERSION",
+            "PAYROLL_WEEK_NOT_CLOSED",
+            "PAYROLL_CYCLE_NOT_OPEN",
+            "NO_PAYROLL_AMOUNT",
+            "PAYROLL_NONPOSITIVE_REQUIRES_CARRY",
+            "PAYROLL_POSITIVE_REQUIRES_START",
+            "PAYROLL_CYCLE_ECONOMICALLY_FROZEN",
+            "PAYROLL_SOURCE_PAYMENT_UNCERTAIN",
+            "PAYROLL_SOURCE_ALREADY_REVERSED",
+            "PAYROLL_ROOT_ENTITLEMENT_NEGATIVE",
+            "STALE_ADJUSTMENT_VERSION",
+            "PAYROLL_LATE_EARNING_ALREADY_CARRIED",
+            "PAYROLL_EARNING_NOT_LATE",
+            "PAYROLL_LATE_CARRY_TARGET_FROZEN",
+            "PAYROLL_EARLIER_CARRY_PENDING",
+            "PAYROLL_PRIOR_LATE_EARNING_PENDING",
+            "PAYROLL_SOURCE_NOT_FOUND",
+            "PAYROLL_ADJUSTMENT_INVALID",
+            "PAYROLL_PAYMENT_ATTEMPT_NOT_FOUND",
+            "PAYROLL_PAYMENT_ATTEMPT_TERMINAL",
+            "PAYROLL_PAYMENT_TRANSITION_INVALID",
+            "PAYROLL_PAYMENT_REFERENCE_ALREADY_USED",
+            "PAYROLL_PAYMENT_REFERENCE_INVALID",
+            "PAYROLL_PAYMENT_METHOD_INVALID",
+            "PAYROLL_PAYMENT_REASON_INVALID",
+            "PAYROLL_PAYMENT_REOPEN_REASON_INVALID",
+            "PAYROLL_PAYMENT_RESULT_AMOUNT_MISMATCH",
+            "PAYROLL_COMMAND_FAILED",
+            "ROOM_NOT_FOUND",
+            "ROOM_TYPE_NOT_FOUND",
+            "ROOM_TYPE_CAPACITY_INVALID",
+            "ROOM_TYPE_CAPACITY_ACTIVE_RESERVATION_CONFLICT",
+            "ROOM_TYPE_CAPACITY_PREVIEW_STALE",
+            "ROOM_TYPE_VERSION_CONFLICT",
+            "ROOM_NUMBER_ALREADY_EXISTS",
+            "ROOM_TYPE_INACTIVE",
+            "ROOM_INACTIVE",
+            "ROOM_ALREADY_INACTIVE",
+            "ROOM_DEACTIVATION_BLOCKED",
+            "ROOM_DEACTIVATION_PREVIEW_STALE",
+            "ROOM_VERSION_CONFLICT",
+            "GUEST_COUNT_EXCEEDS_ROOM_TYPE_CAPACITY",
+            "ROOM_OPERATION_NOT_FOUND",
+            "INVALID_ROOM_PIN",
+            "INVALID_PIN_TRANSFER_REQUEST",
+            "ROOM_PIN_TRANSFER_NOT_CONFIGURED",
+            "ROOM_PIN_TRANSFER_STALE",
+            "ROOM_PIN_TRANSFER_BUSY",
+            "ROOM_PIN_IMPORT_SOURCE_UNAVAILABLE",
+            "ROOM_PIN_TRANSFER_FAILED",
+
+            "INVALID_PIN_BOOTSTRAP_LIMIT",
+            "INVALID_PIN_BOOTSTRAP",
+            "ROOM_PIN_BOOTSTRAP_CONFIG_INVALID",
+            "ROOM_PIN_BOOTSTRAP_FAILED",
+            "ROOM_PIN_KEY_UNAVAILABLE",
+            "ROOM_PIN_CRYPTO_CONFIG_INVALID",
+            "ROOM_PIN_DECRYPT_FAILED",
+            "ROOM_PIN_COMMAND_FAILED",
+            "STALE_PIN_VERSION",
+            "ROOM_NUMBER_CHANGED",
+            "ROOM_PIN_REISSUE_REQUIRED",
+            "ROOM_PIN_MISMATCH_UNRESOLVED",
+            "INVALID_PIN_CHANGE_REASON",
+            "PIN_CHANGE_IN_PROGRESS_REQUIRED",
+            "PIN_CHANGE_IN_PROGRESS",
+            "PIN_CHANGE_LEASE_EXPIRED",
+            "PIN_CHANGE_LEASE_NOT_RESOLVABLE",
+            "PIN_REVEAL_AUTHORIZATION_CHANGED",
+            "GENERATED_PIN_REVEAL_NOT_ALLOWED",
+            "GENERATED_PIN_CONFIRMATION_NOT_ALLOWED",
+            "ROOM_PIN_UNCONFIGURED",
+            "ROOM_PIN_SHEET_OPERATOR_REQUIRED",
+            "ROOM_PIN_SHEET_NOT_CONFIGURED",
+            "ROOM_PIN_SHEET_OPERATION_FAILED",
+            "ROOM_PIN_SHEET_RESPONSE_TOO_LARGE",
+            "ROOM_PIN_SHEET_FULL_RESYNC_STALE",
+            "ROOM_PIN_SHEET_WORKER_BUSY",
+            "ROOM_PIN_SHEET_FULL_RESYNC_PENDING",
+            "ROOM_PIN_SHEET_ROOM_MASTER_INVALID",
+            "PIN_ACCESS_LEASE_REQUIRED",
+            "PIN_ENTITLEMENT_REQUIRED",
+            "PIN_ACCESS_REQUIRED",
+            "SENSITIVE_TEXT_NOT_ALLOWED",
+            "PIN_MATERIAL_NOT_ALLOWED",
+            "ROOM_COMMAND_FAILED",
+            "ORIGIN_NOT_ALLOWED",
+            "ROUTE_NOT_FOUND",
+            "RUNTIME_NOT_CONFIGURED",
+            "INTERNAL_SERVER_ERROR",
+            ...postApprovalOpenApiErrorCodes,
+          ]),
         ],
       },
       RoomChangeConflict: {
@@ -8085,6 +8643,7 @@ export const openApiDocument = {
               "GOOGLE_DRIVE_REFRESH_TOKEN",
               "GOOGLE_DRIVE_ROOT_FOLDER_ID",
               "PHOTO_PURGE_INVOKE_SECRET",
+              "POST_APPROVAL_ROOM_ISSUE_HANDOVER_KEY_BASE64",
               "PAYROLL_CURSOR_HMAC_SECRET",
               "NOTIFICATION_CURSOR_HMAC_SECRET",
               "INSPECTION_CURSOR_HMAC_SECRET",
@@ -8123,6 +8682,7 @@ export const openApiDocument = {
                 "GOOGLE_DRIVE_REFRESH_TOKEN",
                 "GOOGLE_DRIVE_ROOT_FOLDER_ID",
                 "PHOTO_PURGE_INVOKE_SECRET",
+                "POST_APPROVAL_ROOM_ISSUE_HANDOVER_KEY_BASE64",
                 "PAYROLL_CURSOR_HMAC_SECRET",
                 "NOTIFICATION_CURSOR_HMAC_SECRET",
                 "INSPECTION_CURSOR_HMAC_SECRET",
@@ -9103,6 +9663,84 @@ export const openApiDocument = {
           revokedAt: { type: ["string", "null"], format: "date-time" },
         },
       },
+      LimitedAttemptDiscoveryItem: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "attemptId",
+          "assignmentId",
+          "assignmentRevision",
+          "executionVersion",
+          "status",
+          "kind",
+          "allowedActions",
+          "issuedAt",
+          "expiresAt",
+        ],
+        properties: {
+          attemptId: { type: "string", format: "uuid" },
+          assignmentId: { type: "string", format: "uuid" },
+          assignmentRevision: {
+            type: "integer",
+            minimum: 1,
+            maximum: Number.MAX_SAFE_INTEGER,
+          },
+          executionVersion: {
+            type: "integer",
+            minimum: 1,
+            maximum: Number.MAX_SAFE_INTEGER,
+          },
+          status: {
+            type: "string",
+            enum: [
+              "in_progress",
+              "field_completed",
+              "upload_pending",
+              "interrupted",
+            ],
+          },
+          kind: {
+            type: "string",
+            enum: ["finish_current", "upload_submit", "evidence_upload"],
+          },
+          allowedActions: {
+            type: "array",
+            minItems: 1,
+            maxItems: 3,
+            uniqueItems: true,
+            items: {
+              type: "string",
+              enum: [
+                "complete_field_work",
+                "upload_evidence",
+                "validate_evidence",
+                "submit",
+              ],
+            },
+            description:
+              "kind별 고정 순서: finish_current=[complete_field_work], upload_submit=[upload_evidence,validate_evidence,submit], evidence_upload=[upload_evidence,validate_evidence].",
+          },
+          issuedAt: { type: "string", format: "date-time" },
+          expiresAt: { type: "string", format: "date-time" },
+        },
+      },
+      LimitedAttemptDiscovery: {
+        type: "object",
+        additionalProperties: false,
+        required: ["profileStatus", "evaluatedAt", "items"],
+        properties: {
+          profileStatus: {
+            type: "string",
+            enum: ["active", "deactivation_pending", "upload_only"],
+          },
+          evaluatedAt: { type: "string", format: "date-time" },
+          items: {
+            type: "array",
+            maxItems: 1000,
+            items: { $ref: "#/components/schemas/LimitedAttemptDiscoveryItem" },
+          },
+        },
+      },
       LimitedAttempt: {
         type: "object",
         additionalProperties: false,
@@ -9614,6 +10252,12 @@ export const openApiDocument = {
           sequenceNumber: { type: "integer", minimum: 1 },
           revision: { type: "integer", minimum: 1 },
           isCurrent: { type: "boolean" },
+          planningDate: {
+            type: "string",
+            format: "date",
+            description:
+              "불변 통보/변경 근거의 배정 계획일. 원 serviceDate와 구분하며 메이드 오늘/내일 목록 및 실행일 판정에 사용.",
+          },
           targetAssignmentVersion: {
             type: "integer",
             minimum: 1,
@@ -9803,6 +10447,12 @@ export const openApiDocument = {
             minimum: 1,
             description:
               "admin은 현재 target CAS 값입니다. maid는 본인 통보 revision에 고정된 값이며 과거 조회는 mutation 권한이 아닙니다.",
+          },
+          planningDate: {
+            type: "string",
+            format: "date",
+            description:
+              "통보/담당 변경 근거의 계획일. 원 serviceDate를 덮어쓰지 않으며 생성일·통보일과 다릅니다.",
           },
           cleaningKind: {
             type: "string",
@@ -11169,6 +11819,28 @@ export const openApiDocument = {
         description:
           "객실 예약 배정이 준비되지 않은 독립 사유입니다. RESERVATION_CURRENT는 evaluatedAt이 예약의 [checkInAt, checkOutAt) 구간에 있음을 뜻합니다. 여러 값이 동시에 올 수 있습니다. PIN 상태는 이 enum이 아니라 RoomProjection.pinSyncStatus의 별도 경고 축입니다.",
       },
+      RoomProjectionMode: {
+        type: "string",
+        enum: ["LIVE", "PAST_END_OF_DAY", "FUTURE_START_OF_DAY"],
+        description:
+          "선택 날짜의 projection 평가 방식입니다. 오늘은 요청 시점 LIVE, 과거는 영업일 종료, 미래는 영업일 시작 시점을 사용합니다.",
+      },
+      RoomDetailConditionCode: {
+        type: "string",
+        enum: [
+          "CHECKOUT_INSPECTION_REQUIRED",
+          "EXTRA_GUESTS",
+          "VACANT",
+          "CANDLE_PRESENT",
+          "ROOM_ISSUE_PRESENT",
+          "EARLY_CHECK_IN",
+          "LATE_CHECK_OUT",
+          "DATA_VERIFICATION_REQUIRED",
+          "PIN_SYNC_WARNING",
+        ],
+        description:
+          "프런트 와이어프레임의 객실 현황 상세 조건과 직접 대응하는 서버 계산 코드입니다. 수동 퇴실점검 완료 workflow는 포함하지 않습니다.",
+      },
       RoomOccupancyStatus: {
         type: "string",
         enum: ["VACANT", "OCCUPIED"],
@@ -11564,6 +12236,9 @@ export const openApiDocument = {
           "elevatorZone",
           "dataStatus",
           "stateVersion",
+          "serviceDate",
+          "projectionMode",
+          "detailConditionCodes",
           "evaluatedAt",
           "reservationPhase",
           "serverTime",
@@ -11576,6 +12251,11 @@ export const openApiDocument = {
           "nextReservationId",
           "nextCheckInAt",
           "nextCheckOutAt",
+          "displayReservationId",
+          "displayCheckInAt",
+          "displayCheckOutAt",
+          "displayGuestCount",
+          "displayBaseOccupancy",
           "blockingReasonCodes",
           "readinessReasonCodes",
           "occupied",
@@ -11616,11 +12296,26 @@ export const openApiDocument = {
             description:
               "후속 객실 변경 command에서 expectedVersion으로 사용할 CAS version",
           },
+          serviceDate: {
+            type: "string",
+            format: "date",
+            description: "요청 또는 서버 기본값으로 확정된 Asia/Seoul 영업일",
+          },
+          projectionMode: {
+            $ref: "#/components/schemas/RoomProjectionMode",
+          },
+          detailConditionCodes: {
+            type: "array",
+            uniqueItems: true,
+            items: { $ref: "#/components/schemas/RoomDetailConditionCode" },
+            description:
+              "해당 평가 시점에 성립하는 관리자 객실 현황 상세 조건 목록",
+          },
           evaluatedAt: {
             type: "string",
             format: "date-time",
             description:
-              "이 projection의 모든 현재 시각 판정에 사용한 서버 RFC 3339 timestamp",
+              "선택한 영업일 규칙에 따라 객실 상태 판정에 사용한 RFC 3339 timestamp",
           },
           reservationPhase: {
             type: "string",
@@ -11632,7 +12327,7 @@ export const openApiDocument = {
             type: "string",
             format: "date-time",
             description:
-              "evaluatedAt과 byte-for-byte 같은 서버 snapshot timestamp입니다.",
+              "응답을 계산한 실제 서버 snapshot timestamp입니다. 오늘 LIVE projection에서는 evaluatedAt과 같고 과거·미래 조회에서는 다를 수 있습니다.",
           },
           occupancyStatus: {
             $ref: "#/components/schemas/RoomOccupancyStatus",
@@ -11663,7 +12358,7 @@ export const openApiDocument = {
             type: ["string", "null"],
             format: "uuid",
             description:
-              "serverTime 뒤 가장 이른 future active 예약 ID. 현재 예약 자체는 포함하지 않습니다.",
+              "evaluatedAt 뒤 가장 이른 future active 예약 ID. 현재 예약 자체는 포함하지 않습니다.",
           },
           nextCheckInAt: {
             type: ["string", "null"],
@@ -11672,6 +12367,32 @@ export const openApiDocument = {
           nextCheckOutAt: {
             type: ["string", "null"],
             format: "date-time",
+          },
+          displayReservationId: {
+            type: ["string", "null"],
+            format: "uuid",
+            description:
+              "선택 시점의 현재 예약 또는 다음 예약 중 객실 카드에 표시할 예약 ID",
+          },
+          displayCheckInAt: {
+            type: ["string", "null"],
+            format: "date-time",
+          },
+          displayCheckOutAt: {
+            type: ["string", "null"],
+            format: "date-time",
+          },
+          displayGuestCount: {
+            type: ["integer", "null"],
+            minimum: 1,
+            description:
+              "표시 예약의 투숙 인원. 고객 식별정보는 포함하지 않습니다.",
+          },
+          displayBaseOccupancy: {
+            type: "integer",
+            minimum: 1,
+            description:
+              "현재 객실 타입의 기준 인원. 표시 예약이 있으면 EXTRA_GUESTS 계산에 사용합니다.",
           },
           blockingReasonCodes: {
             type: "array",
@@ -11698,7 +12419,7 @@ export const openApiDocument = {
           candleCount: {
             type: "integer",
             minimum: 0,
-            description: "현재 서버 projection의 촛불 수량",
+            description: "evaluatedAt 기준 촛불 수량",
           },
           pinSyncStatus: {
             type: "string",
@@ -11861,14 +12582,48 @@ export const openApiDocument = {
           nextCursor: { type: ["string", "null"], maxLength: 1024 },
         },
       },
+      RoomCandleItem: {
+        type: "object",
+        additionalProperties: false,
+        required: ["roomId", "roomNumber", "count", "roomStateVersion"],
+        properties: {
+          roomId: { type: "string", format: "uuid" },
+          roomNumber: { type: "string", minLength: 1 },
+          count: { type: "integer", minimum: 0, maximum: 2147483647 },
+          roomStateVersion: {
+            type: "integer",
+            minimum: 1,
+            maximum: 9007199254740991,
+          },
+        },
+      },
+      RoomCandlePage: {
+        type: "object",
+        additionalProperties: false,
+        required: ["items", "nextCursor"],
+        properties: {
+          items: {
+            type: "array",
+            maxItems: 50,
+            items: { $ref: "#/components/schemas/RoomCandleItem" },
+          },
+          nextCursor: {
+            anyOf: [{ type: "string", format: "uuid" }, { type: "null" }],
+          },
+        },
+      },
       RoomCandleRequest: {
         type: "object",
         additionalProperties: false,
         required: ["expectedRoomVersion", "reasonCode", "count"],
         properties: {
-          expectedRoomVersion: { type: "integer", minimum: 1 },
+          expectedRoomVersion: {
+            type: "integer",
+            minimum: 1,
+            maximum: 9007199254740991,
+          },
           reasonCode: { $ref: "#/components/schemas/RoomCommandReasonCode" },
-          count: { type: "integer", minimum: 0 },
+          count: { type: "integer", minimum: 0, maximum: 2147483647 },
           physicallyVerified: { type: "boolean", default: false },
         },
       },
@@ -11916,6 +12671,187 @@ export const openApiDocument = {
           description: { type: ["string", "null"], maxLength: 500 },
           status: { type: "string", enum: ["open"] },
           reportedAt: { type: "string", format: "date-time" },
+        },
+      },
+      RegisteredReportEvidence: {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "photoId",
+          "readState",
+          "retentionPolicy",
+          "retentionStartsAt",
+          "expiresAt",
+          "purgedAt",
+          "mediaAvailability",
+        ],
+        "properties": {
+          "photoId": {
+            "type": "string",
+            "format": "uuid",
+          },
+          "readState": {
+            "type": "string",
+            "enum": [
+              "available",
+              "expired",
+              "purged",
+              "unavailable",
+            ],
+          },
+          "retentionPolicy": {
+            "type": "string",
+            "enum": [
+              "legacy_upload",
+              "cleaning_submission",
+              "room_issue",
+              "complaint",
+              "interruption",
+              "sync_conflict",
+              "mixed",
+              "orphan",
+            ],
+          },
+          "retentionStartsAt": {
+            "type": [
+              "string",
+              "null",
+            ],
+            "format": "date-time",
+          },
+          "expiresAt": {
+            "type": [
+              "string",
+              "null",
+            ],
+            "format": "date-time",
+          },
+          "purgedAt": {
+            "type": [
+              "string",
+              "null",
+            ],
+            "format": "date-time",
+          },
+          "mediaAvailability": {
+            "type": "string",
+            "enum": [
+              "available",
+              "purged",
+              "unavailable",
+            ],
+          },
+        },
+      },
+      RegisteredRoomReport: {
+        description:
+          "kind=room_issue의 status는 open/resolved입니다. kind=bomb_room의 reported는 제출에 미봉인, pending은 제출 봉인 후 판정 대기, approved/rejected는 기존 검수 흐름에서 기록된 폭탄방 판정입니다. 조회 API는 판정을 수행하지 않습니다. sealedSubmissionId는 폭탄방의 최초 봉인 제출에만 연결되며 room_issue는 null입니다.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "attemptId",
+          "kind",
+          "memo",
+          "reportedAt",
+          "status",
+          "sealedSubmissionId",
+          "evidence",
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+          },
+          "attemptId": {
+            "type": "string",
+            "format": "uuid",
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "room_issue",
+              "bomb_room",
+            ],
+          },
+          "memo": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500,
+          },
+          "reportedAt": {
+            "type": "string",
+            "format": "date-time",
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "open",
+              "resolved",
+              "reported",
+              "pending",
+              "approved",
+              "rejected",
+            ],
+          },
+          "sealedSubmissionId": {
+            "type": [
+              "string",
+              "null",
+            ],
+            "format": "uuid",
+          },
+          "evidence": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 20,
+            "items": {
+              "$ref": "#/components/schemas/RegisteredReportEvidence",
+            },
+          },
+        },
+      },
+      RoomReportsEnvelope: {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "roomId",
+          "roomStateVersion",
+          "evaluatedAt",
+          "items",
+          "hasMore",
+          "nextCursor",
+        ],
+        "properties": {
+          "roomId": {
+            "type": "string",
+            "format": "uuid",
+          },
+          "roomStateVersion": {
+            "type": "integer",
+            "minimum": 1,
+          },
+          "evaluatedAt": {
+            "type": "string",
+            "format": "date-time",
+          },
+          "items": {
+            "type": "array",
+            "maxItems": 10,
+            "items": {
+              "$ref": "#/components/schemas/RegisteredRoomReport",
+            },
+          },
+          "hasMore": {
+            "type": "boolean",
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null",
+            ],
+            "maxLength": 1024,
+          },
         },
       },
       RoomIssuesEnvelope: {
@@ -12088,12 +13024,11 @@ export const openApiDocument = {
         properties: {
           pinDigits: {
             type: "string",
-            pattern: "^[0-9]{4,8}$",
-            minLength: 4,
-            maxLength: 8,
+            minLength: 1,
+            maxLength: 128,
             writeOnly: true,
             description:
-              "선행 0을 보존하는 숫자 문자열. roomNumber 접두사는 서버만 추가합니다.",
+              "선행 0과 원문을 보존하는 문자열. 숙박 유형별 길이/숫자 제한 없음. 공백만 있는 값, 제어문자, 잘못된 Unicode를 거절하며 UTF-8 128바이트 이하. roomNumber 접두사는 서버가 추가합니다.",
           },
           expectedPinVersion: { type: "integer", minimum: 0 },
           reasonCode: {
@@ -12283,7 +13218,8 @@ export const openApiDocument = {
           roomId: { type: "string", format: "uuid" },
           credential: {
             type: "string",
-            pattern: "^[A-Za-z0-9]{1,32}-[0-9]{4,8}$",
+            minLength: 3,
+            maxLength: 161,
             readOnly: true,
             description:
               "일시 표시 전용 plaintext. clipboard/cache/offline/persistent storage 금지.",
@@ -13598,6 +14534,50 @@ export const openApiDocument = {
   },
 } as const;
 
+// Authentication availability is independent of domain-specific 503 contracts.
+for (const [path, item] of Object.entries(openApiDocument.paths)) {
+  for (const [method, raw] of Object.entries(item)) {
+    if (!["get", "post", "put", "patch", "delete"].includes(method)) continue;
+    const operation = raw as unknown as {
+      security?: Array<Record<string, unknown>>;
+      tags?: string[];
+      responses: Record<string, {
+        description?: string;
+        headers?: Record<string, unknown>;
+      }>;
+    };
+    if (!operation.security?.some((security) => "bearerAuth" in security)) {
+      continue;
+    }
+    // Match the router's separate limited identity paths, not broad UI tags:
+    // photo content uses ordinary auth; upload/slots/status use limited identity.
+    if (
+      path.startsWith("/v1/limited/") || path === "/v1/offline-events" ||
+      (path === "/v1/attempts/{attemptId}/submissions" && method === "post") ||
+      (operation.tags?.includes("Photos") &&
+        path !== "/v1/photos/{photoId}/content")
+    ) {
+      continue;
+    }
+    const existing = operation.responses["503"];
+    if (existing?.headers?.["Cache-Control"]) continue;
+    const unavailable = {
+      ...(existing ?? {
+        ...errorResponse,
+        description:
+          "공통 인증 조회 불가 시 AUTH_CONTEXT_UNAVAILABLE. 401과 구분하며 자동 로그아웃하지 않고 재시도합니다.",
+      }),
+      headers: { ...existing?.headers, "Cache-Control": noStoreHeader },
+    };
+    Object.assign(item, {
+      [method]: {
+        ...operation,
+        responses: { ...operation.responses, "503": unavailable },
+      },
+    });
+  }
+}
+
 function roomIdParameter(): Record<string, unknown> {
   return {
     name: "roomId",
@@ -13655,6 +14635,7 @@ function roomMutationOperation(
   successStatus: 200 | 201,
   description: string,
   entityParameter?: Record<string, unknown>,
+  allowedRoles: string[] = ["admin"],
 ): Record<string, unknown> {
   const responseSchema = responseKey === "room"
     ? "#/components/schemas/RoomProjection"
@@ -13667,10 +14648,11 @@ function roomMutationOperation(
     tags: ["Rooms"],
     operationId,
     summary,
-    description:
-      `${description} 비밀번호 변경을 완료한 active business admin만 실행할 수 있고, Idempotency-Key 재시도와 expected version CAS를 적용합니다.`,
+    description: `${description} 비밀번호 변경을 완료한 active ${
+      allowedRoles.join("/")
+    }만 실행할 수 있고, Idempotency-Key 재시도와 expected version CAS를 적용합니다.`,
     security: [{ bearerAuth: [] }],
-    "x-required-roles": ["admin"],
+    "x-required-roles": allowedRoles,
     parameters: [
       roomIdParameter(),
       ...(entityParameter ? [entityParameter] : []),
@@ -14028,6 +15010,12 @@ function prestartRequestSchema(
   };
   const required = Object.keys(properties);
   if (action === "change") {
+    properties.serviceDate = {
+      type: "string",
+      format: "date",
+      description:
+        "오늘/내일 배정 탭에서 선택한 KST 계획일. 과거 업무 담당 변경 시 반드시 전달. 생략은 기존 통보 계획일/원 날짜 호환이며 생성일·통보일이 아님.",
+    };
     properties.maidProfileId = { type: "string", format: "uuid" };
     properties.sequenceNumber = { type: "integer", minimum: 1 };
     required.push("maidProfileId", "sequenceNumber");

@@ -1,4 +1,8 @@
+import type { FastifyRequest } from 'fastify';
+import { roomPinOperation } from '../lib/room-pin-diagnostic.js';
+
 const sensitiveLogPaths = [
+  '*.ROOM_PIN_TRANSFER_HMAC_SECRET', '*.ROOM_PIN_IMPORT_SPREADSHEET_ID', '*.previewToken', 'req.body.previewToken',
   'req.headers.authorization',
   'req.headers.cookie',
   'req.body.bindingProof',
@@ -37,6 +41,14 @@ const sensitiveLogPaths = [
   '*.VAPID_PRIVATE_KEY','*.VAPID_KEYRING_JSON','*.NOTIFICATION_DELIVERY_INVOKE_SECRET'
   ,'*.ROOM_PIN_KEY_BASE64','*.ROOM_PIN_KEYRING_JSON'
 ] as const;
+
+export function safeRequestLog(req: FastifyRequest): Record<string, unknown> {
+  const operation = roomPinOperation(req.method, req.url);
+  if (operation) return { operation };
+  // Preserve Fastify's default request projection outside PIN commands.
+  return { method: req.method, url: req.url, version: req.headers?.['accept-version'],
+    host: req.host, remoteAddress: req.ip, remotePort: req.socket?.remotePort };
+}
 
 export function loggerOptions(level: string) {
   return {

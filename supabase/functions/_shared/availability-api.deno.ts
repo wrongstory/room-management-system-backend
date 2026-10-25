@@ -83,24 +83,164 @@ function commandRequest(
   });
 }
 
-function queryResult(data: unknown) {
+function queryResult(
+  data: unknown,
+  count: number | null = Array.isArray(data) ? data.length : null,
+) {
   const filters: Array<[string, unknown]> = [];
-  type QueryMock = Promise<{ data: unknown; error: null }> & {
-    select: () => QueryMock;
-    eq: (column: string, value: unknown) => QueryMock;
-    order: () => QueryMock;
-  };
+  type QueryMock =
+    & Promise<{ data: unknown; error: null; count: number | null }>
+    & {
+      select: () => QueryMock;
+      eq: (column: string, value: unknown) => QueryMock;
+      order: () => QueryMock;
+      limit: () => QueryMock;
+    };
   let query: QueryMock;
-  query = Object.assign(Promise.resolve({ data, error: null }), {
+  query = Object.assign(Promise.resolve({ data, error: null, count }), {
     select: () => query,
     eq: (column: string, value: unknown) => {
       filters.push([column, value]);
       return query;
     },
     order: () => query,
+    limit: () => query,
   }) as QueryMock;
   return { query, filters };
 }
+
+for (const path of ["current", "changes", "candidates"]) {
+  for (const count of [null, 1, 1001, -1]) {
+    Deno.test(`availability ${path} rejects incomplete count ${count}`, async () => {
+      const { query } = queryResult([], count);
+      const clients = {
+        forAccessToken: () => ({ from: () => query }),
+      } as unknown as EdgeClients;
+      const request = new Request(
+        "http://localhost/v1/availability?weekStart=2026-08-31",
+        {
+          headers: { authorization: "Bearer test-token" },
+        },
+      );
+      const error = await captureEdgeError(() =>
+        path === "current"
+          ? listAvailability(request, clients, admin)
+          : path === "changes"
+          ? listAvailabilityChangeRequests(request, clients, admin)
+          : listAvailabilityCandidates(
+            new Request(
+              "http://localhost/v1/availability/candidates?workDate=2026-08-31",
+              { headers: request.headers },
+            ),
+            clients,
+            admin,
+          )
+      );
+      assert(
+        error.status === 500 && error.code === "AVAILABILITY_COMMAND_FAILED",
+        "partial list must not succeed",
+      );
+    });
+  }
+  Deno.test(`availability ${path} accepts proven empty list`, async () => {
+    const { query } = queryResult([], 0);
+    const clients = {
+      forAccessToken: () => ({ from: () => query }),
+    } as unknown as EdgeClients;
+    const headers = { authorization: "Bearer test-token" };
+    const request = new Request(
+      "http://localhost/v1/availability?weekStart=2026-08-31",
+      { headers },
+    );
+    const rows = path === "current"
+      ? await listAvailability(request, clients, admin)
+      : path === "changes"
+      ? await listAvailabilityChangeRequests(request, clients, admin)
+      : await listAvailabilityCandidates(
+        new Request(
+          "http://localhost/v1/availability/candidates?workDate=2026-08-31",
+          { headers },
+        ),
+        clients,
+        admin,
+      );
+    assert(rows.length === 0, "known empty is valid");
+  });
+}
+
+const completeDays = Array.from({ length: 7 }, (_, day) => ({
+  work_date: new Date(Date.UTC(2026, 7, 31 + day)).toISOString().slice(0, 10),
+  available: true,
+}));
+for (
+  const days of [
+    null,
+    {},
+    [null, ...completeDays.slice(1)],
+    [],
+    completeDays.slice(0, 6),
+    [...completeDays.slice(0, 6), completeDays[0]],
+    [...completeDays.slice(0, 6), { work_date: "2026-09-07", available: true }],
+  ]
+) {
+  Deno.test("availability rejects incomplete embedded week", async () => {
+    const { query } = queryResult([{
+      week_start: "2026-08-31",
+      availability_days: days,
+    }], 1);
+    const clients = {
+      forAccessToken: () => ({ from: () => query }),
+    } as unknown as EdgeClients;
+    const error = await captureEdgeError(() =>
+      listAvailability(
+        new Request("http://localhost/v1/availability?weekStart=2026-08-31", {
+          headers: { authorization: "Bearer test-token" },
+        }),
+        clients,
+        admin,
+      )
+    );
+    assert(
+      error.status === 500 && error.code === "AVAILABILITY_COMMAND_FAILED",
+      "partial days must not succeed",
+    );
+  });
+}
+
+Deno.test("availability exact 1000 succeeds but a hidden 1001st row fails", async () => {
+  const rows = Array.from(
+    { length: 1000 },
+    (_, id) => ({
+      id: `version-${id}`,
+      week_start: "2026-08-31",
+      availability_days: completeDays,
+    }),
+  );
+  const request = new Request(
+    "http://localhost/v1/availability?weekStart=2026-08-31",
+    { headers: { authorization: "Bearer test-token" } },
+  );
+  for (const count of [1000, 1001]) {
+    const { query } = queryResult(rows, count);
+    const clients = {
+      forAccessToken: () => ({ from: () => query }),
+    } as unknown as EdgeClients;
+    if (count === 1000) {
+      assert(
+        (await listAvailability(request, clients, admin)).length === 1000,
+        "boundary success",
+      );
+    } else {
+      const error = await captureEdgeError(() =>
+        listAvailability(request, clients, admin)
+      );
+      assert(
+        error.code === "AVAILABILITY_COMMAND_FAILED",
+        "hidden extra row fails",
+      );
+    }
+  }
+});
 
 Deno.test("availability projections expose the Fastify camelCase contract", () => {
   const version = toAvailabilityVersion({
@@ -312,7 +452,13 @@ Deno.test("availability reads use bearer RLS and preserve maid self filters", as
     status: "submitted",
     is_current: true,
     submitted_at: "2026-08-30T03:00:00.000Z",
-    availability_days: [{ work_date: "2026-08-31", available: true }],
+    availability_days: Array.from({ length: 7 }, (_, day) => ({
+      work_date: new Date(Date.UTC(2026, 7, 31 + day)).toISOString().slice(
+        0,
+        10,
+      ),
+      available: true,
+    })),
   };
   const versionQuery = queryResult([versionRow]);
   const changeQuery = queryResult([]);

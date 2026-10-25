@@ -1,10 +1,80 @@
 import { handleApiRequest } from "../api/index.ts";
 import { authenticate, type EdgeClients } from "./runtime.ts";
-import { PhotoService } from "./photo-service.ts";
-import type { PhotoProvider } from "./google-drive.ts";
+import { PhotoService, PhotoTiming } from "./photo-service.ts";
+import { GoogleDriveProvider, type PhotoProvider } from "./google-drive.ts";
 
 const id = (n: number) =>
   `10000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
+
+for (const complete of [true, false]) {
+  Deno.test(`photo Drive ACK bridge preserves verification and fallback ${complete}`, async () => {
+    const bytes = new Uint8Array([1, 2, 3]);
+    const sha256 = Array.from(
+      new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)),
+      (value) => value.toString(16).padStart(2, "0"),
+    ).join("");
+    const object = {
+      fileId: "synthetic_file_123",
+      folderId: "synthetic_room_123",
+      objectId: id(6),
+      mime: "image/jpeg" as const,
+      sizeBytes: 3,
+      sha256,
+    };
+    const metadata = {
+      id: object.fileId,
+      name: `${object.objectId}.jpg`,
+      mimeType: object.mime,
+      parents: [object.folderId],
+      size: "3",
+      sha256Checksum: sha256,
+      appProperties: { objectId: object.objectId },
+      trashed: false,
+      shared: false,
+      createdTime: "2026-01-01T00:00:00.000Z",
+    };
+    let gets = 0;
+    const provider = new GoogleDriveProvider({
+      clientId: "synthetic",
+      clientSecret: "synthetic",
+      refreshToken: "synthetic",
+      rootFolderId: "synthetic_root_123",
+    }, async (input) => {
+      const url = new URL(String(input));
+      if (url.hostname === "oauth2.googleapis.com") {
+        return Response.json({
+          access_token: "synthetic",
+          token_type: "Bearer",
+          expires_in: 3600,
+        });
+      }
+      if (url.pathname === "/upload/drive/v3/files") {
+        return Response.json(complete ? metadata : { id: object.fileId });
+      }
+      assert(
+        url.pathname === `/drive/v3/files/${object.fileId}`,
+        "same-ID fallback only",
+      );
+      gets++;
+      return Response.json(metadata);
+    });
+    const timing = new PhotoTiming();
+    const result = await provider.upload(object, bytes, timing);
+    assert(
+      result.uploadedAt === metadata.createdTime,
+      "immutable provider clock",
+    );
+    assert(gets === (complete ? 0 : 1), "only incomplete ACK adds GET");
+    assert(
+      timing.header().includes("photo_drive_upload;dur=") &&
+        timing.header().includes("photo_drive_verify;dur=") &&
+        timing.header().includes("photo_drive_token;dur="),
+      "request-local provider stages",
+    );
+    await provider.inspect(object);
+    assert(gets === (complete ? 1 : 2), "inspect is always fresh");
+  });
+}
 function assert(value: unknown, message: string): asserts value {
   if (!value) throw new Error(message);
 }
@@ -45,6 +115,16 @@ function setup(
       from: () => query,
       rpc: (name: string) => {
         calls.push(name);
+        if (name === "get_active_auth_context") {
+          return Promise.resolve({
+            error: null,
+            data: status !== "active"
+              ? { code: "ACCOUNT_INACTIVE" }
+              : revoked
+              ? { code: "SESSION_REVOKED" }
+              : { code: "OK", profile },
+          });
+        }
         const error = denied && name !== "is_active_auth_session" &&
             name !== "record_authorization_denial"
           ? { message: "PHOTO_ACCESS_REQUIRED" }
@@ -154,6 +234,17 @@ Deno.test("photo exact HTTP routes use verified latest active/limited identity a
         s.dependencies,
       );
       assert(response.status === 200, "own authorized safe metadata");
+      assert(
+        /photo_db;dur=\d+\.\d/.test(
+          response.headers.get("server-timing") ?? "",
+        ),
+        "request timing exposed only after authorized success",
+      );
+      assert(
+        response.headers.get("access-control-expose-headers") ===
+          "Server-Timing",
+        "browser header readable",
+      );
       const text = await response.text();
       assert(
         !/private_provider|session_id|claimDigest/.test(text),
@@ -171,8 +262,8 @@ Deno.test("photo exact HTTP routes use verified latest active/limited identity a
     if (state === "active") {
       assert(
         content.headers.get("access-control-expose-headers") ===
-          "Content-Disposition",
-        "authorized frontend can read only the server disposition header",
+          "Content-Disposition, Server-Timing",
+        "authorized frontend can read disposition and photo/common timings",
       );
     }
   }
@@ -253,7 +344,10 @@ Deno.test("false Auth session decisions stop photo metadata, uploads and content
       const body = await response.text();
       assert(
         JSON.parse(body).error.code === "SESSION_REVOKED" &&
-          s.calls.length === 1 && s.calls[0] === "is_active_auth_session",
+          s.calls.length === 1 && s.calls[0] ===
+            (path.endsWith("/content")
+              ? "get_active_auth_context"
+              : "is_active_auth_session"),
         "no business RPC, Drive call, or decoder after false session decision",
       );
       assert(

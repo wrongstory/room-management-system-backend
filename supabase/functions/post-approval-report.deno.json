@@ -1,0 +1,10 @@
+{
+  "compilerOptions": {
+    "strict": true
+  },
+  "imports": {
+    "./_shared/post-approval-openapi.js": "./_shared/post-approval-openapi.ts",
+    "@imagemagick/magick-wasm": "./api/assets/magick.ts",
+    "@supabase/supabase-js": "npm:@supabase/supabase-js@2.112.4"
+  }
+}

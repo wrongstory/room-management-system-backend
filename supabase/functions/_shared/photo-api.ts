@@ -4,7 +4,8 @@ import { PhotoService } from "./photo-service.ts";
 import type { EdgeClients } from "./runtime.ts";
 
 let provider: GoogleDriveProvider | undefined;
-function configuredProvider(): GoogleDriveProvider {
+/** Shared lazy provider. Constructing a service never reads credentials or calls Drive. */
+export function configuredPhotoProvider(): GoogleDriveProvider {
   provider ??= new GoogleDriveProvider({
     clientId: Deno.env.get("GOOGLE_DRIVE_CLIENT_ID") ?? "",
     clientSecret: Deno.env.get("GOOGLE_DRIVE_CLIENT_SECRET") ?? "",
@@ -14,12 +15,16 @@ function configuredProvider(): GoogleDriveProvider {
   return provider;
 }
 let decoder: Promise<void> | undefined;
+export function initializePhotoDecoder(): Promise<void> {
+  decoder ??= Deno.readFile(
+    new URL("../api/assets/magick.wasm.gz", import.meta.url),
+  ).then(initializeCompressedPhotoDecoder);
+  return decoder;
+}
 export function createPhotoService(clients: EdgeClients): PhotoService {
-  return new PhotoService(clients.admin, configuredProvider, () => {
-    decoder ??= Deno.readFile(
-      new URL("../api/assets/magick.wasm.gz", import.meta.url),
-    )
-      .then(initializeCompressedPhotoDecoder);
-    return decoder;
-  });
+  return new PhotoService(
+    clients.admin,
+    configuredPhotoProvider,
+    initializePhotoDecoder,
+  );
 }

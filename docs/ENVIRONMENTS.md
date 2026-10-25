@@ -28,6 +28,42 @@ Free 프로젝트가 2개뿐이므로 recovery 프로젝트를 개발 DB로 겸�
 - local Sheet adapter를 실행할 때만 `RUNTIME_ENVIRONMENT=local`, `SUPABASE_PROJECT_REF=local`을 exact synthetic target과 함께 설정한다. repository-wide 빈 `SUPABASE_PROJECT_REF` 예시는 다른 runtime의 별도 승인 mapping을 대신하지 않으며, 빈 값이나 `127.0.0.1` alias는 Sheet target 승인이 아니다.
 - #131 feature PR은 source 예시와 검증만 갱신하며 production/recovery Function Secrets나 Vault를 설정하지 않는다. 실제 key 주입·회전은 별도 release 승인 범위다.
 
+## #336 증빙 인계 전용 키 — source 등록·운영 미설정
+
+`POST_APPROVAL_ROOM_ISSUE_HANDOVER_KEY_BASE64`는 canonical Base64로 인코딩한 별도32바이트
+영속 서버 키다. PIN·PII·Web Push의 current/prior 키, cursor HMAC, provider·worker 비밀과
+재사용하지 않는다. 자동 생성하거나 replica/restart 때 회전하지 않으며, 실제 준비·회전은
+릴리스 gate에서 한다. Git·로그·클라이언트에 값·길이·해시를 제공하지 않는다.
+developer runtime은 allowlist의 `{configured:boolean}`만 반환하며 키의 유효성 증거가 아니다.
+
+누락은 앱 시작·보고 조회를 막지 않고 관리자 인계만 safe503
+`POST_APPROVAL_ROOM_ISSUE_EVIDENCE_RETRY_REQUIRED`로 거부한다. 인증·역할·요청 검증 뒤
+설정을 검사하며, 설정 실패에서는 인계 domain RPC·provider 호출을 하지 않는다.
+Node `loadEnv`는 제공된 malformed/reused 값을 정적 설정 오류로 거부한다. Edge는 정적
+env loader가 없으므로 인계 경계에서 malformed/reused 값도503으로 거부하고 조회는 유지한다.
+직접 주입한 Node runtime 키의 길이가 잘못된 경우도 인계만503이다.
+
+공유 사진 provider/decoder는 lazy factory만 재사용한다. 기존 사진의 메이드·제한 계정
+인증을 #336 관리자의 인증으로 재사용하지 않으며, API 등록은 retention worker·Cron·DELETE
+실행기 활성화가 아니다. 운영 migration111 적용·실제 백업/복원 및 별도 릴리스 검증 전에는
+운영 API나 Secrets를 바꾸지 않는다.
+
+## #400 Edge 실행·검증 의존성 분리
+
+실행 번들은 `supabase/functions/deno.lock`의 정확한 runtime 패키지9개를 사용한다.
+소스 타입 검사와 전체 Deno 테스트는 `post-approval-report.deno.lock`을 명시하고
+`--frozen`으로 검증한다. 검증용 타입·테스트 의존성을 배포 번들에 포함하지 않되,
+공유 SDK 패키지의 버전·무결성·의존성 메타데이터는 두 lock에서 같아야 한다.
+
+Docker 엔진을 Safe Start 규칙에 따라 확인한 뒤 재생성은
+`node scripts/generate-edge-runtime-lock.mjs`, 변경 없는 재현 검사는
+`node scripts/generate-edge-runtime-lock.mjs --check`로 수행한다. 고정 Deno 이미지와
+실제5개 entrypoint를 검사한다. `--check`는 검토된 lock을 임시 경로에 먼저 복사하고
+`--frozen`으로 검사하므로 새 호환 transitive 버전이 나와도 임의로 재해석하지 않는다.
+명시적 재생성 모드만 새로 resolve하며 수동 lock 편집으로 패키지를 제거하지 않는다.
+`npm run edge:check`는 이 재현 검사, frozen 타입/테스트, 기본·후보 번들의 기존
+20,000,000 bytes 상한을 모두 검사한다. 로컬 통과는 운영 배포 완료가 아니다.
+
 ## 마이그레이션 흐름
 
 1. `npm run db:new -- <snake_case_name>`으로 파일을 만든다.

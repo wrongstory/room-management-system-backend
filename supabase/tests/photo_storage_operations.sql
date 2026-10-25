@@ -150,8 +150,16 @@ select throws_ok($$select public.begin_photo_upload(pg_temp.pid(2),pg_temp.pid(9
  pg_temp.slot(1),2,repeat('a',64),'image/png',100,repeat('e',64),repeat('b',64))$$,'23514','PHOTO_UPLOAD_INVALID','DB rejects unsupported MIME metadata');
 select throws_ok($$select public.begin_photo_upload(pg_temp.pid(2),pg_temp.pid(902),pg_temp.pid(501),pg_temp.pid(401),2,
  pg_temp.slot(1),2,repeat('a',64),'image/jpeg',100,'raw-key-not-a-digest',repeat('b',64))$$,'23514','PHOTO_UPLOAD_INVALID','raw key is not accepted in digest input');
+-- The earlier unknown provider operation is still compensation_pending. #336
+-- shares the eight-slot budget with unresolved cleanup, not just active uploads.
+select is((select count(*) from private.photo_upload_states where actor_profile_id=pg_temp.pid(2)
+  and status in ('reserved','provider_succeeded','reconciliation_pending','compensation_pending')),1::bigint,
+  'unsettled provider compensation already occupies one inflight slot');
 -- Technical inflight and minute bounds; rejected requests append no operation/security row.
-select pg_temp.upload(1,20+n,0,2,'slot-'||n) from generate_series(2,9)n;
+select pg_temp.upload(1,20+n,0,2,'slot-'||n) from generate_series(2,8)n;
+select is((select count(*) from private.photo_upload_states where actor_profile_id=pg_temp.pid(2)
+  and status in ('reserved','provider_succeeded','reconciliation_pending','compensation_pending')),8::bigint,
+  'seven new uploads and one unsettled compensation exhaust the shared eight-slot budget');
 select throws_ok($$select pg_temp.upload(1,40,0,2,'slot-10')$$,'54000','PHOTO_UPLOAD_LIMIT_EXCEEDED','actor inflight cap eight');
 update private.photo_upload_rate_limits set occurrence_count=30,minute_started_at=date_trunc('minute',clock_timestamp()) where actor_profile_id=pg_temp.pid(3);
 select throws_ok($$select pg_temp.upload(2,41,0,3,'slot-2')$$,'54000','PHOTO_UPLOAD_RATE_LIMITED','fixed minute limit fails without individual denied rows');

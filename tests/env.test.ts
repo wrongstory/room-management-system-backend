@@ -207,4 +207,44 @@ describe('environment contract', () => {
       'ROOM_PIN_INITIAL_DIGITS'
     );
   });
+
+  it('keeps the dedicated handover key optional without generating a fallback', () => {
+    expect(loadEnv(localEnv).POST_APPROVAL_ROOM_ISSUE_HANDOVER_KEY_BASE64).toBeUndefined();
+    expect(loadEnv({ ...localEnv, POST_APPROVAL_ROOM_ISSUE_HANDOVER_KEY_BASE64: '' })
+      .POST_APPROVAL_ROOM_ISSUE_HANDOVER_KEY_BASE64).toBeUndefined();
+    const dedicated = Buffer.alloc(32, 73).toString('base64');
+    expect(loadEnv({ ...localEnv, POST_APPROVAL_ROOM_ISSUE_HANDOVER_KEY_BASE64: dedicated })
+      .POST_APPROVAL_ROOM_ISSUE_HANDOVER_KEY_BASE64).toBe(dedicated);
+  });
+
+  it.each([
+    'not-base64', ' '.repeat(44), Buffer.alloc(31, 73).toString('base64'),
+    Buffer.alloc(33, 73).toString('base64'), `${Buffer.alloc(32, 73).toString('base64')}!`,
+    Buffer.alloc(32, 73).toString('base64').replace(/=$/, ''),
+    ` ${Buffer.alloc(32, 73).toString('base64')}`
+  ])('rejects a non-canonical or non-32-byte handover key', value => {
+    expect(() => loadEnv({ ...localEnv, POST_APPROVAL_ROOM_ISSUE_HANDOVER_KEY_BASE64: value })).toThrow();
+  });
+
+  it('rejects handover key reuse across current and prior secrets', () => {
+    const prior = Buffer.alloc(32, 74).toString('base64');
+    for (const value of [
+      localEnv.ROOM_PIN_KEY_BASE64, localEnv.RESERVATION_PII_KEY_BASE64,
+      localEnv.WEB_PUSH_SUBSCRIPTION_KEY_BASE64, localEnv.ACCOUNT_PHONE_PEPPER,
+      localEnv.PAYROLL_CURSOR_HMAC_SECRET, localEnv.NOTIFICATION_CURSOR_HMAC_SECRET,
+      localEnv.INSPECTION_CURSOR_HMAC_SECRET, localEnv.WEB_PUSH_BINDING_DIGEST_SECRET
+    ]) expect(() => loadEnv({ ...localEnv, POST_APPROVAL_ROOM_ISSUE_HANDOVER_KEY_BASE64: value })).toThrow();
+    for (const name of ['ROOM_PIN_KEYRING_JSON', 'RESERVATION_PII_KEYRING_JSON', 'WEB_PUSH_SUBSCRIPTION_KEYRING_JSON']) {
+      expect(() => loadEnv({ ...localEnv, [name]: JSON.stringify({ 'prior-v1': prior }),
+        POST_APPROVAL_ROOM_ISSUE_HANDOVER_KEY_BASE64: prior })).toThrow();
+    }
+    for (const name of ['SUPABASE_SECRET_KEY', 'SUPABASE_PUBLISHABLE_KEY', 'ACCOUNT_PHONE_PEPPER',
+      'RESERVATION_GUEST_NAME_PEPPER', 'PAYROLL_CURSOR_HMAC_SECRET', 'NOTIFICATION_CURSOR_HMAC_SECRET',
+      'INSPECTION_CURSOR_HMAC_SECRET', 'WEB_PUSH_BINDING_DIGEST_SECRET',
+      'GOOGLE_DRIVE_CLIENT_ID', 'GOOGLE_DRIVE_CLIENT_SECRET', 'GOOGLE_DRIVE_REFRESH_TOKEN',
+      'GOOGLE_DRIVE_ROOT_FOLDER_ID', 'GOOGLE_SHEETS_SERVICE_ACCOUNT_PRIVATE_KEY']) {
+      expect(() => loadEnv({ ...localEnv, [name]: prior,
+        POST_APPROVAL_ROOM_ISSUE_HANDOVER_KEY_BASE64: prior })).toThrow();
+    }
+  });
 });

@@ -32,9 +32,10 @@ try {
     select pg_temp.add_target(5,'notified','2037-09-30','2037-09-30 09:00+09','2037-09-30 15:00+09');
     select pg_temp.add_target(6,'notified','2037-09-30','2037-09-30 08:00+09','2037-09-30 14:00+09');
     insert into public.cleaning_attempts(id,cleaning_target_id,assignment_id,maid_profile_id,
-      attempt_number,status,assignment_revision,template_snapshot,room_snapshot)
-    select pg_temp.pid(506),t.id,pg_temp.pid(406),pg_temp.pid(2),1,'scheduled',2,t.template_snapshot,
-      jsonb_build_object('roomId',t.room_id) from public.cleaning_targets t where t.id=pg_temp.pid(306);
+      attempt_number,status,assignment_revision,template_snapshot,room_snapshot,started_at)
+    select pg_temp.pid(506),t.id,pg_temp.pid(406),pg_temp.pid(2),1,'in_progress',2,t.template_snapshot,
+      jsonb_build_object('roomId',t.room_id),'2037-09-30 09:00+09'::timestamptz
+      from public.cleaning_targets t where t.id=pg_temp.pid(306);
     commit;`);
   const before = snapshot();
   run(process.execPath, [cli, 'migration', 'up', '--local']);
@@ -42,9 +43,9 @@ try {
   const response = JSON.parse(sql(`select public.process_due_assignment_lifecycle(
     '28000000-0000-4000-8000-000000000001','2037-10-01 11:00+09',
     'overdue-upgrade-preserve',repeat('f',64));`));
-  assert.equal(response.rolledOverCount, 0);
-  assert.deepEqual(response.rolloverResults, []);
-  assert.equal(response.activatedCount, 1);
+  assert.equal(response.rolledOverCount, 2);
+  assert.equal(response.rolloverResults.length, 2);
+  assert.equal(response.activatedCount, 0);
   assert.equal(response.alreadyActiveCount, 1);
   assert.equal(response.overdueCount, 3);
   assert.equal(sql('select count(*) from private.cleaning_overdue_events;'), '3');
@@ -59,18 +60,19 @@ try {
   assert.equal(sql(`select md5(string_agg(row_to_json(e)::text,'|' order by e.id))
     from private.cleaning_overdue_events e;`), overdueHistory, 'A later day must reuse original overdue evidence');
   assert.equal(sql("select count(*) from public.notifications where event_family='cleaning.overdue_admin';"), '3');
-  assert.equal(sql(`select bool_and(effective_service_date='2037-09-30' and assignment_version=2 and carryover_count=0)
+  assert.equal(sql(`select bool_and(effective_service_date='2037-09-30' and assignment_version=4 and carryover_count=2 and status='unassigned')
     from public.cleaning_targets where id in (
-    '28000000-0000-4000-8000-000000000304','28000000-0000-4000-8000-000000000305',
-    '28000000-0000-4000-8000-000000000306');`), 't');
+    '28000000-0000-4000-8000-000000000304','28000000-0000-4000-8000-000000000305');`), 't');
+  assert.equal(sql(`select effective_service_date='2037-09-30' and assignment_version=2 and carryover_count=0
+    from public.cleaning_targets where id='28000000-0000-4000-8000-000000000306';`), 't');
   assert.equal(sql(`select count(*) from public.cleaning_attempts
     where cleaning_target_id='28000000-0000-4000-8000-000000000305'
-    and assignment_id='28000000-0000-4000-8000-000000000405' and status='scheduled';`), '1');
+    and assignment_id='28000000-0000-4000-8000-000000000405' and status='scheduled';`), '0');
   assert.equal(sql(`select status from public.cleaning_attempts
-    where id='28000000-0000-4000-8000-000000000506';`), 'scheduled');
+    where id='28000000-0000-4000-8000-000000000506';`), 'in_progress');
   assert.equal(sql(`select count(*) from public.cleaning_target_schedule_revisions
-    where reason_code='ROLLED_OVER_NOT_STARTED';`), '0');
-  console.log('Cleaning overdue upgrade 85→88: PASS; original schedules/owners/history preserved, durable overdue dedupe without rollover; no historical start backfill.');
+    where reason_code='ROLLED_OVER_NOT_STARTED';`), '1');
+  console.log('Cleaning overdue upgrade 85→latest: PASS; migration preserves history; midnight releases only unstarted owners, active work and durable overdue evidence stay intact.');
 } finally {
   run(process.execPath, [cli, 'db', 'reset', '--local', '--no-seed']);
 }
