@@ -4,6 +4,8 @@
 catalog-v2 기반의 실제 SQL **소스**와 전용 연결 포트를 연결한다. 공개 API, 환경 변수, 자격 증명,
 기본 DB connector, CLI 실행 진입점은 추가하지 않는다. `#378`의 history export 포트도 확장하지 않는다.
 실제 DB 실행은 0회이며 `liveDatabaseVerified=false`, `executionEnabled=false`는 항상 유지한다.
+후속 native owned connector는 [`RESET_NATIVE_POSTGRES.md`](RESET_NATIVE_POSTGRES.md)에 정리한다.
+이 문서의 port 구현 단위와 별도로 실제 드라이버 생성 경로를 연결했으며 실제 DB 검증은 여전히0회다.
 
 ## 신뢰와 쿼리 범위
 
