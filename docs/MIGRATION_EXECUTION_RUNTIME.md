@@ -76,3 +76,29 @@ first-party byte 검사는 stale checkout/실행 경로 차이를 검출한다. 
 - 현재 새 테스트는 메모리 PG/HTTP/FS/authority adapter, 실제 parser/local source 및 DB를 import하지 않는 합성 OS child를 사용한다. 실제 child의 preflight/실행 event-loop 정지와 강제 종료를 검증한다. 초기 합성 fixture/기존 export assertion 실패를 수정한 후 재검증했으며 실제 DB 성공 증거로 사용하지 않는다.
 
 이 문서는 실행 승인이 아니다. 승인 자료는 한 문서에서 exact 후보를 검토할 수 있게 모으되, 승인 전에 이 CLI의 apply 경로를 실행하지 않는다.
+
+## 최종 격리 DB 시험 준비 — 아직 실행하지 않음
+
+기존 `db:test:migration-readonly-tls`의 소유권이 확인된 PG17 tmpfs 컨테이너 안에
+atomic writer 시험 8건을 추가했다. 최종 Full DB gate가 true인 기존 단계에서만 수행하며,
+일반 application/manifest 검사에는 실행되지 않는다. 이 하네스 추가 자체는 DB 실행 승인이
+아니다. 이번 개발에서는 테스트 등록·구문·일반 품질 검사만 수행했고 실제 PG 시험은 NOT RUN이다.
+
+- SQL과 history를 한 번씩 같은 transaction에 반영하고 별도 연결에서 실제 상태를 확인
+- history 전 연결 손실 및 COMMIT 전 연결 손실에서 실제 SQL rollback 확인
+- 서버 COMMIT 성공 응답을 시험 adapter가 숨긴 뒤 재실행 없이 APPLIED 판정
+- 실제 제약 위반에서 history 미반영, committed readback 손실에서는 UNKNOWN 유지
+- 실제 잘못된 CA와 프로젝트 advisory lock 충돌에서 SQL 실행 전 중단
+
+테스트 전용 Vitest 설정은 `atomic-pg.fixture.mjs`만 명시적으로 수집한다. 가상 프로젝트
+`aaaaaaaaaaaaaaaaaaaa`의 transport는 이미 확인한 컨테이너의 loopback 포트로만 연결하며
+다른 host·role·port 입력은 거부한다. 외부 주소로의 fallback은 없다. source-bundle 소유권과
+remote/approval 입력은 명시적인 합성 adapter이며 실제 GitHub 승인·Full DB proof를 만들지 않는다.
+SQL parser·history codec·state collector·pg/TLS·원자 실행기·supervisor는 실제 소스를 사용한다.
+따라서 이 시험의 향후 PASS도 운영 CLI 전체 권한 검증이나 실제 운영 migration 성공의 증거가 아니다.
+연결 손실은 실제 연결을 닫고 adapter 응답을 숨기는 통제된 fault이며 모든 네트워크 분할이나
+서버 crash를 포괄하지 않는다. 해당 추가 장애는 실제 실행 계획에서 별도로 구분한다.
+
+운영 코드·CLI의 SUPABASE 고정 대상, 소스 지문·1회 승인 receipt 조건은 변경하지 않았다.
+기존 격리 컨테이너 소유권·이미지 digest·volume 없음·유한 timeout·정리 조건과 workflow의
+실행 승인 gate를 유지한다. Docker 시작이나 제품 migration/reset은 개발 중 실행하지 않았다.
