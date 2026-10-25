@@ -231,10 +231,13 @@ export function verifyPostApprovalReportEdgeBundle({ rawSourceDiagnostic = false
     if (!rawSourceDiagnostic) {
       const { artifact } = generateReportBundle({ check: true });
       const code = readFileSync(artifact, 'utf8').replace(/\r\n?/g, '\n');
-      const runtimeImport = 'from "./runtime.ts"';
-      if (!code.includes(runtimeImport)) throw new Error('Generated runtime import drift');
+      // esbuild may omit optional whitespace after `from`; both forms retain
+      // the exact external module graph checked by the generator.
+      const runtimeImport = /\bfrom\s*"\.\/runtime\.ts"/g;
+      const photoImport = /\bfrom\s*"\.\/photo-binary\.ts"/g;
+      if (!code.match(runtimeImport) || !code.match(photoImport)) throw new Error('Generated runtime import drift');
       writeFileSync(resolve(temporary, 'report.js'), code.replaceAll(runtimeImport,
-        'from "file:///workspace/supabase/functions/_shared/runtime.ts"').replaceAll('from "./photo-binary.ts"',
+        'from "file:///workspace/supabase/functions/_shared/runtime.ts"').replaceAll(photoImport,
         'from "file:///workspace/supabase/functions/_shared/photo-binary.ts"'));
       console.log(`Generated report JavaScript bytes: ${statSync(resolve(temporary, 'report.js')).size}`);
       const testPaths = [
