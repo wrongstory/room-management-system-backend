@@ -1550,3 +1550,10 @@ private.photo_upload_batches와 photo_upload_batch_members는 불변 예약 meta
 actor/key UNIQUE와 admission FK를 사용하며 사진·보존·제출 원장을 복사하지 않는다.
 같은 두 member의 accepted change만 collection CAS 진행의 근거가 된다.
 설계·미실행 SQL은 [사진 묶음 계약](./PHOTO_UPLOAD_BATCH_411.md)을 따른다.
+
+## #396 운영 안전 장치 후보
+
+128의 private.developer_operation_control/reauth/admissions/events는 초기화 보존 후보인
+운영 상태·재인증·작업 입장·감사 관계다. 계정 cascade FK는 없고 event→reauth만 참조한다.
+marker/TTL seed 없이 UNKNOWN으로 시작하며 STARTED 잠금은 일반 전환으로 해제되지 않는다.
+실제 DB는 NOT RUN이며 [운영 안전 계약](./DEVELOPER_OPERATION_GATES.md)을 따른다.

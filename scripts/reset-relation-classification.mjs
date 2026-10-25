@@ -7,6 +7,10 @@ import { z } from 'zod';
 export const RESET_CLASSIFICATION_VERSION = '396-local111-plus-batch126-review-v2';
 export const RESET_RELATION_GROUPS = Object.freeze({
   preserve: Object.freeze([
+    'private.developer_operation_control',
+    'private.developer_operation_reauth',
+    'private.developer_operation_admissions',
+    'private.developer_operation_events',
     'private.notification_event_catalog',
     'private.room_pin_nonce_reservations',
     'public.room_types',

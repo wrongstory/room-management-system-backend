@@ -3162,3 +3162,56 @@ Table private.photo_upload_batch_members {
 Ref: private.photo_upload_batches.actor_profile_id > public.profiles.id
 Ref: private.photo_upload_batch_members.(batch_id,actor_profile_id) > private.photo_upload_batches.(id,actor_profile_id)
 Ref: private.photo_upload_batch_members.(actor_profile_id,idempotency_key_digest) > private.photo_upload_admissions.(actor_profile_id,idempotency_key_digest)
+
+Table private.developer_operation_control {
+  singleton boolean [pk, note: 'Always true; no seed row']
+  target_ref text [not null]
+  policy_hash text [not null]
+  reauth_ttl_seconds integer [not null, note: 'Positive, no default policy']
+  lifecycle text [not null, note: 'UNKNOWN / PROVISIONING / STARTED; STARTED irreversible']
+  maintenance text [not null, note: 'OPEN / REQUESTED is not full drain proof']
+  version bigint [not null]
+  started_at timestamptz
+  Note: '#396 source128; RLS, owner-only control, no account cascade. SQL NOT RUN.'
+}
+Table private.developer_operation_reauth {
+  id uuid [pk]
+  nonce_hash text [not null]
+  actor_profile_id uuid [not null, note: 'No FK: preserve security receipt during later approved reset']
+  auth_user_id uuid [not null]
+  session_digest text [not null]
+  password_version text [not null]
+  target_ref text [not null]
+  policy_hash text [not null]
+  control_version bigint [not null]
+  action text [not null]
+  created_at timestamptz [not null]
+  expires_at timestamptz [not null]
+  state text [not null]
+  probe_session_digest text [unique]
+  verified_at timestamptz
+  consumed_at timestamptz
+  Note: '#396 source128; password AMR observed after challenge and probe session absent before READY; no credentials/tokens stored.'
+}
+Table private.developer_operation_admissions {
+  id uuid [pk]
+  control_version bigint [not null]
+  kind text [not null]
+  owner_digest text [not null]
+  nonce_hash text [not null]
+  created_at timestamptz [not null]
+  deadline_at timestamptz [not null]
+  completed_at timestamptz
+  indexes { (owner_digest,nonce_hash) [unique] }
+  Note: '#396 source128; deadline expiry is UNKNOWN, not completion. Full-path integration is pending.'
+}
+Table private.developer_operation_events {
+  id bigint [pk, increment]
+  created_at timestamptz [not null]
+  control_version bigint [not null]
+  actor_profile_id uuid [not null]
+  action text [not null]
+  receipt_id uuid [not null, unique]
+  Note: '#396 source128; append-only security audit, no raw nonce/session/credential.'
+}
+Ref: private.developer_operation_events.receipt_id > private.developer_operation_reauth.id [delete: restrict]

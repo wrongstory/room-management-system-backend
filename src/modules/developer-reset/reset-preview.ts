@@ -1,4 +1,5 @@
 import { resetRelationGroups } from "./reset-preview-groups.js";
+import { summarizeOperationGates } from "./operation-gates.js";
 import {
   type ResetCensus,
   summarizeResetRowImpact,
@@ -53,6 +54,7 @@ export function summarizeResetPreview(input: unknown) {
     "snapshotId",
     "relations",
     ...(Object.hasOwn(value, "rowImpact") ? ["rowImpact"] : []),
+    ...(Object.hasOwn(value, "gateEvidence") ? ["gateEvidence"] : []),
   ]);
   if (
     value.format !== "reset-preview-inventory-v1" || value.readOnly !== true ||
@@ -123,9 +125,6 @@ export function summarizeResetPreview(input: unknown) {
     "RESET_RECOVERY_SCOPE_UNDECIDED",
     "PHOTO_DELETION_ON_HOLD",
     "TEMPLATE_PUBLICATION_RULES_UNVERIFIED",
-    "PRE_OPERATION_STATE_UNVERIFIED",
-    "RECENT_REAUTHENTICATION_UNVERIFIED",
-    "MAINTENANCE_AND_DRAIN_UNVERIFIED",
     "RESET_EXECUTION_NOT_IMPLEMENTED",
   ];
   if (missingRelations || unknownRelations) {
@@ -134,7 +133,11 @@ export function summarizeResetPreview(input: unknown) {
   if (unsupportedRelations) blockers.push("UNSUPPORTED_RELATIONS");
   if (truncatedRelations) blockers.push("INVENTORY_ROW_LIMIT_EXCEEDED");
   let rowImpact: ReturnType<typeof summarizeResetRowImpact>;
+  let operationGates: ReturnType<typeof summarizeOperationGates> | null;
   try {
+    operationGates = Object.hasOwn(value, "gateEvidence")
+      ? summarizeOperationGates(value.gateEvidence)
+      : null;
     rowImpact = summarizeResetRowImpact(
       value.rowImpact,
       census,
@@ -144,6 +147,9 @@ export function summarizeResetPreview(input: unknown) {
     return failed();
   }
   blockers.push(...rowImpact.blockers);
+  blockers.push(
+    ...(operationGates?.blockers ?? ["OPERATION_GATES_NOT_COLLECTED"]),
+  );
   return {
     readOnly: true,
     diagnosticComplete:
@@ -160,6 +166,7 @@ export function summarizeResetPreview(input: unknown) {
     // These are table candidate groups. mixed/review totals are never deletion counts.
     candidateImpact: summary,
     rowImpact,
+    operationGates,
     blockers,
   };
 }

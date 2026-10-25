@@ -37,6 +37,10 @@ returns text language sql immutable security definer set search_path=pg_catalog 
     ('private.complaint_response_attention_scan_cursor','''resetCandidate''::text'),
     ('private.developer_catalog_previews','case (select p.role::text from public.profiles p where p.id={alias}.actor_profile_id) when ''developer'' then ''preserve'' when ''admin'' then ''resetCandidate'' when ''maid'' then ''resetCandidate'' else ''unresolved'' end'),
     ('private.developer_diagnostic_rate_limits','case (select p.role::text from public.profiles p where p.id={alias}.actor_profile_id) when ''developer'' then ''preserve'' when ''admin'' then ''resetCandidate'' when ''maid'' then ''resetCandidate'' else ''unresolved'' end'),
+    ('private.developer_operation_admissions','''preserve''::text'),
+    ('private.developer_operation_control','''preserve''::text'),
+    ('private.developer_operation_events','''preserve''::text'),
+    ('private.developer_operation_reauth','''preserve''::text'),
     ('private.flat_evidence_migration_receipts','''photoHold''::text'),
     ('private.limited_session_eligibility','''resetCandidate''::text'),
     ('private.limited_session_roots','''resetCandidate''::text'),
@@ -317,7 +321,7 @@ begin
   if clock_timestamp()>=deadline then
     raise exception using errcode='57014',message='RESET_PREVIEW_TIMEOUT';
   end if;
-  return jsonb_build_object('format','reset-row-impact-v1','ruleFingerprint','3b599c4e1f45fe4caec08e2edc275c62a916c8eb20aa4ca9a401825849adf564',
+  return jsonb_build_object('format','reset-row-impact-v1','ruleFingerprint','bf8bfdf62cc1e77687a02f227d1f8f6bcf5fddc516c5d2b8ad7880cdb850ded2',
     'snapshotId',encode(extensions.digest(pg_current_snapshot()::text||statement_timestamp()::text,'sha256'),'hex'),
     'relations',items,'authBoundary',auth_boundary,'expectedForeignKeys',expected_references,
     'unsupportedForeignKeys',unsupported_references,'foreignKeys',references_found);
