@@ -2,8 +2,9 @@ import { createHmac, randomFillSync } from 'node:crypto';
 import { z } from 'zod';
 import { requestHash } from '../../lib/command.js';
 import { inspectResetSnapshot, inspectResetSnapshotCapture } from './reset-snapshot.js';
-import { composeResetReview, resetReviewRequestSchema, resetReviewFailureCode, type ReviewRow } from './review-composition.js';
+import { composeResetReview, resetReviewRequestSchema, resetReviewFailureCode, assertResetReviewActor, assertResetReviewEnvelope, type ReviewRow } from './review-composition.js';
 import { captureResetPlanContent } from './plan-revalidation.js';
+import { inspectResetProtectionPlan } from './reset-protection-plan.js';
 
 const hash = z.string().regex(/^[a-f0-9]{64}$/);
 const name = z.string().regex(/^[a-z][a-z0-9_]{0,62}$/);
@@ -275,14 +276,28 @@ export function createResetSnapshotBuilder(expectedInput: unknown, limits: Reset
       // Pending policy must never bypass technical FK/NULL/target completeness.
       // The capture checker retains undecided labels and grants no plan validity.
       const structure = inspectResetSnapshotCapture(snapshotInput);
-      if (!structure.structureValid) return { ...blocked([...new Set([...structure.blockers, ...pending])].sort()), review: null };
+      const contentFingerprint = requestHash({ snapshotId, census: [...census].sort((a, b) => compare(a.relation, b.relation)) });
+      const reviewBinding = { ...expected, snapshotId, contentFingerprint };
+      if (!structure.structureValid) {
+        // Complete structural/content observations may diagnose a preservation
+        // conflict. Other technical failures never expose a partial manifest.
+        let protection: ReturnType<typeof inspectResetProtectionPlan> | null = null;
+        if (reviewRequest && metadata.consistency.kind === 'repeatable-read' &&
+          structure.blockers.length > 0 && structure.blockers.every(code => code === 'PRESERVED_ROW_REFERENCES_REMOVED_ROW')) {
+          assertResetReviewEnvelope(scopeId, reviewSidecar);
+          if (assertResetReviewActor(reviewRequest, reviewRows, [...tables.keys()])) protection = inspectResetProtectionPlan({ binding: reviewBinding, selection: { binding: reviewBinding,
+            templateSelection: reviewRequest.templateSelection, requestFingerprint: requestHash({ binding: reviewBinding, request: reviewRequest }),
+            reviewPlanFingerprint: null }, referenceCapture: snapshotInput.plan });
+        }
+        check();
+        return { ...blocked([...new Set([...structure.blockers, ...pending])].sort()), review: null, protection };
+      }
       let review = null;
       if (reviewRequest) {
         if (metadata.consistency.kind !== 'repeatable-read') fail('RESET_REVIEW_REPEATABLE_READ_REQUIRED');
         if (planCapture) captureResetPlanContent(planCapture, { binding: expected, ...catalog(selected) }, reviewRequest, reviewRows);
-        const contentFingerprint = requestHash({ snapshotId, census: [...census].sort((a, b) => compare(a.relation, b.relation)) });
-        review = { ...composeResetReview({ request: reviewRequest, binding: { ...expected, snapshotId, contentFingerprint },
-          scopeId, relations: [...tables.keys()], rows: reviewRows, independent, census, sidecar: reviewSidecar, pending: [...pending].sort() }, planCapture),
+        review = { ...composeResetReview({ request: reviewRequest, binding: reviewBinding,
+          scopeId, relations: [...tables.keys()], rows: reviewRows, independent, census, sidecar: reviewSidecar, pending: [...pending].sort() }, planCapture, snapshotInput.plan),
           reviewPrepared: true, contentVerified: true };
         check();
       }
@@ -292,7 +307,7 @@ export function createResetSnapshotBuilder(expectedInput: unknown, limits: Reset
       const result = inspectResetSnapshot(snapshotInput);
       // Technical FK/content failure must not expose a partial composition or receipt.
       if (!result.snapshotValid) review = null;
-      return { ...result, consistency: metadata.consistency.kind, review };
+      return { ...result, consistency: metadata.consistency.kind, review, protection: null };
     } catch (error) {
       return { ...blocked(error instanceof CaptureFailure ? error.message : resetReviewFailureCode(error) ?? 'RESET_SNAPSHOT_SOURCE_UNAVAILABLE'), review: null };
     } finally {
@@ -310,5 +325,5 @@ export function createResetSnapshotBuilder(expectedInput: unknown, limits: Reset
 }
 function blocked(code: string | string[]) {
   return { snapshotValid: false, executionEnabled: false, fingerprint: null, counts: null,
-    consistency: null, blockers: Array.isArray(code) ? code : [code] };
+    consistency: null, protection: null, blockers: Array.isArray(code) ? code : [code] };
 }
