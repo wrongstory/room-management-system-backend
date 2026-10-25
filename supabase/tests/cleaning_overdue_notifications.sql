@@ -230,6 +230,51 @@ select is((select count(*)::int from private.notification_delivery_targets t
  join public.notifications n on n.id=t.notification_id
  where n.cleaning_target_id=pg_temp.oid(1300)),0,
  'suppressed overdue delivery creates no external provider delivery target');
+-- #345: genuinely older than worker TTL, with a newly activated administrator.
+select pg_temp.overdue_fixture(400,'unassigned',null,
+ ((clock_timestamp()-interval '3 days') at time zone 'Asia/Seoul')::date,
+ clock_timestamp()-interval '3 days');
+update private.cleaning_overdue_scan_cursor set last_target_id=null where singleton;
+select is(private.detect_cleaning_overdue_at(pg_temp.oid(1),clock_timestamp()-interval '2 days'),1,
+ 'old occurrence is recorded before late administrator activation');
+insert into overdue_results select 'late-old-history',jsonb_agg(to_jsonb(n) order by n.id)
+ from public.notifications n where n.cleaning_target_id=pg_temp.oid(1400);
+insert into overdue_results select 'late-old-outbox',jsonb_agg(to_jsonb(o) order by o.id)
+ from private.notification_delivery_outbox o join public.notifications n on n.id=o.notification_id
+ where n.cleaning_target_id=pg_temp.oid(1400);
+update public.profiles set status='active' where id=pg_temp.oid(4);
+update private.cleaning_overdue_scan_cursor set last_target_id=null where singleton;
+select is(private.detect_cleaning_overdue_at(pg_temp.oid(1),clock_timestamp()),0,
+ 'late recipient reuses old event without creating another occurrence');
+select is((select count(*)::int from public.notifications n
+ join private.cleaning_overdue_events e on e.id::text=n.source_entity_id
+ join private.cleaning_overdue_recipients r on r.event_id=e.id and r.recipient_profile_id=n.recipient_profile_id
+ join private.notification_delivery_outbox o on o.notification_id=n.id
+ where n.cleaning_target_id=pg_temp.oid(1400) and n.recipient_profile_id=pg_temp.oid(4)
+   and n.occurred_at=e.occurred_at and e.occurred_at<clock_timestamp()-interval '24 hours'
+   and o.enqueued_at=r.enrolled_at and o.enqueued_at>clock_timestamp()-interval '1 minute'),1,
+ 'late inbox preserves occurrence while delivery clock starts at enrollment');
+select is((select jsonb_agg(to_jsonb(n) order by n.id) from public.notifications n
+ where n.cleaning_target_id=pg_temp.oid(1400) and n.recipient_profile_id<>pg_temp.oid(4)),
+ (select value from overdue_results where label='late-old-history'),'late enrollment preserves old inbox rows');
+select is((select jsonb_agg(to_jsonb(o) order by o.id) from private.notification_delivery_outbox o
+ join public.notifications n on n.id=o.notification_id
+ where n.cleaning_target_id=pg_temp.oid(1400) and n.recipient_profile_id<>pg_temp.oid(4)),
+ (select value from overdue_results where label='late-old-outbox'),'late enrollment never refreshes old outbox TTL');
+select public.claim_notification_deliveries(repeat('4',64),10);
+select is((select count(*)::int from private.notification_delivery_jobs j
+ join private.notification_delivery_outbox o on o.id=j.outbox_id
+ join public.notifications n on n.id=o.notification_id
+ where n.cleaning_target_id=pg_temp.oid(1400) and n.recipient_profile_id=pg_temp.oid(4)
+ and j.status='suppressed' and j.terminal_reason='NO_ACTIVE_SUBSCRIPTION'),1,
+ 'late delivery passes TTL and reaches actual worker subscription check');
+insert into overdue_results values('late-repeat',pg_temp.overdue_delivery());
+select is(private.detect_cleaning_overdue_at(pg_temp.oid(1),clock_timestamp()),0,'late repeat creates no event');
+select is(pg_temp.overdue_delivery(),(select value from overdue_results where label='late-repeat'),
+ 'repeated scan preserves original and late delivery history');
+select ok(not has_function_privilege(role,fn,'execute'),role||' cannot call new clock trigger helper')
+ from unnest(array['anon','authenticated','service_role']) role cross join unnest(array[
+ 'private.guard_cleaning_overdue_enrollment_clock()','private.set_cleaning_overdue_delivery_clock()']) fn;
 set constraints all immediate;
 select * from finish();
 rollback;
