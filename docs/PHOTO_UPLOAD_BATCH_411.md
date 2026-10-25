@@ -88,6 +88,11 @@ Edge542 PASS/1 FAIL이었다. 다른 두 실행을 마친 뒤 코드·테스트�
 단독 재검사하여65+543+68 tests와 전체 gate가 PASS했다. report 후보19,930,953 bytes
 (여유69,047 bytes), backup99,006 bytes다. 이 관측은 실제 운영 부하 검증을 대체하지 않는다.
 
+dev392(9a29044)의 승인 기반 migration 실행기·pg/parser 의존성과 report manifest 변경도
+정상 통합했다. npm ci144 packages/audit0, report bundle source check, manifest126 및
+application158파일·4362tests가 PASS했다. 동일 입력의 최종 Edge65+543+68도 PASS하며
+report19,930,953 bytes/backup99,006 bytes로 유지됐다. 실제 DB 실행기는 호출하지 않았다.
+
 초기화 영향 조회의 source 목록에도 두 새 metadata 테이블을 사진 HOLD의 review 종속성으로
 반영했다. 전체185관계·mixed/review137이며 삭제 승인이나 초기화 실행 구현은 추가하지 않았다.
 
