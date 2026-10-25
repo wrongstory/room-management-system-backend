@@ -1386,6 +1386,11 @@ outbox/fence의 결과와 heartbeat를 같은 transaction에서 admission에 기
 terminal이나 최신 PIN으로 과거 UNKNOWN을 지우지 않는다. hosted mapping·활성화·full-resync와
 photo deletion HOLD를 유지한다. [PIN 증분 계약](./OPERATION_PIN_ADMISSION.md), 실제 SQL NOT RUN.
 
+별도 사진 보류 source는 `photo-purge` Edge entry를 `503 PHOTO_PURGE_HELD`로 고정한다.
+secret·body·환경 입력과 DB/provider 생성을 거치지 않으며 해제 mode나 성공 heartbeat를
+추가하지 않는다. 기존 worker 알고리즘은 합성 회귀로 유지한다. 미배포 source는 기존 hosted
+실행 종료를 증명하지 않는다. [사진 HOLD 경계](./PHOTO_PURGE_HOLD_396.md)를 따른다.
+
 132의 알림 Node/Edge worker는 실제 claim과 입장 기록을 원자화하고 해당 immutable attempt
 결과를 조회한 뒤에만 완료한다. 결과를 확인하지 못한 시도는 새 claim 성공/만료로 해제되지
 않는다. 구성 실패 heartbeat도 같은 transaction으로 보호한다. 별도 opt-in이며 scheduler,

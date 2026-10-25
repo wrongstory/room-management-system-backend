@@ -99,6 +99,7 @@ const sourcePaths = [
   'supabase/functions/room-pin-sheet-sync/index.ts'
 ];
 const testPaths = [
+  'supabase/functions/photo-purge/index.deno.ts',
   'supabase/functions/_shared/pin-worker-admission.deno.ts',
   'supabase/functions/reservation-scheduler/index.deno.ts',
   'supabase/functions/reservation-backup-monitor/index.deno.ts',
