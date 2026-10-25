@@ -758,6 +758,9 @@ deferred event/enrollment/notice/outbox trigger가 수신자별 정확히 한 in
 같은 commit에서 요구한다. 별도 singleton cursor는 mutable 기술 projection이며 100건씩 회전한다.
 알림은 informational history이고 업무 완료 뒤에도 원장·알림을 삭제하거나 다시 쌓지 않는다.
 
+#345 source 후보는 신규 수신자의 outbox 시각만 기존 `enrolled_at`에 결합한다.
+새 테이블이나 과거 이력 backfill은 없다. [검증·배포 상태](./CLEANING_OVERDUE_DELIVERY_CLOCK_345.md).
+
 #308 3차의 dev 통합 계약(PR #340)은 새 테이블 없이 기존 attempt와 immutable `cleaning.attempt_started` 감사에
 정상 청소 시작 알림을 결합한다. 관리자의 informational inbox와 비자기 push intent는
 시작 상태/CAS/receipt와 동일 transaction에 추가하고 source-controlled writer의 원자성과
