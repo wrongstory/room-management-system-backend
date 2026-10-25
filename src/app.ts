@@ -1,3 +1,5 @@
+import { admissionConfig, assertAdmissionTarget, withAdmissionRpc, withAtomicAdmissionRpc } from './modules/developer-reset/http-admission.js';
+import { installHttpAdmission } from './modules/developer-reset/http-admission-node.js';
 import cors from '@fastify/cors';
 import { randomUUID } from 'node:crypto';
 import { roomPinOperation, roomPinFailureDiagnostic } from './lib/room-pin-diagnostic.js';
@@ -154,7 +156,26 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   let services = options.services;
   let submissionService = options.submissionService;
   let runtimeClients: SupabaseClients | undefined;
-  const clientsForRuntime = () => runtimeClients ??= createSupabaseClients(options.env);
+  const operationConfig = admissionConfig(options.env.DEVELOPER_OPERATION_ADMISSION_MODE,
+    options.env.DEVELOPER_OPERATION_TARGET, options.env.DEVELOPER_OPERATION_BUDGET_MS);
+  assertAdmissionTarget(operationConfig, options.env.SUPABASE_URL);
+  const clientsForRuntime = () => {
+    if (!runtimeClients) {
+      runtimeClients = createSupabaseClients(options.env);
+      if (operationConfig) {
+        runtimeClients.operationAdmission = operationAdmission;
+        runtimeClients.admin = withAdmissionRpc(withAtomicAdmissionRpc(runtimeClients.admin, {
+          config: operationConfig,
+          error: () => new AppError(503, 'OPERATION_ATOMIC_RPC_UNAVAILABLE', '현재 작업을 시작할 수 없습니다. 잠시 후 다시 시도해 주세요.'),
+        }), operationAdmission);
+      }
+    }
+    return runtimeClients;
+  };
+  const operationAdmission = installHttpAdmission(app, {
+    config: operationConfig,
+    clients: clientsForRuntime,
+  });
   const photoRuntime = createPhotoRuntimeDependencies(options.env);
   if (!services) {
     const clients = clientsForRuntime();
@@ -407,11 +428,9 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   }
   const photoServices = options.photoServices ?? createPhotoHttpServices(clientsForRuntime(), options.env, photoRuntime);
   await app.register(createPhotoRoutes(photoServices));
-  let limitedClients: ReturnType<typeof createSupabaseClients> | undefined;
   await app.register(createLimitedAttemptRoutes(
     options.limitedAttemptService ?? new LimitedAttemptService({ rpc: async (name, args) => {
-      limitedClients ??= createSupabaseClients(options.env);
-      return limitedClients.admin.rpc(name, args);
+      return clientsForRuntime().admin.rpc(name, args);
     } }),
     photoServices.authenticate,
   ));

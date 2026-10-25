@@ -76,7 +76,7 @@ describe('Supabase Edge runtime PoC contract', () => {
     expect(api).toMatch(/supplementalRoomIssueHandler:\s*async \(request, path, clients\)/);
     expect(api).toContain('provider: configuredPhotoProvider');
     expect(api).toContain('initializeDecoder: initializePhotoDecoder');
-    expect(api.indexOf('clients = dependencies.createClients()')).toBeGreaterThan(
+    expect(api.indexOf('clients = { ...dependencies.createClients() }')).toBeGreaterThan(
       api.indexOf('path === "/docs"')
     );
     expect(photo).toContain('export function configuredPhotoProvider');
@@ -269,7 +269,7 @@ describe('Supabase Edge runtime PoC contract', () => {
     expect(api).toContain('path === "/v1/developer/diagnostics"');
     expect(api).toContain('requireDeveloper(actor)');
     expect(developerApi).toMatch(
-      /expectedMigrationName\s*=\s*["']operation_admission_authority["']/
+      /expectedMigrationName\s*=\s*["']operation_atomic_audit_admission["']/
     );
     expect(developerApi).toContain('secretConfigurationAllowlist');
     expect(developerApi).not.toMatch(/Object\.(?:keys|entries)\(Deno\.env/);
