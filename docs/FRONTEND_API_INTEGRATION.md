@@ -14,6 +14,13 @@ snapshotId는 실행 token·CAS·백업/복구 증명이 아니다. 실제 초�
 실행하거나 프런트 화면을 수정하지 않았다. 개발자 콘솔 UI 연결은 별도 범위다.
 source OpenAPI 156 paths / 168 operations. [전체 계약](./DEVELOPER_RESET.md).
 
+후속 행 후보 수집에서는 `rowImpact`를 추가한다. 보존·기준 객실·업무 초기화·템플릿 원본·사진 HOLD·
+미분류 행의 합계, Auth ID-only census의 계정 분류, 현재 실제 FK의 충돌/누락/NULL 건수만 제공한다.
+`available=false`는 이전 inventory-only collector 또는 미수집 상태이며 통과가 아니다.
+`rowImpact.diagnosticComplete`와 `referencesValid`는 건수 기반 현재 FK 진단이다. 동일 건수 내용
+교체·삭제 순서·유효 승인·복구 증명을 뜻하지 않으며 실행은 항상 false다. 원본 행/ID/비밀번호/PIN은
+응답에 없다. 운영 배포·DB 실행·프런트 변경은 여전히 NOT RUN이다.
+
 ## 2026-10-25 #415 합성 기준선 통합
 
 #453/#455 계산 개선은 v0.9.5 이후 운영에 포함됐다. PR456의

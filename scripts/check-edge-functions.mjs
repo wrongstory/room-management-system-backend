@@ -67,6 +67,7 @@ const sourcePaths = [
   'supabase/functions/_shared/developer-api.ts',
   'supabase/functions/_shared/developer-reset-api.ts',
   'supabase/functions/_shared/reset-preview.ts',
+  'supabase/functions/_shared/reset-row-impact.ts',
   'supabase/functions/_shared/reset-preview-groups.ts',
   'supabase/functions/_shared/openapi.ts',
   'supabase/functions/_shared/room-operation-cursor.ts',
@@ -283,6 +284,8 @@ export function verifyPostApprovalReportEdgeBundle({ rawSourceDiagnostic = false
 function main() {
 const resetPreview = spawnSync(process.execPath, ['scripts/generate-reset-preview-edge.mjs', '--check'], { stdio: 'inherit' });
 if (resetPreview.status !== 0) throw new Error('Reset preview generated source verification failed');
+const resetRows = spawnSync(process.execPath, ['scripts/generate-reset-row-impact.mjs', '--check'], { stdio: 'inherit' });
+if (resetRows.status !== 0) throw new Error('Reset row collector generated source verification failed');
 const pinDiagnostic = spawnSync(process.execPath, ['scripts/generate-room-pin-diagnostic-edge.mjs', '--check'], { stdio: 'inherit' });
 if (pinDiagnostic.status !== 0) throw new Error('PIN diagnostic generated source verification failed');
 const batch = spawnSync(process.execPath, ['scripts/generate-remittance-batch-edge.mjs', '--check'], { stdio: 'inherit' });

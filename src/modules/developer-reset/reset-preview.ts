@@ -1,4 +1,8 @@
 import { resetRelationGroups } from "./reset-preview-groups.js";
+import {
+  type ResetCensus,
+  summarizeResetRowImpact,
+} from "./reset-row-impact.js";
 
 export class ResetPreviewError extends Error {
   constructor(public readonly status: number, public readonly code: string) {
@@ -39,7 +43,7 @@ function fields(value: Record<string, unknown>, names: string[]) {
   ) failed();
 }
 
-/** Only accepts server RPC output. Diagnostics never establish row disposition or execution authority. */
+/** Only accepts server RPC output. Candidate impact never establishes execution authority. */
 export function summarizeResetPreview(input: unknown) {
   const value = object(input);
   fields(value, [
@@ -48,6 +52,7 @@ export function summarizeResetPreview(input: unknown) {
     "capturedAt",
     "snapshotId",
     "relations",
+    ...(Object.hasOwn(value, "rowImpact") ? ["rowImpact"] : []),
   ]);
   if (
     value.format !== "reset-preview-inventory-v1" || value.readOnly !== true ||
@@ -60,6 +65,7 @@ export function summarizeResetPreview(input: unknown) {
     !Array.isArray(value.relations) || value.relations.length > 1000
   ) return failed();
   const seen = new Set<string>();
+  const census: ResetCensus = new Map();
   const summary = Object.fromEntries(
     groups.map(
       (group) => [group, { relations: 0, observedRows: 0, exact: true }],
@@ -96,6 +102,10 @@ export function summarizeResetPreview(input: unknown) {
       unsupportedRelations++;
     }
     const group = classifications.get(row.relation);
+    census.set(row.relation, {
+      count: row.observedRows as number | null,
+      known: group !== undefined,
+    });
     if (!group) {
       unknownRelations++;
       continue;
@@ -112,7 +122,6 @@ export function summarizeResetPreview(input: unknown) {
   const blockers = [
     "RESET_RECOVERY_SCOPE_UNDECIDED",
     "PHOTO_DELETION_ON_HOLD",
-    "ROW_DISPOSITION_RULES_UNIMPLEMENTED",
     "TEMPLATE_PUBLICATION_RULES_UNVERIFIED",
     "PRE_OPERATION_STATE_UNVERIFIED",
     "RECENT_REAUTHENTICATION_UNVERIFIED",
@@ -124,6 +133,17 @@ export function summarizeResetPreview(input: unknown) {
   }
   if (unsupportedRelations) blockers.push("UNSUPPORTED_RELATIONS");
   if (truncatedRelations) blockers.push("INVENTORY_ROW_LIMIT_EXCEEDED");
+  let rowImpact: ReturnType<typeof summarizeResetRowImpact>;
+  try {
+    rowImpact = summarizeResetRowImpact(
+      value.rowImpact,
+      census,
+      value.snapshotId,
+    );
+  } catch {
+    return failed();
+  }
+  blockers.push(...rowImpact.blockers);
   return {
     readOnly: true,
     diagnosticComplete:
@@ -139,6 +159,7 @@ export function summarizeResetPreview(input: unknown) {
     truncatedRelations,
     // These are table candidate groups. mixed/review totals are never deletion counts.
     candidateImpact: summary,
+    rowImpact,
     blockers,
   };
 }

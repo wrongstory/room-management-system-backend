@@ -343,8 +343,10 @@ base table 목록과 각 관계의 독립 count를 읽는다. 일반 heap만 ONL
 partition은 query하지 않는다. 테이블당 10,001행에서 중단해 10,000 초과는 exact=false인
 하한으로 표시한다. 관계 1,000개 초과는 거부하고 lock timeout은 2초다. 루프 전체 5초 deadline을
 각 조회 전후 확인하며 초과 시 부분 결과를 반환하지 않는다. 공개 RPC의 function-level
-statement timeout 7초는 PostgREST 호출의 현재 query를 제한하고, 양쪽 HTTP adapter는 8초에
-abort 및 응답 실패를 보장한다. 제한 값/효력은 최종 승인 DB 검증 대상이다.
+statement timeout 7초는 PostgREST 호출의 서버 측 제한 의도를 설정한다. 이미 실행 중인 호출의
+실제 중단·hosted 취소 전파는 검증하지 않았다. 양쪽 HTTP adapter의 8초 응답 실패와 abort 신호,
+루프의 5초 전후 경계 검사는 별도 한계이며 서버 SQL 중단 성공을 증명하지 않는다.
+설정 값/효력은 최종 승인 DB 검증 대상이다.
 [Supabase function timeout 계약](https://supabase.com/docs/guides/database/postgres/timeouts)을 따른다.
 실제 업무 값/ID/원장
 본문은 수집하지 않는다. 고정 schema와 catalog가 반환한 식별자를 `%I`로 quoting하며 caller SQL,
@@ -395,3 +397,56 @@ backup monitor bundle 91,678 bytes. 진단 bundle은 20,000,000-byte 상한에 �
 67관계다. 앞선 단계의183/135/65 수치는 해당 checkpoint의 기록이다. 이 추가는 실제
 clear 승인·삭제 구현·사진 purge 활성화가 아니다. 기존125 SQL은 catalog 기반 동적 census이므로
 수정하지 않는다. generated preview 목록만 source에서 재생성하고 운영/DB 검증과 구분한다.
+
+## 2026-10-25 후속 행 후보·FK 영향 수집 — source 후보, 운영 미적용
+
+`scripts/reset-row-policy.mjs`는 명시된 관계마다 후보 규칙을 연결한다. wildcard는 없으며
+새 관계·알 수 없는 역할·고아 계정 연결은 분류 완료로 처리하지 않는다. 이는 실제 삭제 predicate나
+승인 목록이 아니다. 관리자·메이드·테스트 업무 초기화와 개발자·기준정보 보존이라는 확정 요구를
+검토 가능한 영향표로 만든다. D01 복구 범위, 실제 실행 승인, 사진 HOLD는 별도로 유지한다.
+
+| 대상 | 조회 시 행 후보 | 보존/충돌 의미 |
+| --- | --- | --- |
+| 개발자 profile·별칭·password version·연결 보안 기록 | preserve | 현재 연결 role로 판단하며 역할 snapshot을 최신 권한으로 사용하지 않음 |
+| 관리자·메이드 profile·연결 기록 | resetCandidate | 일반 계정 삭제 권한을 부여하지 않음 |
+| 객실 기준 행 | roomBaseline | 행 삭제 없음. 점유·PIN 등 업무 상태의 후속 patch/전환 계획과 구분 |
+| 템플릿 version·slot | templateSource | 내용 보존 후 새 출처로 재등록할 원본 후보; 게시·새 ID 할당은 후속 |
+| 사진 및 submission 사진 바인딩 | photoHold | provider 객체와 종속 metadata 보존 후보 |
+| nonce registry·전역 로그인 제한·미상 로그인 보안 집계 | preserve | 비식별 보안 상태의 임의 초기화를 피함 |
+| 업무 command receipt·audit 및 기타 테스트 업무 | resetCandidate | developer가 작성했어도 업무 후보이며 보존 보안 기록과의 FK 충돌은 별도 계수 |
+
+후속 STABLE collector는 기존 census와 동일한 calling statement snapshot에서 각 행 후보 건수를
+집계한다. HTTP adapter는 관계별 독립 count, 후보 count의 합, 같은 snapshot ID와 정확한 규칙 지문을
+확인한다. 클라이언트가 행 선택, SQL, scope 또는 source 역할을 제공하지 않는다.
+
+FK 영향은 실제 `conkey/confkey/conpfeqop` 순서를 사용한다. 검증된 FK와 즉시 유효 unique key,
+pg_catalog equality의 정확 operand type 및 같은 collation만 지원한다. MATCH SIMPLE의 NULL과
+MATCH FULL의 일부 NULL, 없는 target, 보존 후보가 reset/template 후보를 참조하는 건수를 구분한다.
+지원하지 않는 equality·키·foreign/partition·외부 schema는 검증 통과로 처리하지 않는다.
+Auth 경계는 `auth.users.id` 연결 조회와 bounded ID-only census만 사용한다. profile 없는 Auth계정도
+별도 unresolved 건수로 표시하며, 비밀번호·Auth 전체 행·파생 hash를 읽거나 내보내지 않는다.
+공개 응답에는 테이블명·constraint명·행 ID·원자료가 없고 합계와 고정 code만 있다.
+
+`rowImpact.diagnosticComplete`는 이 **건수 기반** 수집의 완전성이다. `referencesValid`도 지원된
+실제 FK 영향 검사만 의미한다. 동일 건수 행 교체/내용 변경, 논리 JSON 참조, row-content snapshot,
+복구 증거, 승인 TTL/CAS, 삭제 순서 또는 실행 가능성을 증명하지 않는다. 기존 내부 snapshot checker는
+별도로 유지하며 실제 내용 snapshot/유효 승인 연결을 완료했다고 표시하지 않는다.
+
+전체 loop의 5초 경계, RPC의 7초 설정 의도와 adapter의 8초 응답 한계를 유지한다. hosted cancel/현재
+query의 실제 timeout 효력은 SQL 검증 전 미확인이다. 아직 전체 DB·pgTAP·운영 실행은 NOT RUN이다.
+
+검증 입력은 batch126 `1828806` tree와 동일한 통합 기준에 row-impact127을 추가한 것이다.
+`ci:quality` PASS(143파일/3,522 tests, lint/typecheck/build/secrets/OpenAPI157/169),
+manifest 정적 검사127 PASS, Python3.12 임시 codegen 및 ruff PASS,
+전체 `edge:check` PASS(65/540/68 합성 회귀, actual bundle19,150,558 bytes,
+report 진단19,986,351 bytes, backup91,678 bytes). 첫 Edge 검사에서는 생성 지문 줄바꿈이
+format 검사에 걸려 generator를 수정했고 최종 전체 재검증은 PASS다. PostgreSQL/pgTAP,
+hosted timeout/취소, DB 복구·운영 배포는 NOT RUN이다. 독립 QA는 source/권한/합계/동일 snapshot/
+Auth ID-only census/사진 HOLD를 검토해 차단 사항0, 별도3파일47 tests PASS를 확인했다.
+
+최종 dev `f25e5b6`(#378/#493/#494/#495) 정상 통합 후 application159파일/4,389 tests,
+manifest127 및 row/preview/report generator 검사가 PASS했다. 전체 Edge65/543/68 회귀와
+실제 API bundle18,989,717 bytes, report 후보19,655,418 bytes, backup99,006 bytes가 PASS다.
+report 생성물은664,758 bytes이며 기존20MB 상한을 유지했다. Python codegen/ruff는 dev60cd6af
+통합 입력에서 PASS했고 이후 f25e5b6까지 OpenAPI/Python 입력 변경0을 확인했다.
+이번127 변경의 실제 PostgreSQL·pgTAP·hosted 호출·reset/복구 실행은 여전히 NOT RUN이다.
