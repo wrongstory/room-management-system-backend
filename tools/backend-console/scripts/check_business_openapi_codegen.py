@@ -22,10 +22,20 @@ def check_reset_preview_roundtrip(repository_root: Path, destination: Path) -> N
     if not node:
         raise RuntimeError("Node is required for actual reset preview projections")
     cases = subprocess.run(  # noqa: S603
-        [node, "--import", "tsx", "--input-type=module", "-e",
-         "import { resetPreviewContractResponses } from './tests/fixtures/reset-preview.ts';"
-         "process.stdout.write(JSON.stringify(resetPreviewContractResponses()));"],
-        cwd=repository_root, check=True, capture_output=True, text=True, encoding="utf-8",
+        [
+            node,
+            "--import",
+            "tsx",
+            "--input-type=module",
+            "-e",
+            "import { resetPreviewContractResponses } from './tests/fixtures/reset-preview.ts';"
+            "process.stdout.write(JSON.stringify(resetPreviewContractResponses()));",
+        ],
+        cwd=repository_root,
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
     )
     roundtrip = """\
 import json
@@ -47,8 +57,11 @@ for case in cases:
 print('Python reset preview codegen: five actual nullable/state/effect projections roundtrip PASS')
 """
     subprocess.run(  # noqa: S603
-        [sys.executable, "-c", roundtrip, str(destination)], input=cases.stdout,
-        text=True, encoding="utf-8", check=True,
+        [sys.executable, "-c", roundtrip, str(destination)],
+        input=cases.stdout,
+        text=True,
+        encoding="utf-8",
+        check=True,
     )
 
 
