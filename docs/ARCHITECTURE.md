@@ -1381,6 +1381,11 @@ Boolean으로 drain을 증명하지 않는다. 실제 활성화와 DB 실행은 
 [HTTP 연결](./HTTP_OPERATION_ADMISSION_396.md), [원자 감사](./OPERATION_ATOMIC_AUDIT.md),
 [운영 안전 경계](./DEVELOPER_OPERATION_GATES.md)를 따른다.
 
+134의 PIN Node/Edge worker opt-in은 증분 claim과 입장을 원자화하고 고정 dispatch가 해당
+outbox/fence의 결과와 heartbeat를 같은 transaction에서 admission에 기록한다. mutable
+terminal이나 최신 PIN으로 과거 UNKNOWN을 지우지 않는다. hosted mapping·활성화·full-resync와
+photo deletion HOLD를 유지한다. [PIN 증분 계약](./OPERATION_PIN_ADMISSION.md), 실제 SQL NOT RUN.
+
 132의 알림 Node/Edge worker는 실제 claim과 입장 기록을 원자화하고 해당 immutable attempt
 결과를 조회한 뒤에만 완료한다. 결과를 확인하지 못한 시도는 새 claim 성공/만료로 해제되지
 않는다. 구성 실패 heartbeat도 같은 transaction으로 보호한다. 별도 opt-in이며 scheduler,

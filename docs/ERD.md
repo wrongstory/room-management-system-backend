@@ -1564,6 +1564,11 @@ command/key digest/hash를 결합한다. 세션/key 원문과 raw 요청은 보�
 두 방식 모두 HTTP 응답만으로 외부 효과를 완료하지 않으며 계정 cascade FK를 추가하지 않는다.
 [HTTP 원장 계약](./OPERATION_HTTP_ADMISSION.md)과 [원자 감사 계약](./OPERATION_ATOMIC_AUDIT.md)을 따른다.
 
+134는 같은 admissions context에 PIN 증분 claim/fence/outbox version과 같은 transaction에서
+관측한 결과·마지막 heartbeat를 기록한다. 이전 UNKNOWN은 최신 PIN/후속 성공으로 해제하지
+않는다. 새 관계 없이 claim UUID UNIQUE를 추가하며 hosted mapping/전체 재동기화는 HOLD다.
+실제 SQL NOT RUN이며 [PIN 증분 계약](./OPERATION_PIN_ADMISSION.md)을 따른다.
+
 132는 같은 admissions 관계에 nullable worker_kind/worker_context를 추가한다. 알림 claim과
 동일 transaction에서 실제 attempt/target/leaseVersion/claim digest만 저장하며 민감 payload는
 보관하지 않는다. 만료나 나중 시도의 성공은 이전 unknown 효과를 완료하지 않는다.
