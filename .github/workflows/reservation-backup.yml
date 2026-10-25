@@ -1,0 +1,49 @@
+name: reservation-backup
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 18 * * *' # 03:00 KST; GitHub scheduling can be delayed.
+
+permissions:
+  contents: read
+
+concurrency:
+  group: reservation-backup-production
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    # Inactive until separately approved secrets, private bucket policies and TLS
+    # are verified. No pull_request trigger; the source transaction is read-only.
+    if: github.ref == 'refs/heads/main' && vars.RESERVATION_BACKUP_ENABLED == 'true'
+    environment: reservation-backup
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Prepare public TLS certificate
+        env:
+          BACKUP_CA_PEM: ${{ vars.RESERVATION_BACKUP_CA_PEM }}
+        run: |
+          test -n "$BACKUP_CA_PEM"
+          printf '%s\n' "$BACKUP_CA_PEM" > "$RUNNER_TEMP/reservation-backup-ca.pem"
+          psql --version
+      - name: Encrypted reservation backup and read-model recovery verification
+        env:
+          RESERVATION_BACKUP_ENABLED: 'true'
+          RESERVATION_BACKUP_DB_URL: ${{ secrets.RESERVATION_BACKUP_DB_URL }}
+          RESERVATION_BACKUP_KEY: ${{ secrets.RESERVATION_BACKUP_KEY }}
+          RESERVATION_BACKUP_STORAGE_TOKEN: ${{ secrets.RESERVATION_BACKUP_STORAGE_TOKEN }}
+          RESERVATION_BACKUP_CA_PATH: ${{ runner.temp }}/reservation-backup-ca.pem
+        run: npm run backup:reservations
+      - name: Failure summary
+        if: failure()
+        run: echo 'Reservation backup failed. Check the run status; previous verified copies were not overwritten.' >> "$GITHUB_STEP_SUMMARY"
