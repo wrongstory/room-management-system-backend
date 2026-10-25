@@ -62,7 +62,8 @@ developer preview의 request/impact payload, 기타 새 보존 payload도 등록
 
 검증은 합성 회귀와 source 대조로 수행한다. 실제 DB/SQL/Auth/Drive 조회·수정·삭제는 NOT RUN이다.
 
-최신 dev의 worker132를 정상 통합한 `ci:quality` 172파일/4,769 tests, manifest132,
+worker132와 내용 collector·템플릿 builder를 포함한 dev a97c84를 정상 통합한
+`ci:quality` 174파일/4,818 tests, manifest132,
 typecheck/lint/build가 PASS다. 관련35 tests 및 독립 QA의35 tests도 PASS이며 차단 finding은 없다.
 초기 fixture의 nullable 타입과 제어문자 정규식 lint 오류는 수정 후 재검사했다.
 이번4파일은 Node 내부만 변경한다. Edge/SQL/API 입력은 incoming dev와 같아 별도 실행하지 않았다.
