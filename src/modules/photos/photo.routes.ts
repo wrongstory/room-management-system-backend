@@ -66,6 +66,7 @@ export function createPhotoRoutes(services: PhotoHttpServices): FastifyPluginAsy
     const routes = [
       ['POST', '/v1/attempts/:attemptId/photo-slots/:slotId/upload'],
       ['POST', '/v1/attempts/:attemptId/photo-slots/:slotId/photos/:photoItemId/upload'],
+      ['POST', '/v1/attempts/:attemptId/photo-slots/:slotId/upload-batches'],
       ['DELETE', '/v1/attempts/:attemptId/photo-slots/:slotId/photos/:photoItemId'],
       ['GET', '/v1/attempts/:attemptId/photo-slots'],
       ['GET', '/v1/photo-uploads/:operationId'],
@@ -84,7 +85,8 @@ export function createPhotoRoutes(services: PhotoHttpServices): FastifyPluginAsy
           reply.header('server-timing', service.timingHeader() ?? '').header('access-control-expose-headers', 'Content-Disposition, Server-Timing');
           return reply.code(result.status).send(Buffer.from(await result.arrayBuffer()));
         }
-        const result = route.kind === 'upload' ? await service.upload(web, identity, route.attemptId, route.slotId, route.photoItemId)
+        const result = route.kind === 'admit-batch' ? await service.admitBatch(web, identity, route.attemptId, route.slotId)
+          : route.kind === 'upload' ? await service.upload(web, identity, route.attemptId, route.slotId, route.photoItemId)
           : route.kind === 'delete-item' ? await service.deleteItem(web, identity, route.attemptId, route.slotId, route.photoItemId)
           : route.kind === 'slots' ? await service.slots(web, identity, route.attemptId) : await service.status(web, identity, route.operationId);
         reply.header('server-timing', service.timingHeader() ?? '').header('access-control-expose-headers', 'Server-Timing');

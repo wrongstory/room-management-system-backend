@@ -2,7 +2,7 @@
 
 ## 2026-10-25 #396 초기화 영향 조회 후보
 
-통합 source OpenAPI는 156 paths / 168 operations다. `GET /v1/developer/reset/preview`만 추가했으며
+#396 단독 checkpoint의 source OpenAPI는 156 paths / 168 operations다. `GET /v1/developer/reset/preview`만 추가했으며
 active developer/session 전후 검증과 후보 그룹별 건수 조회를 제공한다. 실행은 항상 false이고
 `diagnosticComplete`는 수집 완전성만 나타낸다. 신규 migration/API는 운영 미적용이며 프런트
 코드는 변경하지 않았다. [진단 계약과 미실행 범위](./DEVELOPER_RESET.md)를 따른다.
@@ -207,3 +207,9 @@ Issue #9 Stage 1을 포함한 nullable retention metadata와 후속 계약은 pr
 4. 새 프런트 정책이 기존 사용자 확정 계약과 충돌하면 조용히 승격하지 않고 양 저장소 Issue에 충돌과 처리 결정을 기록한다.
 5. 백엔드 OpenAPI의 path 수만 비교하지 않고 role, status, error code, idempotency, CAS, nullable 의미를 함께 비교한다.
 6. generated client와 breaking diff CI 구현은 #173, 전체 adapter 전환과 browser E2E는 #13에서 진행한다.
+
+## #411 두 사진 예약 후보
+
+metadata-only batch admission 1 path/1 operation을 추가한다. 기존 업로드 경로와 수량 계약은
+유지하며 frontend 참조 commit을 갱신하지 않는다. 최신 dev125와 합친 후보 inventory는 157 paths/169 operations다.
+실제 실행·연결 상태는 [사진 묶음 계약](./PHOTO_UPLOAD_BATCH_411.md)을 따른다.

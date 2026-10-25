@@ -15,8 +15,8 @@ function first<T>(rows: T[]) { const row = rows[0]; if (!row) throw new Error('m
 describe('read-only developer reset inventory preview', () => {
   it('completes diagnostic collection independently of execution gates and excludes raw names', () => {
     const result = summarizeResetPreview(inventory());
-    expect(result).toMatchObject({ diagnosticComplete: true, executionEnabled: false, readOnly: true, relationCount: 183,
-      candidateImpact: { preserve: { relations: 3, observedRows: 3, exact: true }, mixed: { relations: 10 }, review: { relations: 125 } } });
+    expect(result).toMatchObject({ diagnosticComplete: true, executionEnabled: false, readOnly: true, relationCount: 185,
+      candidateImpact: { preserve: { relations: 3, observedRows: 3, exact: true }, mixed: { relations: 10 }, review: { relations: 127 } } });
     expect(result.blockers).toContain('RESET_RECOVERY_SCOPE_UNDECIDED');
     expect(result.blockers).toContain('PHOTO_DELETION_ON_HOLD');
     expect(JSON.stringify(result)).not.toContain('public.profiles');

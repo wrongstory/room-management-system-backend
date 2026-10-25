@@ -3135,3 +3135,30 @@ Ref: private.post_approval_issue_delete_barriers.object_id > private.post_approv
 Ref: private.post_approval_issue_purge_jobs.object_id > private.post_approval_issue_provider_objects.id
 
 // #452: room_pin_revisions.source adds sheet_import; service-role import uses immutable revision/current CAS. See docs/ROOM_PIN_TRANSFER.md.
+
+Table private.photo_upload_batches {
+  id uuid [pk]
+  actor_profile_id uuid [not null]
+  idempotency_key_digest text [not null]
+  request_hash text [not null]
+  created_at timestamptz [not null]
+  indexes {
+    (actor_profile_id, idempotency_key_digest) [unique]
+    (id, actor_profile_id) [unique]
+  }
+  Note: '#411 candidate. Immutable private reservation, no provider bytes or credentials. Two member admissions commit atomically. Actual SQL NOT RUN; photo deletion HOLD.'
+}
+Table private.photo_upload_batch_members {
+  batch_id uuid [not null]
+  actor_profile_id uuid [not null]
+  item_index integer [not null, note: '0 or 1']
+  idempotency_key_digest text [not null]
+  indexes {
+    (batch_id, item_index) [pk]
+    (actor_profile_id, idempotency_key_digest) [unique]
+  }
+  Note: '#411 candidate. Admission FK is DEFERRABLE INITIALLY DEFERRED. Different immutable members may hold two transfer claims; only accepted sibling change proves collection revision advance.'
+}
+Ref: private.photo_upload_batches.actor_profile_id > public.profiles.id
+Ref: private.photo_upload_batch_members.(batch_id,actor_profile_id) > private.photo_upload_batches.(id,actor_profile_id)
+Ref: private.photo_upload_batch_members.(actor_profile_id,idempotency_key_digest) > private.photo_upload_admissions.(actor_profile_id,idempotency_key_digest)
