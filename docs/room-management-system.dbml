@@ -3225,3 +3225,24 @@ Table private.developer_operation_events {
   Note: '#396 source128; append-only security audit, no raw nonce/session/credential.'
 }
 Ref: private.developer_operation_events.receipt_id > private.developer_operation_reauth.id [delete: restrict]
+
+Table private.developer_reset_receipt_heads {
+  id uuid [pk]
+  actor_profile_id uuid [not null]
+  project_ref text [not null]
+  key_digest text [not null]
+  binding jsonb [not null]
+  header jsonb [not null]
+  version integer [not null]
+  head_hash text [not null]
+  indexes { (actor_profile_id, project_ref, key_digest) [unique] }
+  Note: '#396 source135; immutable binding/header and CAS head. Closed FORCE RLS; no account FK. Stored observations are not execution authorization. Actual SQL NOT RUN.'
+}
+Table private.developer_reset_receipt_events {
+  receipt_id uuid [not null]
+  sequence integer [not null]
+  entry jsonb [not null]
+  indexes { (receipt_id, sequence) [pk] }
+  Note: '#396 source135; append-only bounded hash-chain entries, no raw session/credential/business rows. Preserve candidate.'
+}
+Ref: private.developer_reset_receipt_events.receipt_id > private.developer_reset_receipt_heads.id [delete: no action]
