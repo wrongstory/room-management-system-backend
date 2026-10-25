@@ -9,6 +9,7 @@ import { RESET_TEMPLATE_REFERENCE_PATHS, summarizeResetTemplateEvidence } from '
 import { buildTemplateReseedProposal, templateInventoryFingerprint } from './template-plan-builder.js';
 import { captureResetPlanTemplate, resetPlanTemplateDependencies } from './plan-revalidation.js';
 import { RESET_HANDOVER_POLICY, RESET_HANDOVER_POLICY_FINGERPRINT, inspectHandoverReauthenticationPolicy, approvedTemplateSelectionEvidence } from './approved-handover-policy.js';
+import { inspectResetProtectionPlan } from './reset-protection-plan.js';
 
 const hash = z.string().regex(/^[a-f0-9]{64}$/);
 const surface = z.object({ relation: z.string().max(128), path: z.string().max(160) }).strict();
@@ -61,6 +62,30 @@ function pgTime(v: string): { iso: string; micros: bigint } {
 const sidecarSchema = z.object({ scopeId: hash, statementId: hash, statementAt: z.string().max(64),
   templateEvidence: z.unknown(), gateEvidence: z.unknown() }).strict();
 
+/** Envelope identity only; it does not validate the contained domain evidence. */
+export function assertResetReviewEnvelope(scopeId: string, input: unknown) {
+  const sidecar = sidecarSchema.parse(input);
+  if (sidecar.scopeId !== scopeId) return fail('RESET_REVIEW_MIXED_SCOPE');
+  return { sidecar, statement: pgTime(sidecar.statementAt) };
+}
+
+/** Shared same-capture consistency check, not a live session/reauth proof. */
+export function assertResetReviewActor(request: ResetReviewRequest, rows: ReviewRow[], relations: readonly string[]) {
+  if (!request.developerId) return false;
+  if (request.receipt && request.receipt.actorProfileId.toLowerCase() !== request.developerId.toLowerCase()) return fail('RESET_REVIEW_ACTOR_MISMATCH');
+  if (!relations.includes('public.profiles') || !relations.includes('auth.users')) return fail('RESET_REVIEW_RELATION_MISSING');
+  const allProfiles = rows.filter(row => row.relation === 'public.profiles');
+  if (allProfiles.filter(row => text(row, 'role') === 'developer').length !== 1) return fail('RESET_REVIEW_ACTOR_UNAVAILABLE');
+  const profiles = allProfiles.filter(row => text(row, 'id').toLowerCase() === request.developerId?.toLowerCase());
+  const profile = profiles.length === 1 ? profiles[0] : undefined;
+  if (!profile || text(profile, 'role') !== 'developer' || text(profile, 'status') !== 'active' ||
+    text(profile, 'must_change_password') !== 'false') return fail('RESET_REVIEW_ACTOR_UNAVAILABLE');
+  const authId = text(profile, 'auth_user_id').toLowerCase();
+  if (rows.filter(row => row.relation === 'auth.users' && text(row, 'id').toLowerCase() === authId).length !== 1 ||
+    (request.receipt && request.receipt.authUserId.toLowerCase() !== authId)) return fail('RESET_REVIEW_ACTOR_MISMATCH');
+  return true;
+}
+
 /** Called only inside the one-use snapshot builder after BOTH independent row
  * observations and the complete census agree. It returns summaries and a bound
  * PREPARED receipt candidate, never rows, template provenance, an executable plan
@@ -69,30 +94,16 @@ const sidecarSchema = z.object({ scopeId: hash, statementId: hash, statementAt: 
 export function composeResetReview(input: { request: ResetReviewRequest; binding: Binding; scopeId: string;
   relations: readonly string[]; rows: ReviewRow[]; independent: { relation: string; key: string }[];
   census: { relation: string; count: number }[]; sidecar: unknown; pending: string[];
-}, planCapture?: object) {
+}, planCapture?: object, referenceCapture?: unknown) {
   const { request, binding, rows } = input;
-  const sidecar = sidecarSchema.parse(input.sidecar);
-  if (sidecar.scopeId !== input.scopeId) return fail('RESET_REVIEW_MIXED_SCOPE');
-  const statement = pgTime(sidecar.statementAt);
+  const { sidecar, statement } = assertResetReviewEnvelope(input.scopeId, input.sidecar);
   const get = (name: string) => {
     if (!input.relations.includes(name)) return fail('RESET_REVIEW_RELATION_MISSING');
     return rows.filter(row => row.relation === name);
   };
   const census = new Map(input.census.map(row => [row.relation, { known: true as const, count: row.count }]));
   const blockers = new Set(input.pending);
-  if (request.developerId) {
-    if (request.receipt && request.receipt.actorProfileId.toLowerCase() !== request.developerId.toLowerCase()) return fail('RESET_REVIEW_ACTOR_MISMATCH');
-    const allProfiles = get('public.profiles');
-    if (allProfiles.filter(row => text(row, 'role') === 'developer').length !== 1) return fail('RESET_REVIEW_ACTOR_UNAVAILABLE');
-    const profiles = allProfiles.filter(row => text(row, 'id').toLowerCase() === request.developerId?.toLowerCase());
-    const profile = profiles.length === 1 ? profiles[0] : undefined;
-    if (!profile || text(profile, 'role') !== 'developer' || text(profile, 'status') !== 'active' ||
-      text(profile, 'must_change_password') !== 'false') return fail('RESET_REVIEW_ACTOR_UNAVAILABLE');
-    const authId = text(profile, 'auth_user_id').toLowerCase();
-    if (get('auth.users').filter(row => text(row, 'id').toLowerCase() === authId).length !== 1 ||
-      (request.receipt && request.receipt.authUserId.toLowerCase() !== authId)) return fail('RESET_REVIEW_ACTOR_MISMATCH');
-    // This is same-snapshot consistency, not a fresh session/reauthentication proof.
-  }
+  assertResetReviewActor(request, rows, input.relations);
   const expectedSurfaces = new Set(request.surfaces.map(s => `${s.relation}:${s.path}`));
   if (RESET_LOGICAL_REFERENCE_RULES.some(s => !expectedSurfaces.has(`${s.relation}:${s.path}`))) {
     return fail('RESET_REVIEW_SURFACE_INVENTORY_INCOMPLETE');
@@ -209,6 +220,12 @@ export function composeResetReview(input: { request: ResetReviewRequest; binding
     templateSelection: request.templateSelection, selectedEvidence, handoverPolicy: RESET_HANDOVER_POLICY_FINGERPRINT,
     gates, reauthenticationPolicy, pending: input.pending,
     dispositions: rows.map(({ relation, key, disposition }) => ({ relation, key, disposition })).sort((a, b) => order(`${a.relation}:${a.key}`, `${b.relation}:${b.key}`)) });
+  // The owning builder supplies the same opaque FK capture, never an independent
+  // caller's graph. Its NULL/content checks already ran; this adds no authority.
+  const protection = referenceCapture === undefined ? null : inspectResetProtectionPlan({ binding,
+    selection: { binding, templateSelection: request.templateSelection,
+      requestFingerprint: requestHash({ binding, request }), reviewPlanFingerprint: planFingerprint }, referenceCapture });
+  for (const code of protection?.blockers ?? ['RESET_PROTECTION_CAPTURE_UNAVAILABLE']) blockers.add(code);
   // Explicit inputs are intent, not proof of approval/backup/fresh authentication.
   // A candidate does not clear any blocker and cannot authorize an effect.
   const receipt = request.receipt && logical.logicalReferencesValid && proposal?.generated
@@ -225,7 +242,7 @@ export function composeResetReview(input: { request: ResetReviewRequest; binding
   // Only the owning builder adds contentVerified/reviewPrepared after validation.
   return { executionEnabled: false, liveDatabaseVerified: false,
     completeResetCoverage: false, contentFingerprint: binding.contentFingerprint, planFingerprint,
-    logical, templates: { evidence: templateEvidence, selectedEvidence, proposal: proposal ? { generated: proposal.generated,
+    logical, protection, templates: { evidence: templateEvidence, selectedEvidence, proposal: proposal ? { generated: proposal.generated,
       counts: proposal.counts, planFingerprint: proposal.planFingerprint, blockers: proposalBlockers,
       plannedDraftCount: proposal.handover?.drafts.length ?? null } : null }, gates,
     handoverPolicy: RESET_HANDOVER_POLICY, reauthenticationPolicy,
