@@ -94,17 +94,21 @@ select private.patch_photo_batch_source('public.admit_photo_collection_upload(uu
 -- and every replay through the existing counter; otherwise 20 images would consume
 -- 40 of the unchanged 30/min CPU budget. Only an as-yet-uncreated batch admission skips
 -- the increment: its membership cannot exist outside this deferred-FK transaction.
+-- Each helper call recompiles immediately, so wrap the complete statement atomically.
 select private.patch_photo_batch_source('public.admit_photo_collection_upload(uuid,uuid,uuid,uuid,bigint,uuid,uuid,bigint,bigint,text)',
-  'insert into private.photo_upload_admission_limits values (p_actor_profile_id, date_trunc(''minute'', at_time), 1)',
+  'insert into private.photo_upload_admission_limits values (p_actor_profile_id, date_trunc(''minute'', at_time), 1)
+    on conflict (actor_profile_id) do update set
+      minute_started_at = excluded.minute_started_at,
+      occurrence_count = case when photo_upload_admission_limits.minute_started_at = excluded.minute_started_at
+        then photo_upload_admission_limits.occurrence_count + 1 else 1 end;',
   'if ad.id is not null or not exists(select 1 from private.photo_upload_batch_members
     where actor_profile_id=p_actor_profile_id and idempotency_key_digest=p_idempotency_key_digest) then
-  insert into private.photo_upload_admission_limits values (p_actor_profile_id, date_trunc(''minute'', at_time), 1)');
-select private.patch_photo_batch_source('public.admit_photo_collection_upload(uuid,uuid,uuid,uuid,bigint,uuid,uuid,bigint,bigint,text)',
-  'then photo_upload_admission_limits.occurrence_count + 1 else 1 end;
-  if ad.id is null then',
-  'then photo_upload_admission_limits.occurrence_count + 1 else 1 end;
-  end if;
-  if ad.id is null then');
+  insert into private.photo_upload_admission_limits values (p_actor_profile_id, date_trunc(''minute'', at_time), 1)
+    on conflict (actor_profile_id) do update set
+      minute_started_at = excluded.minute_started_at,
+      occurrence_count = case when photo_upload_admission_limits.minute_started_at = excluded.minute_started_at
+        then photo_upload_admission_limits.occurrence_count + 1 else 1 end;
+  end if;');
 select private.patch_photo_batch_source('public.begin_admitted_photo_collection_upload(uuid,uuid,uuid,text,text,integer,text,text)',
   'coalesce(state_row.revision, 0) <> ad.expected_photo_revision',
   'not private.photo_batch_admission_revision_matches(ad.id,coalesce(state_row.revision,0))');

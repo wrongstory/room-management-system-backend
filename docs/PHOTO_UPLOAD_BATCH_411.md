@@ -63,6 +63,34 @@ items 배열 순서는 멱등 요청의 일부이며 displayOrder 지정은 아�
 
 ## 검증과 릴리스 순서
 
+### #526 격리 설치에서 발견한 함수 치환 오류
+
+2026-10-25 D03-P 승인 1회 검증에서 source `a17f97a`의 migration126은
+statement9(SQLSTATE42601, syntax error at end of input)로 실패했다. 두 개의 helper 호출이
+각각 `IF` 시작과 `END IF`를 넣었지만, helper는 매번 함수를 즉시 재컴파일하므로 첫 호출의
+미완성 본문이 거부됐다. 다음 metadata/13개 SQL 회귀는 NOT RUN이며 자동 재실행하지 않았다.
+CLI의 실패 정리 뒤 신규 자원 부재와 기존10개 container·5개 volume·5개 network 보존을 대조했다.
+
+같은 날 production history122 및 recovery73의 읽기 확인에서 이 migration은 적용0이었다.
+뒤에 새 migration을 추가해도 fresh 설치가126에서 먼저 멈추므로 **미적용126만 수정**하고
+dev manifest의126 지문을 갱신한다. 이미 적용된 history·baseline 파일은 변경하지 않는다.
+counter `INSERT ... ON CONFLICT ... CASE ... END` 전체를 완결된 `IF ... END IF`로 한 번에
+치환하며, 30/min 차단과 실제 binary/replay 과금·최초 metadata 중복 과금 방지 의미는 유지한다.
+함수 본문 검사 비활성화나 예외 무시는 사용하지 않는다.
+
+PG15/17 소스 회귀4개는 기존 두 호출에서 FAIL한 뒤 수정본에서 PASS했다. 기존29개 batch
+검사와 합계33개 PASS이며, 실제 원본 함수의 counter를 원자 치환한 결과가 이전 두 치환의
+의도한 최종 결과와 바이트 단위로 일치함을 확인한다. 외부 SQL AST는 PL/pgSQL 본문을
+컴파일하지 않으므로 이것을 DB 성공으로 표시하지 않는다. 수정본의 실제 설치와 기존 batch
+pgTAP 과금/원자성 검사 등은 **새 고정 입력의 별도 승인 전 NOT RUN**이다.
+
+첫 전체 검사에서는 기존 upgrade 소스 검증기의126 해시가 이전값이라 두 suite가 실패했다.
+검토한 새 해시 하나로 정확한 고정을 갱신했고, 임의 tail/변조 거부 검사는 유지했다.
+최종 `npm run ci:quality`는200파일/5,383 tests·typecheck/build PASS,
+`npm run db:manifest:verify`도 과거 릴리스 및 dev137 모두 PASS다.
+
+아래 수치는 최초 구현의 검증 이력이다.
+
 새 단위 검증: 29 PASS. 메타데이터 key/CAS binding·입력 제한·응답 allowlist·Node 등록을 검증했다.
 처음 전체 application 실행은 신규 OpenAPI inventory와 migration manifest/head가 아직 맞지 않아
 FAIL이었다. 이 사실은 실제 SQL 실패나 성공을 뜻하지 않는다. 최신 dev125 통합 후에는
