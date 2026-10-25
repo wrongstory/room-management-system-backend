@@ -6,7 +6,7 @@ import { inspectResetSnapshot } from './reset-snapshot.js';
 const hash = z.string().regex(/^[a-f0-9]{64}$/);
 const name = z.string().regex(/^[a-z][a-z0-9_]{0,62}$/);
 const relation = z.string().regex(/^(public|private|auth)\.[a-z][a-z0-9_]{0,62}$/);
-const pgType = z.string().regex(/^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*(?:\[\])?$/).max(128);
+const pgType = z.string().regex(/^[a-z][a-z0-9_]*\.[a-z_][a-z0-9_]*(?:\[\])?$/).max(128);
 const column = z.object({ name, pgType }).strict();
 const cell = z.object({ name, pgType, value: z.string().nullable() }).strict();
 const bindingSchema = z.object({ projectRef: z.string().regex(/^[a-z]{20}$/),
@@ -26,7 +26,7 @@ const metadataSchema = z.object({
 const expectedSchema = metadataSchema.omit({ consistency: true });
 const contentSchema = z.object({ scopeId: hash, relation, key: z.array(cell).min(1).max(64),
   values: z.array(cell).min(1).max(1600) }).strict();
-const rowSchema = contentSchema.extend({ disposition: z.enum(['keep', 'remove']),
+const rowSchema = contentSchema.extend({ disposition: z.enum(['keep', 'remove', 'roomBaseline', 'templateSource', 'unresolved']),
   references: z.array(z.object({ constraint: name, targetKey: z.array(cell).min(1).max(64).nullable(),
     sourceNulls: z.array(z.boolean()).min(1).max(64) }).strict()).max(200),
 }).strict();
@@ -211,7 +211,7 @@ export function createResetSnapshotBuilder(expectedInput: unknown, limits: Reset
       };
       const fks = new Map(metadata.foreignKeys.map(fk => [`${fk.source}:${fk.name}`, fk]));
       if (fks.size !== metadata.foreignKeys.length || metadata.foreignKeys.some(fk => !tables.has(fk.source) || !tables.has(fk.target))) fail('RESET_SNAPSHOT_INPUT_INVALID');
-      const rows: { relation: string; key: string; disposition: 'keep' | 'remove'; references: { constraint: string; targetKey: string | null }[] }[] = [];
+      const rows: { relation: string; key: string; disposition: z.infer<typeof rowSchema>['disposition']; references: { constraint: string; targetKey: string | null }[] }[] = [];
       const content: { relation: string; key: string; snapshotId: string; contentToken: string }[] = [];
       const nullEvidence: { relation: string; key: string; constraint: string; snapshotId: string; sourceNulls: boolean[] }[] = [];
       await each(collected.rows, raw => {
@@ -243,9 +243,22 @@ export function createResetSnapshotBuilder(expectedInput: unknown, limits: Reset
         });
         if (header.count !== contents.length || new Set(contents.map(c => c.key)).size !== contents.length) fail('RESET_SNAPSHOT_CENSUS_MISMATCH');
         contents.sort((a, b) => compare(a.key, b.key));
+        const captured = content.filter(row => row.relation === header.relation)
+          .map(({ key, contentToken }) => ({ key, contentToken })).sort((a, b) => compare(a.key, b.key));
+        if (requestHash(captured) !== requestHash(contents)) fail('CENSUS_CONTENT_MISMATCH');
         census.push({ relation: header.relation, count: header.count, snapshotId, contentFingerprint: requestHash(contents) });
       });
       check();
+      if (census.length !== tables.size) fail('MISSING_RELATION_COUNT');
+      const pending = new Set<string>();
+      for (const row of rows) {
+        if (row.disposition === 'roomBaseline') pending.add('RESET_ROOM_BASELINE_DISPOSITION_UNRESOLVED');
+        if (row.disposition === 'templateSource') pending.add('RESET_TEMPLATE_DISPOSITION_UNRESOLVED');
+        if (row.disposition === 'unresolved') pending.add('RESET_ROW_DISPOSITION_UNRESOLVED');
+      }
+      // Content has been independently compared, but unresolved candidates are
+      // never converted into a keep/remove decision or a valid reference plan.
+      if (pending.size) return blocked([...pending].sort());
       const result = inspectResetSnapshot({ expected, snapshot: { ...expected, id: snapshotId, readOnly: true, isolation },
         plan: { catalogFingerprint: expected.catalogFingerprint, snapshotCatalogFingerprint: metadata.binding.catalogFingerprint,
           complete: true, relations: [...tables.keys()], relationRowCounts: census.map(({ relation, count }) => ({ relation, count })),
@@ -260,7 +273,7 @@ export function createResetSnapshotBuilder(expectedInput: unknown, limits: Reset
   }
   return Object.freeze({ build, dispose: () => { disposed = true; active?.abort(); } });
 }
-function blocked(code: string) {
+function blocked(code: string | string[]) {
   return { snapshotValid: false, executionEnabled: false, fingerprint: null, counts: null,
-    consistency: null, blockers: [code] };
+    consistency: null, blockers: Array.isArray(code) ? code : [code] };
 }
