@@ -58,3 +58,7 @@ NOT_APPLIED는 해당 단계의 확정 실패이며 후속 단계 실행을 열�
 
 135의 [영속 저장 adapter](./RESET_RECEIPT_STORE.md)가 별도 private head/events와 서버 전용 RPC로
 CAS·append-only·정확 readback을 구현한다. 위 순수 API는 유지하며 실제 DB 검증은 여전히 NOT RUN이다.
+
+[승인 기록의 일회 소비](./RESET_APPROVAL_CONSUMPTION.md)는 별도 서버 내부 공통부다.
+owner 승인 기록의 exact 명령 결합과 exclusive 소비만 제공하며 STARTED 기록이나 소비 성공 자체가
+승인·백업·drain 실재성 또는 실행 권한을 증명하지 않는다. 실제 승인 파일 소비는 NOT RUN이다.
