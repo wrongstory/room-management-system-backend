@@ -1,5 +1,12 @@
 # 백엔드 서버 설계
 
+## #411 비공개 사진 미리보기 후보
+
+`GET /v1/photos/{photoId}/thumbnail`은 원본의 DB 읽기 권한과 보존 상태를 전후
+재검증한 뒤 같은 Drive 객체의 provider 미리보기를 서버에서 중계한다.
+별도 storage object/table/cache·보존 clock·삭제 worker 변경은 없다.
+구체 범위와 운영 미검증 사항은 [썸네일 계약](./PHOTO_THUMBNAIL_411.md)을 따른다.
+
 ## #414 주급 projection 재사용 후보
 
 117번째 후보는 private before_workflow의 단일행 CTE만 MATERIALIZED로

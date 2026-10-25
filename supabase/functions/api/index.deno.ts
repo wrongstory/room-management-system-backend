@@ -4,6 +4,78 @@ import { EdgeError } from "../_shared/runtime.ts";
 import { PhotoError } from "../_shared/photo-binary.ts";
 import type { PhotoService } from "../_shared/photo-service.ts";
 
+Deno.test("#411 thumbnail takes ordinary auth and preserves private binary headers", async () => {
+  let authentications = 0, reads = 0;
+  const token = `h.${
+    btoa(JSON.stringify({ session_id: "10000000-0000-4000-8000-000000000001" }))
+  }.synthetic`;
+  const service = {
+    withTiming: () => service,
+    timingHeader: () => "photo_db;dur=1.0, photo_drive;dur=2.0",
+    content: (
+      _request: Request,
+      identity: { role: string },
+      photoId: string,
+      representation: string,
+    ) => {
+      assert(
+        identity.role === "admin" &&
+          photoId === "10000000-0000-4000-8000-000000000411" &&
+          representation === "thumbnail",
+        "exact read route and identity",
+      );
+      reads++;
+      return Promise.resolve(
+        new Response(new Uint8Array([1, 2]), {
+          headers: {
+            "content-type": "image/jpeg",
+            "cache-control": "no-store",
+            "x-content-type-options": "nosniff",
+            "content-disposition": 'inline; filename="thumbnail.jpg"',
+          },
+        }),
+      );
+    },
+  };
+  for (const prefix of ["/api", "/functions/v1/api"]) {
+    const response = await handleApiRequest(
+      new Request(
+        `https://api.example${prefix}/v1/photos/10000000-0000-4000-8000-000000000411/thumbnail`,
+        {
+          headers: { authorization: `Bearer ${token}` },
+        },
+      ),
+      {
+        createClients: () => ({}) as EdgeClients,
+        authenticateRequest: () => {
+          authentications++;
+          return Promise.resolve({ ...actor, role: "admin" });
+        },
+        photoService: () => service as unknown as PhotoService,
+      },
+    );
+    assert(
+      response.status === 200 &&
+        response.headers.get("cache-control") === "no-store",
+      "private success",
+    );
+    assert(
+      response.headers.get("content-type") === "image/jpeg" &&
+        !response.headers.has("location"),
+      "no provider URL",
+    );
+    assert(
+      response.headers.get("access-control-expose-headers") ===
+        "Content-Disposition, Server-Timing",
+      "safe exposed headers",
+    );
+  }
+  assert(
+    authentications === 2 && reads === 2,
+    "full auth every request, no limited identity path",
+  );
+});
+
 Deno.test("#317 PIN 5xx logs correlate server UUID without secrets across all operations", async () => {
   const paths = [
     "pins/bootstrap",
