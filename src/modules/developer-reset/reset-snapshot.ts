@@ -12,7 +12,7 @@ const binding = z.object({
 }).strict();
 const schema = z.object({
   expected: binding,
-  snapshot: binding.extend({ id: hash, readOnly: z.literal(true), isolation: z.literal('repeatable read') }).strict(),
+  snapshot: binding.extend({ id: hash, readOnly: z.literal(true), isolation: z.enum(['repeatable read', 'stable statement']) }).strict(),
   plan: resetReferencePlanSchema,
   census: z.array(z.object({ relation, snapshotId: hash, count: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER), contentFingerprint: hash }).strict()).max(1000),
   // Tokens are produced by a trusted collector using a per-snapshot keyed digest.
@@ -102,7 +102,7 @@ export function inspectResetSnapshot(input: unknown) {
     byKey({ key: identity(a.relation, a.key) }, { key: identity(b.relation, b.key) });
   return { snapshotValid: true, executionEnabled: false, blockers: [] as string[], counts: graph.counts,
     // Not a bearer token, backup proof, TTL, live schema proof or execution permit.
-    fingerprint: requestHash({ binding: p.expected, snapshotId: p.snapshot.id,
+    fingerprint: requestHash({ binding: p.expected, snapshotId: p.snapshot.id, isolation: p.snapshot.isolation,
       relations: [...p.plan.relations].sort(),
       foreignKeyTargets: [...p.plan.foreignKeys].sort((a, b) => byKey({ key: identity(a.source, a.name) }, { key: identity(b.source, b.name) })),
       rows: p.plan.rows.map((row) => ({ ...row, references: [...row.references].sort((a, b) => byKey({ key: a.constraint }, { key: b.constraint })) })).sort(byIdentity),
