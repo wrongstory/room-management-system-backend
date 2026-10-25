@@ -29,6 +29,85 @@ const request = (method = "POST", suffix = "", body?: string, given = secret) =>
     },
     body,
   });
+Deno.test("notification delivery signed mode rejects replay expiry, cross purpose and downgrade before worker", async () => {
+  const now = 1792890000000;
+  let runs = 0, loads = 0;
+  const deps = {
+    loadInvokeSecret: () => secret,
+    loadInvokeMode: () => "signed-v1",
+    nowMs: () => now,
+    loadConfig: () => {
+      loads++;
+      return config;
+    },
+    validateConfig: () => Promise.resolve(),
+    run: async () => {
+      runs++;
+      return { claimed: 0 };
+    },
+  };
+  const signed = async (
+    audience = "notification-delivery:aodikrxcczbogjpsjwjt",
+    ageSeconds = 0,
+  ) => {
+    const at = String(Math.floor(now / 1000) - ageSeconds),
+      nonce = "ab".repeat(16);
+    const key = await crypto.subtle.importKey(
+      "raw",
+      new TextEncoder().encode(secret),
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["sign"],
+    );
+    const signature = new Uint8Array(
+      await crypto.subtle.sign(
+        "HMAC",
+        key,
+        new TextEncoder().encode(
+          `rms-scheduled-invocation-v1\n${audience}\n${at}\n${nonce}\nPOST`,
+        ),
+      ),
+    );
+    return new Headers({
+      "x-rms-invoke-at": at,
+      "x-rms-invoke-nonce": nonce,
+      "x-rms-invoke-signature": [...signature].map((value) =>
+        value.toString(16).padStart(2, "0")
+      ).join(""),
+    });
+  };
+  const invoke = (headers: Headers, body?: string) =>
+    handleNotificationDelivery(
+      new Request(
+        "https://example.test/functions/v1/notification-delivery",
+        { method: "POST", headers, body },
+      ),
+      deps,
+    );
+  assert((await invoke(await signed())).status === 200);
+  for (
+    const headers of [
+      await signed(undefined, 60),
+      await signed(undefined, -6),
+      await signed("reservation-backup-monitor:matalcofimnhuzslfhdd"),
+      new Headers(),
+    ]
+  ) {
+    assert((await invoke(headers)).status === 401);
+  }
+  const downgraded = await signed();
+  downgraded.set("x-notification-delivery-invoke-secret", secret);
+  assert((await invoke(downgraded)).status === 401);
+  assert((await handleNotificationDelivery(request(), deps)).status === 401);
+  assert((await invoke(await signed(), "{}")).status === 400);
+  assert(
+    (await handleNotificationDelivery(request(), {
+      ...deps,
+      loadInvokeMode: () => "typo",
+    })).status === 503,
+  );
+  assert(runs === 1 && loads === 1);
+});
 Deno.test("notification delivery Edge rejects method, query, body and bad secret before worker", async () => {
   let runs = 0;
   const dependencies = {
