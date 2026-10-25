@@ -524,6 +524,7 @@ CASTLE THE ART 객실관리 시스템은 숙소 내부 직원용 앱이다.
 - `room_types.default_guest_count`와 `max_guest_count`를 API의 `baseOccupancy`와 `maxOccupancy`로 공개한다. 두 값은 1 이상의 정수이며 `baseOccupancy <= maxOccupancy`다.
 - 예약 가능 미리보기의 `guestCount`는 선택값이다. 생략/null이면 임의 인원 기본값을 넣지 않고 기간 bookability만 계산하며, 양의 정수이면 최신 `maxOccupancy`를 함께 검사한다. 예약 생성·일정 변경의 `guestCount`는 계속 필수이고 최신 `maxOccupancy`를 DB에서 다시 확인한다. 초과 요청은 `GUEST_COUNT_EXCEEDS_ROOM_TYPE_CAPACITY`로 거부하고 기존 예약을 자동 변경하지 않는다.
 - 현재 DB에 저장된 인원 값은 그대로 보존한다. 화면 예시 숫자를 새 production 기준값이나 backfill 값으로 승격하지 않는다.
+- [운영 입력 확인 — 2026-10-25 #14] 사용자가 현행 기본/최대 인원 standard2/2, premium2/3, oceanFamily4/6, oceanPremium2/4가 맞다고 확인했다. 현행 값을 유지하며 새 seed/backfill이나 영구 상수로 고정하지 않는다. 이후 변경은 다음 developer preview/commit 절차를 따른다.
 - 객실 유형 인원 변경은 singleton developer만 수행한다. 먼저 5분 유효 impact preview를 받고, 동일 fingerprint와 room-type CAS version, source-controlled reason code, Idempotency-Key로 확정한다. 새 최대 인원을 초과하는 활성 예약이 있으면 확정하지 않는다.
 - 객실 추가는 숫자 문자열 room number, 활성 객실 유형, 최신 객실 유형 version을 요구한다. 새 객실은 `verification_required`로 시작한다.
 - 객실 제거는 hard delete가 아니라 versioned inactive 전이다. 현재 점유, 활성·미래 예약, 진행 중 청소, PIN 변경, 미해결 운영 업무가 있으면 preview/commit이 막히며 과거 예약·청소·감사 이력은 유지한다.
@@ -546,6 +547,8 @@ CASTLE THE ART 객실관리 시스템은 숙소 내부 직원용 앱이다.
 ### `[운영 입력값]` 608호
 
 과거 운영 설명에는 608호를 청소·고객 배정에서 제외한다는 내용이 있었지만 프런트 최종 감사는 608호 전용 제품 규칙을 제거했다. 따라서 608호를 영구 invariant나 migration seed로 넣지 않는다. 실제 운영 개시 시점에 차단이 여전히 유효한지 관리자가 확인한 뒤 일반 객실 운영 차단 record로만 입력한다.
+
+2026-10-25 사용자는 현재 차단을 유지하고 나중에 직접 해제한다고 확인했다. 자동 해제나 별도 608호 전용 권한을 추가하지 않는다. 같은 시점의 자료는 시험·개발용이며 관리자·메이드 기기는 우선 갤럭시, PIN 시트 동기화는 현재 미사용·운영 시 사용 예정으로 확인됐다. 이는 현재 현장 사실이며 실제 기기 검증·DB lifecycle 전환·시트 쓰기 완료를 뜻하지 않는다.
 
 ### `[데모/변동 가능]` 운영 상태
 
@@ -1213,11 +1216,11 @@ Google Drive 운영 계정과 OAuth 자격증명은 아직 외부 배포 전제�
 AI는 아래 항목을 암묵적으로 확정하지 않는다.
 
 1. 투숙 중이면서 청소가 필요한 객실의 **프런트 대표 표현**: `DOCS/17` 우선순위와 `DOCS/20`/현재 wireframe의 주 상태+하위 상태 중 어느 쪽인지. 백엔드 독립 축은 이 결정과 무관하게 유지한다.
-2. 기본/최대 숙박 인원을 운영 정본으로 확정할지. 타입별 예상시간 정책은 폐기되어 결정 대상이 아니다.
+2. 기본/최대 숙박 인원은 2026-10-25 현행 네 타입 값으로 확인됐다. 이후 변경은 developer 영향 미리보기·확정 절차를 따른다. 타입별 예상시간 정책은 폐기되어 결정 대상이 아니다.
 3. current role 단일값과 역할 이력/복수 역할 구조 중 어느 모델을 채택할지. 단, `upload_only`는 별도 역할이 아니라 제한 capability다.
 4. 재제출 version을 사용자 화면에서 어떻게 노출하고 비교할지
 5. Google Drive의 실제 운영 계정·OAuth 자격증명·용량/비용 감시와 도어락·향후 송금·OTA/PMS·push의 실제 공급자·자격증명/비용. 사진 저장 provider 자체는 Google Drive로 확정이다.
-6. 운영 시작 시 608호 차단이 여전히 유효한지
+6. 608호는 2026-10-25 사용자 확인에 따라 차단을 유지하며 나중에 사용자가 해제한다. 실행 직전 실제 차단 상태는 다시 관측한다.
 7. wireframe의 퇴실점검을 제품 범위로 유지할지와 수동 완료/청소 완료 대체 규칙
 
 미확정 항목도 확장 가능한 schema는 설계할 수 있다. 다만 한쪽 정책을 강제하는 irreversible migration, purge, 지급 로직은 결정 전 배포하지 않는다.
