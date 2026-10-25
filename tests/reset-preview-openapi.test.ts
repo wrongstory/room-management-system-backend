@@ -49,6 +49,19 @@ describe('actual Node/Edge reset preview and complete strict wire schema', () =>
     delete response.operationGates;
     expect(validate(response)).toBe(false);
   });
+  it('requires the template field and rejects selected-policy or raw template data promotion', () => {
+    const sample = samples.find(row => row.name === 'templates-all-statuses');
+    if (!sample) throw new Error('fixture missing');
+    const body = summarizeResetPreview(sample.input);
+    const missing: Record<string, unknown> = { ...body }; delete missing.templateEvidence;
+    expect(validate(missing)).toBe(false);
+    for (const patch of [{ executionEnabled: true }, { templateCount: -1 }, { sourceId: 'private-value' }]) {
+      expect(validate({ ...body, templateEvidence: { ...body.templateEvidence, ...patch } })).toBe(false);
+    }
+    const alternatives = body.templateEvidence.selectionAlternatives;
+    expect(validate({ ...body, templateEvidence: { ...body.templateEvidence,
+      selectionAlternatives: alternatives?.map(row => ({ ...row, statusPolicyDecided: true })) } })).toBe(false);
+  });
   it('rejects promoted permission, malformed state, omissions and raw private fields', () => {
     const sample = samples[2]; if (!sample) throw new Error('fixture missing');
     const body = summarizeResetPreview(sample.input);

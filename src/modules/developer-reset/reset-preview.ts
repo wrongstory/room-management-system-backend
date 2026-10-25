@@ -4,6 +4,7 @@ import {
   type ResetCensus,
   summarizeResetRowImpact,
 } from "./reset-row-impact.js";
+import { summarizeResetTemplateEvidence } from "./reset-template-evidence.js";
 
 export class ResetPreviewError extends Error {
   constructor(public readonly status: number, public readonly code: string) {
@@ -55,6 +56,7 @@ export function summarizeResetPreview(input: unknown) {
     "relations",
     ...(Object.hasOwn(value, "rowImpact") ? ["rowImpact"] : []),
     ...(Object.hasOwn(value, "gateEvidence") ? ["gateEvidence"] : []),
+    ...(Object.hasOwn(value, "templateEvidence") ? ["templateEvidence"] : []),
   ]);
   if (
     value.format !== "reset-preview-inventory-v1" || value.readOnly !== true ||
@@ -124,7 +126,6 @@ export function summarizeResetPreview(input: unknown) {
   const blockers = [
     "RESET_RECOVERY_SCOPE_UNDECIDED",
     "PHOTO_DELETION_ON_HOLD",
-    "TEMPLATE_PUBLICATION_RULES_UNVERIFIED",
     "RESET_EXECUTION_NOT_IMPLEMENTED",
   ];
   if (missingRelations || unknownRelations) {
@@ -134,12 +135,18 @@ export function summarizeResetPreview(input: unknown) {
   if (truncatedRelations) blockers.push("INVENTORY_ROW_LIMIT_EXCEEDED");
   let rowImpact: ReturnType<typeof summarizeResetRowImpact>;
   let operationGates: ReturnType<typeof summarizeOperationGates> | null;
+  let templateEvidence: ReturnType<typeof summarizeResetTemplateEvidence>;
   try {
     operationGates = Object.hasOwn(value, "gateEvidence")
       ? summarizeOperationGates(value.gateEvidence)
       : null;
     rowImpact = summarizeResetRowImpact(
       value.rowImpact,
+      census,
+      value.snapshotId,
+    );
+    templateEvidence = summarizeResetTemplateEvidence(
+      value.templateEvidence,
       census,
       value.snapshotId,
     );
@@ -150,6 +157,7 @@ export function summarizeResetPreview(input: unknown) {
   blockers.push(
     ...(operationGates?.blockers ?? ["OPERATION_GATES_NOT_COLLECTED"]),
   );
+  blockers.push(...templateEvidence.blockers);
   return {
     readOnly: true,
     diagnosticComplete:
@@ -167,6 +175,7 @@ export function summarizeResetPreview(input: unknown) {
     candidateImpact: summary,
     rowImpact,
     operationGates,
+    templateEvidence,
     blockers,
   };
 }

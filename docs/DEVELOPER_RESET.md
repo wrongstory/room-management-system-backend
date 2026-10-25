@@ -459,3 +459,44 @@ manifest127 및 row/preview/report generator 검사가 PASS했다. 전체 Edge65
 report 생성물은664,758 bytes이며 기존20MB 상한을 유지했다. Python codegen/ruff는 dev60cd6af
 통합 입력에서 PASS했고 이후 f25e5b6까지 OpenAPI/Python 입력 변경0을 확인했다.
 이번127 변경의 실제 PostgreSQL·pgTAP·hosted 호출·reset/복구 실행은 여전히 NOT RUN이다.
+
+## 템플릿 전체 상태 수집과 재등록 후보 비교 — 129 source 후보
+
+`collect_developer_reset_template_inventory`는 draft/published/retired를 모두 포함한다.
+동일한 STABLE snapshot에서 독립 template/slot count를 수집하고 각 template의 모든 원래 컬럼과
+정규화 slot 원본을 내용 digest로 묶는다. ID·작성자·label·slot 내용·digest는 내부 RPC에서만
+처리하고 HTTP 응답에는 상태별 합계와 고정 진단 code만 남긴다. 이는 전체 DB 내용 snapshot,
+복구 가능한 백업 또는 유효 실행 승인이 아니다. Auth 원문·비밀번호·PIN은 수집하지 않는다.
+
+기존 `photo_snapshot_valid`의 역사 읽기 가능성과 `normalized_checkout_template_slots` 및
+새 version의 현재 validator가 요구하는 신규 등록 shape를 별도로 검사한다. pre-A 내용을
+읽을 수 있다는 이유로 maxPhotos를 만들어 넣거나 새 게시의 검증을 생략하지 않는다.
+displayOrder 정렬은 기존 규칙을 사용하며 label/필수 여부/수량/description/section 등 실제 값은
+변환하지 않는다. draft에 아직 slot projection이 없는 현재 계약을 보존하고, 이미 있는 projection은
+원본 JSON과 개수·내용·key/order/required가 일치하는지 확인한다. 기존 공개 게시 API는 checkout과
+관리자 전용이며 이 수집기는 그 권한을 확장하지 않는다.
+
+두 source 선택 후보를 모두 제공한다. `currentPublished`는 게시본 수와 제외될 draft/retired 수를,
+`allVersions`는 전체 수를 보여준다. **둘 다 신규 상태나 게시 범위를 결정하지 않는다.** 모든 버전을
+게시하거나 draft/retired를 archive만 남기기로 결정한 뜻이 아니다. 이전 작성 이력의 검증된 보호,
+새 개발자 등록 출처, 선택에서 제외할 상태의 보호·재등록 방법은 D01의 실제 대상과 함께 결정해야
+한다. 원래 내용이 현재 fresh shape와 맞지 않으면 불일치 건수를 보여주며 임의 변환하지 않는다.
+
+논리 참조는 cleaning target/attempt의 template snapshot, photo snapshot contract/slot,
+flat evidence migration receipt의 과거 template/contract/slot이라는 명시된 7경로를 추가 조회한다.
+현재 catalog에 없는 역사 identity는 detached로 구분하며 곧바로 손상이나 삭제 가능으로 판단하지
+않는다. 역사 참조는 새 template ID로 자동 치환하지 않는다. 이 목록은 감사 JSON 등 모든 임의
+payload의 범용 참조 검출기가 아니며, 전체 복구·삭제 graph 완전성으로 승격하지 않는다.
+
+template/slot/source/edge는 각각 10,000건을 넘으면 부분 성공 대신 실패한다. collector는 5초 loop
+경계와 2초 lock 한계를 유지한다. 이미 진행 중인 쿼리의 강제 취소 효력은 최종 SQL 검증 대상이다.
+다른 snapshot·누락/중복 ID·경로·census 합계 불일치는 adapter에서 거부한다. `diagnosticComplete`
+는 이 명시 범위 수집의 완전성이고 모든 보호 조건 충족이나 게시·초기화 허가를 뜻하지 않는다.
+
+128 최종 `42624cc` 정상 통합 후 application163파일/4,472 tests, manifest129와 생성 검사 PASS다.
+템플릿 계약28 tests와 실제 Node/Edge/Fastify 응답 schema12 tests를 포함한다. 전체 Edge65/543/68,
+API19,036,605 bytes, report19,702,306 bytes, backup99,006 bytes PASS로 기존20MB 한계를 유지했다.
+Python 실제 응답8종 roundtrip/codegen PASS, Ruff lint/format·mypy26파일·pytest113·package source PASS다.
+pgTAP 권한·NULL·legacy/fresh shape 회귀 소스를 작성했다. 독립 QA는 SQL/DTO/공개 projection 검토와
+별도40 tests PASS로 주요 차단0을 확인했다. SQL/pgTAP 실제 실행,
+운영 DB/API 호출, 원본 복사·삭제·재등록·게시·복구는 모두 NOT RUN이다.
