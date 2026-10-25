@@ -12241,6 +12241,96 @@ export const openApiDocument = {
           blockers: { type: "array", items: { type: "string" } },
         },
       },
+      DeveloperResetTemplateEvidence: {
+        type: "object",
+        additionalProperties: false,
+        description:
+          "모든 template 상태의 내용·slot 및 명시 역사 참조 수집. diagnosticComplete는 수집 완전성이고 복구/새 게시/초기화 승인이 아니다. 두 source 후보는 draft/retired 상태 처리나 제외를 결정하지 않는다.",
+        required: [
+          "available",
+          "diagnosticComplete",
+          "executionEnabled",
+          "templateCount",
+          "slotCount",
+          "contentFingerprintsCollected",
+          "statusCounts",
+          "referenceCounts",
+          "selectionAlternatives",
+          "historicallyUnreadable",
+          "registrationShapeInvalid",
+          "unsupportedPublicationPaths",
+          "slotProjectionMismatches",
+          "missingCreators",
+          "exhaustedVersions",
+          "blockers",
+        ],
+        properties: {
+          available: { type: "boolean" },
+          diagnosticComplete: { type: "boolean" },
+          executionEnabled: { type: "boolean", enum: [false] },
+          ...Object.fromEntries(
+            [
+              "templateCount",
+              "slotCount",
+              "contentFingerprintsCollected",
+              "historicallyUnreadable",
+              "registrationShapeInvalid",
+              "unsupportedPublicationPaths",
+              "slotProjectionMismatches",
+              "missingCreators",
+              "exhaustedVersions",
+            ].map((
+              label,
+            ) => [label, { type: ["integer", "null"], minimum: 0 }]),
+          ),
+          statusCounts: {
+            type: ["object", "null"],
+            additionalProperties: false,
+            required: ["draft", "published", "retired"],
+            properties: Object.fromEntries(
+              ["draft", "published", "retired"].map((
+                label,
+              ) => [label, integer]),
+            ),
+          },
+          referenceCounts: {
+            type: ["object", "null"],
+            additionalProperties: false,
+            required: ["edges", "absent", "malformed", "detached", "matched"],
+            properties: Object.fromEntries(
+              ["edges", "absent", "malformed", "detached", "matched"].map((
+                label,
+              ) => [label, integer]),
+            ),
+          },
+          selectionAlternatives: {
+            type: ["array", "null"],
+            maxItems: 2,
+            items: {
+              type: "object",
+              additionalProperties: false,
+              required: [
+                "scope",
+                "selected",
+                "excludedDraft",
+                "excludedRetired",
+                "statusPolicyDecided",
+              ],
+              properties: {
+                scope: {
+                  type: "string",
+                  enum: ["currentPublished", "allVersions"],
+                },
+                selected: integer,
+                excludedDraft: integer,
+                excludedRetired: integer,
+                statusPolicyDecided: { type: "boolean", enum: [false] },
+              },
+            },
+          },
+          blockers: { type: "array", items: { type: "string" } },
+        },
+      },
       DeveloperResetPreview: {
         type: "object",
         additionalProperties: false,
@@ -12258,6 +12348,7 @@ export const openApiDocument = {
           "candidateImpact",
           "rowImpact",
           "operationGates",
+          "templateEvidence",
           "blockers",
         ],
         properties: {
@@ -12286,6 +12377,9 @@ export const openApiDocument = {
           rowImpact: { $ref: "#/components/schemas/DeveloperResetRowImpact" },
           operationGates: {
             $ref: "#/components/schemas/DeveloperOperationGates",
+          },
+          templateEvidence: {
+            $ref: "#/components/schemas/DeveloperResetTemplateEvidence",
           },
           blockers: { type: "array", items: { type: "string" } },
         },

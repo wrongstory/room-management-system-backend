@@ -69,3 +69,5 @@ D01 보호 범위/방식, template 상태 선택, 사진 HOLD, 실행 승인과 
 
 최신 dev943f220 통합 후 `ci:quality` 163파일/4,478 tests와 manifest128/기존 generator 검사 PASS.
 Edge·Python·DB source는 해당 dev와 동일하며 이 단위에서 별도 실행하지 않았다. 전체 DB NOT RUN.
+후속 dev11e7cf3(템플릿129)도 정상 통합한 최종 `ci:quality`는164파일/4,513 tests PASS다.
+manifest129/생성 검사 PASS, snapshot 고유 source6파일의 범위와 독립 QA 결과를 유지한다.
