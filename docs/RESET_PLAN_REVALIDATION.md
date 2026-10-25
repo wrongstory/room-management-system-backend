@@ -16,6 +16,10 @@ read-only collector와 builder가 각 관측의 독립 내용/census/FK 검사�
 반환하지 않는다. opaque content commitment를 만들 때만 검증된 원문을 사용한다. 기존 snapshot
 key와 행 token은 이 계약에 노출되지 않고 원래 수명대로 폐기한다.
 
+R1/T1/S1 선택 이후에는 [승인 정책의 draft lifecycle 계획](RESET_APPROVED_HANDOVER_POLICY.md)도
+같은 의미 비교에 포함한다. status/version/정책 변경은 원래 내용·UUID가 같아도 거절한다.
+재인증5분 정책은 이 비교 핸들의 수명을 자동으로 정하거나 연장하는 기본값이 아니다.
+
 `prepare → recheck → consume`은 각각 한 번이다. 기한은 호출자가 반드시 지정하며 기본 TTL은 없다.
 options는 정확히 expiresAt 한 필드만 strict copy하여 단일 정수로 고정한다. getter·추가 필드·
 비정수는 거부하고 호출 이후 원본 객체의 변경이 세션 기한에 영향을 주지 않는다.

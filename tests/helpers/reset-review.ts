@@ -29,7 +29,7 @@ export function resetReviewFixture() {
   add('public.cleaning_template_versions', { room_type_id: 'uuid', cleaning_kind: 'text', duration_minutes: 'int4',
     photo_slots: 'jsonb', status: 'text', version: 'int4', created_by: 'uuid', created_at: 'timestamptz' });
   add('private.photo_template_slots', { template_version_id: 'uuid', slot_snapshot: 'jsonb' });
-  add('private.developer_operation_control', { singleton: 'bool', target_ref: 'text', version: 'int8', lifecycle: 'text', maintenance: 'text' });
+  add('private.developer_operation_control', { singleton: 'bool', target_ref: 'text', version: 'int8', lifecycle: 'text', maintenance: 'text', reauth_ttl_seconds: 'int4' });
   add('private.developer_operation_admissions', { deadline_at: 'timestamptz', completed_at: 'timestamptz' });
   add('private.password_change_commands', { state: 'text', actor_profile_id: 'uuid' });
   add('private.password_reset_auth_markers', { state: 'text', actor_profile_id: 'uuid' });
@@ -69,7 +69,7 @@ export function resetReviewFixture() {
   const census = metadata.relations.map(({ relation }) => ({ header: { scopeId: reviewScope, relation, count: contents.filter(r => r.relation === relation).length },
     contents: contents.filter(r => r.relation === relation) }));
   const request = { surfaces: RESET_LOGICAL_REFERENCE_RULES.map(({ relation, path }) => ({ relation, path })),
-    templateSelection: 'CURRENT_PUBLISHED' as 'CURRENT_PUBLISHED' | 'ALL_VERSIONS' | null, developerId: reviewId(1) as string | null,
+    templateSelection: 'CURRENT_PUBLISHED' as 'CURRENT_PUBLISHED' | null, developerId: reviewId(1) as string | null,
     receipt: { actorProfileId: reviewId(1), authUserId: reviewId(2), sessionDigest: '1'.repeat(64), passwordVersionDigest: '2'.repeat(64),
       expectedPostconditionFingerprint: '3'.repeat(64), policyHash: '4'.repeat(64), approvalScopeHash: '5'.repeat(64), backupProofHash: '6'.repeat(64),
       idempotencyKeyDigest: '7'.repeat(64), expiresAt: Date.now() + 60000, steps: [{ id: '8'.repeat(64), kind: 'DATABASE' as const }] } };

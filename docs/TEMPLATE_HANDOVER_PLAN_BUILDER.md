@@ -1,5 +1,10 @@
 # 템플릿 인계 등록 후보 생성 (#396)
 
+2026-10-25의 R1/T1/S1 선택 이후 실제 review composition은
+[승인 정책 모드](RESET_APPROVED_HANDOVER_POLICY.md)로 현재 게시본의 새 draft status/version을
+계획한다. 아래 두 선택과 status/version 미정 설명은 범용 순수 검사 모드의 계약이다.
+정책 모드에서 `ALL_VERSIONS`는 거부하며 실제 등록·게시·이력 변경은 실행하지 않는다.
+
 `template-plan-builder.ts`는 검증된 전체 템플릿 목록에서 새 개발자 인계 등록 **후보**를 만든다.
 공개 경로·DB·게시·삭제 호출은 없다. 실행은 항상 비활성이고 사용자의 선택을 대신하지 않는다.
 기존 `template-reseed-plan.ts`의 내용·provenance 비교를 재사용한다.
