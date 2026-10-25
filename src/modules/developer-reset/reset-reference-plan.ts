@@ -5,7 +5,7 @@ const identifier = z.string().regex(/^[a-z][a-z0-9_]*$/).max(63);
 // Collector-local opaque row identities, not SQL identifiers or an execution API.
 const key = z.string().regex(/^[a-zA-Z0-9_-]{1,80}$/);
 const hash = z.string().regex(/^[a-f0-9]{64}$/);
-const schema = z.object({
+export const resetReferencePlanSchema = z.object({
   catalogFingerprint: hash, snapshotCatalogFingerprint: hash,
   complete: z.boolean(),
   relations: z.array(relation).min(1).max(1000),
@@ -25,7 +25,7 @@ const schema = z.object({
  * Cycles are visited once, not topologically sorted: this is NOT a deletion order planner.
  */
 export function inspectResetReferencePlan(input: unknown) {
-  const parsed = schema.safeParse(input);
+  const parsed = resetReferencePlanSchema.safeParse(input);
   const blocked = (blockers: string[]) => ({
     referencesValid: false, executionEnabled: false, blockers, counts: null,
   });

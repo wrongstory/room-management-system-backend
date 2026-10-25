@@ -1,5 +1,12 @@
 # 프런트엔드 계약 snapshot
 
+## 2026-10-25 #396 초기화 영향 조회 후보
+
+source OpenAPI는 155 paths / 167 operations다. `GET /v1/developer/reset/preview`만 추가했으며
+active developer/session 전후 검증과 후보 그룹별 건수 조회를 제공한다. 실행은 항상 false이고
+`diagnosticComplete`는 수집 완전성만 나타낸다. 신규 migration/API는 운영 미적용이며 프런트
+코드는 변경하지 않았다. [진단 계약과 미실행 범위](./DEVELOPER_RESET.md)를 따른다.
+
 ## 2026-10-25 dev 통합 — #485
 
 운영의 마지막 확인 기록은 [v0.9.9 배포](https://github.com/wrongstory/room-management-system-backend/pull/477#issuecomment-6359461664)의 API53 / migration122 / main3e805249다. 아래 과거의 현재·후보·미배포 표현은 각 checkpoint 당시 상태다.

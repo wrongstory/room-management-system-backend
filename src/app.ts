@@ -6,6 +6,7 @@ import { GoogleRoomPinImportSource } from './modules/rooms/google-sheets-pin-imp
 import { roomPinImportCredentials } from './modules/rooms/google-sheets-pin.js';
 import { roomPinTransferDatabaseError } from './modules/rooms/room-pin-transfer-http.js';
 import { createRoomPinTransferRoutes } from './modules/rooms/room-pin-transfer.routes.js';
+import { createDeveloperResetPreviewRoutes, SupabaseResetPreviewService, type ResetPreviewService } from './modules/developer-reset/reset-preview.routes.js';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -91,6 +92,7 @@ export interface AppServices {
   rooms: RoomService;
   roomPinSheetOperations?: RoomPinSheetOperationsService;
   roomPinTransfer?: RoomPinTransfer;
+  resetPreview?: ResetPreviewService;
   reservations: ReservationService;
   payroll: PayrollService;
   complaints?: ComplaintService;
@@ -160,6 +162,10 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       auth: new SupabaseAuthService(clients, options.env.ACCOUNT_PHONE_PEPPER),
       accounts: new SupabaseAccountService(clients, options.env.ACCOUNT_PHONE_PEPPER),
       availability: new SupabaseAvailabilityService(clients),
+      resetPreview: new SupabaseResetPreviewService(async (name, args, signal) => {
+        const { data, error } = await clients.admin.rpc(name, args).abortSignal(signal);
+        return { data, error };
+      }),
       roomPinTransfer: new RoomPinTransfer(async (name, args) => {
         const { data, error } = await clients.admin.rpc(name, args);
         if (error) throw roomPinTransferDatabaseError(error.message);
@@ -364,6 +370,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     await app.register(createRoomPinTransferRoutes(services.roomPinTransfer), { prefix: '/v1/rooms/pins' });
   }
   await app.register(createDeveloperRoomCatalogRoutes(services.rooms), { prefix: '/v1/developer' });
+  if (services.resetPreview) await app.register(createDeveloperResetPreviewRoutes(services.resetPreview), { prefix: '/v1/developer' });
   if (services.roomPinSheetOperations) {
     await app.register(createRoomPinSheetOperationsRoutes(services.roomPinSheetOperations), {
       prefix: '/v1/room-pin-sheet-sync'
