@@ -37,6 +37,63 @@ async function wrapperInput(sql = "-- 승인 원문\r\nBEGIN;\r\nSELECT '가;나
 }
 
 describe('#378 real PG15/PG17 parser byte evidence', () => {
+  it.each([15, 17])('recognizes only exact CREATE FUNCTION output declarations for PG%i', async major => {
+    for (const settings of ["SET timezone='UTC'", "SET datestyle='ISO, MDY'",
+      "SET search_path='pg_catalog' SET timezone='UTC' SET datestyle='ISO, MDY' SET lock_timeout='2s' SET statement_timeout='7s'"]) {
+      const value = input(`-- 한글 byte offset\nCREATE OR REPLACE FUNCTION public.f() RETURNS void LANGUAGE plpgsql ${settings} AS $$BEGIN RETURN; END;$$;`, major);
+      const plan = await api.createMigrationSqlPlan(value);
+      expect(plan.statements).toHaveLength(1);
+      expect(plan.sqlSha256).toBe(hash(value.sqlBytes));
+      expect(plan).toMatchObject({ executionAllowed: false, sourceEvidenceVerified: false, sourceReviewRequired: true });
+      expect(plan.statements[0]?.requiresBodyReview).toBe(true);
+    }
+  });
+  it.each([15, 17])('rejects unreviewed/session/mixed output settings for PG%i', async major => {
+    const declarations = ["timezone='utc'", "timezone='Europe/London'", "timezone=0", "timezone=DEFAULT", 'timezone FROM CURRENT',
+      "timezone='UTC','Europe/London'", "datestyle='ISO, YMD'", "datestyle='ISO'", "datestyle=DEFAULT", 'datestyle FROM CURRENT',
+      "timezone='UTC' SET timezone='UTC'", "timezone='UTC' SET datestyle='ISO, YMD'", "role='postgres'", "session_replication_role='replica'"];
+    const outside = ["SET timezone='UTC';", "SET LOCAL datestyle='ISO, MDY';", "SET ROLE postgres;",
+      "ALTER SYSTEM SET timezone='UTC';", "ALTER ROLE postgres SET timezone='UTC';",
+      "ALTER FUNCTION public.f() SET timezone='UTC';", "ALTER FUNCTION public.f() SET datestyle='ISO, MDY';"];
+    for (const sql of [...declarations.map(setting => `CREATE FUNCTION public.f() RETURNS void LANGUAGE plpgsql SET ${setting} AS $$BEGIN RETURN; END;$$;`), ...outside]) {
+      await expect(api.createMigrationSqlPlan(input(sql, major))).rejects.toThrow(/^SQL_PLAN_/u);
+    }
+  }, 20_000);
+  it.each([15, 17])('rejects malformed or reparented output-declaration ASTs for PG%i', async major => {
+    const sql = "CREATE FUNCTION public.f() RETURNS void LANGUAGE plpgsql SET timezone='UTC' AS $$BEGIN RETURN; END;$$;";
+    const native = await new Parser({ version: major }).parse(sql);
+    for (const change of ['outer-extra', 'def-extra', 'def-action', 'setting-extra', 'local', 'reset', 'args', 'constant-extra', 'literal-extra',
+      'bad-location', 'negative-location', 'nested-only', 'alias', 'duplicate', 'alter-parent']) {
+      const ast = clone(native), statement = ast.stmts[0];
+      if (!statement) throw new Error('SYNTHETIC_FIXTURE_MISSING');
+      const node = statement.stmt.CreateFunctionStmt;
+      if (!node) throw new Error('SYNTHETIC_FIXTURE_MISSING');
+      const options = node.options as { DefElem: Record<string, unknown> }[];
+      const option = options.find(value => value.DefElem.defname === 'set');
+      if (!option) throw new Error('SYNTHETIC_FIXTURE_MISSING');
+      const declaration = option.DefElem, argument = mutable(declaration.arg as object);
+      const setting = mutable(argument.VariableSetStmt as object);
+      const args = setting.args as { A_Const: Record<string, unknown> }[];
+      const constant = args[0]?.A_Const;
+      if (!constant) throw new Error('SYNTHETIC_FIXTURE_MISSING');
+      if (change === 'outer-extra') mutable(option).extra = true;
+      if (change === 'def-extra') declaration.extra = true;
+      if (change === 'def-action') declaration.defaction = 'DEFELEM_SET';
+      if (change === 'setting-extra') setting.extra = true;
+      if (change === 'local') setting.is_local = true;
+      if (change === 'reset') setting.kind = 'VAR_RESET';
+      if (change === 'args') args.push(clone(args[0] as { A_Const: Record<string, unknown> }));
+      if (change === 'constant-extra') constant.ival = { ival: 0 };
+      if (change === 'literal-extra') mutable(constant.sval as object).extra = true;
+      if (change === 'bad-location') constant.location = sql.length;
+      if (change === 'negative-location') declaration.location = -1;
+      if (change === 'nested-only') { node.options = options.filter(value => value !== option); node.unexpected = argument; }
+      if (change === 'alias') node.unexpected = argument;
+      if (change === 'duplicate') options.push(clone(option));
+      if (change === 'alter-parent') statement.stmt = { AlterFunctionStmt: { actions: options } };
+      expect(() => api.inspectMigrationSqlAst(Buffer.from(sql), ast, major), change).toThrow(/^SQL_PLAN_/u);
+    }
+  });
   it.each([15, 17])('accepts only finite function-local timeout declarations for PG%i', async major => {
     const sql = "CREATE FUNCTION public.f() RETURNS void LANGUAGE plpgsql SET search_path='' SET lock_timeout='2s' SET statement_timeout='7s' AS $$BEGIN RETURN; END;$$;";
     expect((await api.createMigrationSqlPlan(input(sql, major))).statements).toHaveLength(1);

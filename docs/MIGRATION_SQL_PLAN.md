@@ -4,6 +4,21 @@
 
 현재 runtime 경계는 [MIGRATION_EXECUTION_RUNTIME.md](./MIGRATION_EXECUTION_RUNTIME.md)를 따른다. 함수 선언 위치의 양수 literal `lock_timeout`/`statement_timeout`(ms/s, 최대 120초)을 source review 대상으로 허용한다. top-level SET, 0/음수/default/from-current는 계속 거부한다. parser 증거 자체가 운영 실행 승인은 아니다.
 
+S1 source136의 정확한 timestamp/JSON text 대조를 위해 `CREATE FUNCTION` 선언 옵션의
+`SET timezone='UTC'`, `SET datestyle='ISO, MDY'` 두 고정값만 추가로 분류한다. 단일 문자열,
+정확한 option/AST 형태·위치·부모, 중복 없음이 필요하다. ALTER FUNCTION, top-level/session/
+role/system SET, FROM CURRENT, 다른 값·복수값·추가 필드·다른 위치나 공유된 AST node는
+허용하지 않는다. 함수 body로 설정을 숨기지 않으며 body 검토와 exact source byte binding은
+그대로다. 이는 SQL source의 명시적 선언 호환이며 history codec, H1 GUC 비교/기준 수용,
+운영 승인 범위를 늘리지 않는다. 실제 DB/SQL/TLS 실행은 NOT RUN이다.
+
+동일한 미적용 source136 원문 SHA256
+`787108ff050f1c31d9e7e2be695f8ba4180b11616ab441d0d72749d73eeb5f89`를 별도 담당
+worktree에서 읽어 대조했다. 변경 전 PG15/17 모두 `SQL_PLAN_NESTED_UNSAFE`, 변경 후
+실제 유한 parser worker는 양쪽10문장 PASS이며 sourceEvidenceVerified/executionAllowed는
+false다. SQL 실행 결과가 아니다. 관련107개와 전체194파일/5,294개 application 검사가
+PASS했다. source136의 고정 파일 회귀는 해당 source 통합 시 그 담당 테스트에서 연결한다.
+
 
 > 상태: **source-only / 실행 불가**. 실제 PostgreSQL parser와 유한 worker 격리는 구현했으나 DB driver, TLS, 운영 연결, 실제 승인·Git/manifest/history 검증, migration 실행과 백업은 구현·실행하지 않았다. 모든 결과는 `executionAllowed=false`다. 이 단계로 #378 전체를 완료하거나 배포를 허용하지 않는다. 기존 [정책 모델](./PRODUCTION_MIGRATION_EXECUTOR.md)의 운영 gate를 대체하지 않는다.
 
@@ -89,7 +104,7 @@ source codec 분류는 100파일에서 가능했고, 나머지 3파일은 알려
 
 현재 관측 목록 밖 AST는 unknown으로 거부한다. CREATE/DROP INDEX CONCURRENTLY, 모든 REINDEX/VACUUM, DATABASE/TABLESPACE/ALTER SYSTEM, COPY(file/program/stdin 포함), foreign server/FDW/subscription, extension 설치/수정, role/global SET, CALL/TRUNCATE는 hard reject다. 추가 지원은 별도 정책·구현·독립 QA가 필요하다.
 
-DO와 function body는 raw parser의 string 또는 nested definition일 수 있고 PL/pgSQL 내부·동적 SQL·외부 호출/transaction 제어 안전성을 입증하지 못한다. 해당 종류는 반드시 `requiresBodyReview=true`다. CREATE/ALTER FUNCTION의 **선언 옵션 위치**에 있는 `SET search_path`/`VAR_SET_VALUE`만 top-level SET과 구분한다. 다른 위치·timeout 설정·unknown language는 거부하며 함수 body·설정 검토 필요 상태를 해제하지 않는다.
+DO와 function body는 raw parser의 string 또는 nested definition일 수 있고 PL/pgSQL 내부·동적 SQL·외부 호출/transaction 제어 안전성을 입증하지 못한다. 해당 종류는 반드시 `requiresBodyReview=true`다. CREATE/ALTER FUNCTION의 **선언 옵션 위치**에 있는 `SET search_path`/`VAR_SET_VALUE`와 위의 유한 timeout을 top-level SET과 구분한다. 고정 출력 설정 두 값은 CREATE FUNCTION에서만 허용한다. 다른 위치·설정·unknown language는 거부하며 함수 body·설정 검토 필요 상태를 해제하지 않는다.
 
 ## 유한 parser worker와 안전한 오류
 
