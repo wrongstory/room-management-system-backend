@@ -45,5 +45,6 @@ uncaught EventEmitter 오류가 되지 않도록 남겨 두며, 이미 파기된
 - registry/template/admission/receipt는 각 내부 검증 단위를 실제 같은 snapshot/계획에 결합해야 한다.
   순수 함수나 합성 입력의 PASS를 전체 초기화·운영 배포 완료로 표시하지 않는다.
 
-개발 검증: 전체 `ci:quality` 173파일/4,781 tests, native 합성16 tests, manifest132 및
+개발 검증: 템플릿 후보·논리 참조 registry를 포함한 dev `42c3f4c`를 충돌 없이 정상 통합하고
+전체 `ci:quality` 175파일/4,834 tests, native 합성16 tests, manifest132 및
 compiled import PASS다. 독립 source/doc QA와 native/closed-collector 2파일43 tests PASS, 차단 결함0이다.
