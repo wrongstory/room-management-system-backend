@@ -69,6 +69,7 @@ const sourcePaths = [
   'supabase/functions/_shared/reset-preview.ts',
   'supabase/functions/_shared/operation-gates.ts',
   'supabase/functions/_shared/reset-row-impact.ts',
+  'supabase/functions/_shared/reset-template-evidence.ts',
   'supabase/functions/_shared/reset-preview-groups.ts',
   'supabase/functions/_shared/openapi.ts',
   'supabase/functions/_shared/room-operation-cursor.ts',

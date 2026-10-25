@@ -43,8 +43,8 @@ import sys
 sys.path.insert(0, sys.argv[1])
 from generated.models.developer_reset_preview import DeveloperResetPreview
 cases = json.load(sys.stdin)
-if len(cases) != 5 or len({case['name'] for case in cases}) != 5:
-    raise RuntimeError('Expected five actual reset preview projection cases')
+if len(cases) != 8 or len({case['name'] for case in cases}) != 8:
+    raise RuntimeError('Expected eight actual reset preview projection cases')
 for case in cases:
     body = case['body']
     model = DeveloperResetPreview.from_dict(body)
@@ -54,7 +54,9 @@ for case in cases:
         raise RuntimeError('Required nullable operationGates model field is missing')
     if (model.operation_gates is None) != (body['operationGates'] is None):
         raise RuntimeError('Null gate evidence was silently omitted or fabricated')
-print('Python reset preview codegen: five actual nullable/state/effect projections roundtrip PASS')
+    if not hasattr(model, 'template_evidence'):
+        raise RuntimeError('Required template evidence model field is missing')
+print('Python reset preview codegen: eight actual gate/template projections roundtrip PASS')
 """
     subprocess.run(  # noqa: S603
         [sys.executable, "-c", roundtrip, str(destination)],
@@ -432,6 +434,7 @@ def main() -> None:
             package / "models" / "developer_reset_preview.py",
             package / "models" / "developer_reset_row_impact.py",
             package / "models" / "developer_operation_gates_type_0.py",
+            package / "models" / "developer_reset_template_evidence.py",
             package / "models" / "developer_reset_candidate_impact.py",
             package / "api" / "photos" / "get_photo_thumbnail.py",
             package / "api" / "photos" / "admit_attempt_photo_collection_batch.py",
