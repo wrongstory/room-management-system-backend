@@ -1,5 +1,19 @@
 # 프론트엔드·Codex API 연동 가이드
 
+## 2026-10-25 #396 읽기 전용 초기화 영향 조회 — 운영 미배포
+
+`GET /v1/developer/reset/preview`는 조건/body 없이 개발자 access token만 받는다. 기존 인증과
+비밀번호 변경 조건을 통과한 뒤 DB가 수집 전후 최신 개발자 role/status/session을 확인한다.
+응답 `preview`에는 snapshot 시각/진단 ID와 preserve/mixed/reseed/clear/review 후보 그룹의
+관계 수·관찰 행 수·exact 여부, 누락/미분류/미지원/상한 초과 건수, 고정 blocker 코드만 있다.
+개별 업무 값·계정 ID·PIN·사진 식별자·테이블명은 반환하지 않는다. 응답은 no-store다.
+
+`diagnosticComplete=true`여도 `executionEnabled=false`다. 후보 그룹의 건수는 확정 삭제
+건수가 아니며, `exact=false`의 observedRows는 누락 또는 상한 때문에 전체 합계가 아니다.
+snapshotId는 실행 token·CAS·백업/복구 증명이 아니다. 실제 초기화 경로는 없으며 신규 SQL을
+실행하거나 프런트 화면을 수정하지 않았다. 개발자 콘솔 UI 연결은 별도 범위다.
+source OpenAPI 156 paths / 168 operations. [전체 계약](./DEVELOPER_RESET.md).
+
 ## 2026-10-25 #415 합성 기준선 통합
 
 #453/#455 계산 개선은 v0.9.5 이후 운영에 포함됐다. PR456의

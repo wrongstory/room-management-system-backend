@@ -2,17 +2,17 @@
   "schemaVersion": 1,
   "release": "dev",
   "hashAlgorithm": "sha256-lf-utf8",
-  "totalCount": 124,
+  "totalCount": 125,
   "baseline": {
     "count": 78,
     "head": "reservation_bookability_optional_guest_count"
   },
   "pending": {
-    "count": 46,
+    "count": 47,
     "first": "assignment_unavailability_reassignment",
-    "head": "assignment_card_hydration"
+    "head": "developer_reset_preview"
   },
-  "head": "assignment_card_hydration",
+  "head": "developer_reset_preview",
   "migrations": [
     {
       "order": 1,
@@ -633,6 +633,11 @@
       "order": 124,
       "name": "assignment_card_hydration",
       "sha256": "c82c9b3b950c1ec92460b4f597451791222b9bfeee9f7a5868ef6c3ed7e87607"
+    },
+    {
+      "order": 125,
+      "name": "developer_reset_preview",
+      "sha256": "b9c1f020cbfdcd741980fff1d5a92031a9eab45ee9183fe430f72b1988ed9677"
     }
   ]
 }

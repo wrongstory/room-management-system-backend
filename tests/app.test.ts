@@ -12,6 +12,36 @@ import type { SubmissionService } from '../src/modules/submissions/submission.se
 import { flatTemplateRequest, flatTemplateSlotPermutations, historicalTemplateRequest, invalidFlatTemplateRequests, templateProjection } from './fixtures/cleaning-template-contract.js';
 
 import type { PostApprovalRoomIssueModuleServices } from '../src/modules/post-approval-room-issues/post-approval-room-issue.module.js';
+import { SupabaseResetPreviewService } from '../src/modules/developer-reset/reset-preview.routes.js';
+import { resetRelationGroups } from '../src/modules/developer-reset/reset-preview-groups.js';
+
+describe('developer read-only reset preview route', () => {
+  it('reuses authentication, denies business roles, accepts no target override and exposes no execution route', async () => {
+    const appServices = services(); const session = '00000000-0000-4000-8000-000000000001';
+    const accessToken = `verified.${Buffer.from(JSON.stringify({ session_id: session })).toString('base64url')}.signature`;
+    const rpc = vi.fn(async () => ({ data: { format: 'reset-preview-inventory-v1', readOnly: true,
+      capturedAt: '2026-10-25T00:00:00Z', snapshotId: 'a'.repeat(64),
+      relations: Object.values(resetRelationGroups).flat().map(relation => ({ relation, kind: 'r', partition: false, observedRows: 0, exact: true })) }, error: null }));
+    appServices.resetPreview = new SupabaseResetPreviewService(rpc);
+    const app = await buildApp({ env, services: appServices, logger: false });
+    const path = '/v1/developer/reset/preview'; const headers = { authorization: `Bearer ${accessToken}` };
+    try {
+      expect((await app.inject({ method: 'GET', url: path })).statusCode).toBe(401);
+      expect((await app.inject({ method: 'GET', url: path, headers })).statusCode).toBe(403);
+      expect(rpc).not.toHaveBeenCalled();
+      vi.mocked(appServices.auth.authenticate).mockResolvedValue({ profileId: session, authUserId: session,
+        displayName: 'synthetic', role: 'developer', mustChangePassword: false, accessToken });
+      const success = await app.inject({ method: 'GET', url: path, headers });
+      expect(success.statusCode).toBe(200); expect(success.headers['cache-control']).toBe('no-store');
+      expect(success.json().preview).toMatchObject({ diagnosticComplete: true, executionEnabled: false });
+      expect(rpc).toHaveBeenCalledOnce();
+      expect((await app.inject({ method: 'GET', url: `${path}?target=other`, headers })).statusCode).toBe(400);
+      for (const method of ['POST', 'DELETE', 'HEAD'] as const) expect((await app.inject({ method, url: path, headers })).statusCode).toBe(404);
+      expect((await app.inject({ method: 'POST', url: '/v1/developer/reset/execute', headers })).statusCode).toBe(404);
+      expect(rpc).toHaveBeenCalledOnce();
+    } finally { await app.close(); }
+  });
+});
 
 describe('common business handler timing', () => {
   it('measures successful authenticated responses and never trusts supplied timing headers', async () => {

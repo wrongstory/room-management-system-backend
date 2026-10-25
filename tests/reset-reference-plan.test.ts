@@ -11,6 +11,7 @@ function fixture() {
   return {
     catalogFingerprint: 'a'.repeat(64), snapshotCatalogFingerprint: 'a'.repeat(64), complete: true,
     relations: ['public.profiles', 'private.receipts'],
+    relationRowCounts: [{ relation: 'public.profiles', count: 2 }, { relation: 'private.receipts', count: 1 }],
     foreignKeys: [{ source: 'private.receipts', target: 'public.profiles', name: 'actor_fk' }],
     rows: [
       { relation: 'public.profiles', key: 'developer', disposition: 'keep', references: [] as { constraint: string; targetKey: string | null }[] },
@@ -60,6 +61,7 @@ describe('reset row reference plan', () => {
       const f = fixture();
       f.foreignKeys.push({ source: 'public.profiles', target: 'private.receipts', name: 'receipt_fk' });
       f.rows = [at(f.rows, 0), at(f.rows, 2)];
+      at(f.relationRowCounts, 0).count = 1;
       for (const row of f.rows) row.disposition = disposition;
       at(f.rows, 0).references = [{ constraint: 'receipt_fk', targetKey: 'receipt' }];
       expect(inspectResetReferencePlan(f)).toMatchObject({ referencesValid: true, executionEnabled: false });
@@ -77,5 +79,44 @@ describe('reset row reference plan', () => {
       row.references.push({ constraint: 'auth_fk', targetKey: row.key });
     }
     expect(inspectResetReferencePlan(f).blockers).toContain('MISSING_TARGET_ROW');
+  });
+  it.each(['keep', 'remove'])('blocks omission of an unreferenced %s row', (disposition) => {
+    const f = fixture(); at(f.rows, 1).disposition = disposition;
+    f.rows.splice(1, 1);
+    expect(inspectResetReferencePlan(f)).toMatchObject({
+      referencesValid: false, executionEnabled: false, blockers: ['ROW_COUNT_MISMATCH'], counts: null,
+    });
+  });
+  it('requires an explicit zero for an empty relation', () => {
+    const f = fixture(); f.relations.push('private.empty');
+    expect(inspectResetReferencePlan(f).blockers).toContain('MISSING_RELATION_COUNT');
+    f.relationRowCounts.push({ relation: 'private.empty', count: 0 });
+    expect(inspectResetReferencePlan(f).referencesValid).toBe(true);
+  });
+  it.each([
+    ['MISSING_RELATION_COUNT', (f: ReturnType<typeof fixture>) => { f.relationRowCounts.pop(); }],
+    ['UNKNOWN_RELATION_COUNT', (f: ReturnType<typeof fixture>) => { f.relationRowCounts.push({ relation: 'private.unknown', count: 0 }); }],
+    ['DUPLICATE_RELATION_COUNT', (f: ReturnType<typeof fixture>) => { f.relationRowCounts.push({ ...at(f.relationRowCounts, 0) }); }],
+    ['ROW_COUNT_MISMATCH', (f: ReturnType<typeof fixture>) => { at(f.relationRowCounts, 0).count = 1; }],
+    ['ROW_COUNT_MISMATCH', (f: ReturnType<typeof fixture>) => { at(f.relationRowCounts, 0).count = 10001; }],
+  ] as const)('rejects count coverage: %s', (reason, mutate) => {
+    const f = fixture(); mutate(f);
+    expect(inspectResetReferencePlan(f).blockers).toContain(reason);
+    expect(inspectResetReferencePlan(f).executionEnabled).toBe(false);
+  });
+  it.each([-1, 1.5, Number.MAX_SAFE_INTEGER + 1, Infinity, NaN, '2', null])('rejects invalid count %s', (count) => {
+    const f = fixture();
+    expect(inspectResetReferencePlan({ ...f, relationRowCounts: [{ relation: 'public.profiles', count }] }).blockers)
+      .toEqual(['INVALID_INPUT']);
+  });
+  it('does not infer counts for the previous internal input contract', () => {
+    const { relationRowCounts: _counts, ...legacy } = fixture();
+    expect(inspectResetReferencePlan(legacy).blockers).toEqual(['INVALID_INPUT']);
+  });
+  it('accepts reordered rows and counts without mutating input', () => {
+    const f = fixture(); f.rows.reverse(); f.relationRowCounts.reverse();
+    const before = structuredClone(f);
+    expect(inspectResetReferencePlan(f).referencesValid).toBe(true);
+    expect(f).toEqual(before);
   });
 });

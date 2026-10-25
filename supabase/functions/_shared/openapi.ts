@@ -2112,6 +2112,27 @@ export const openApiDocument = {
     "/v1/accounts/{profileId}/password-reset": accountMutationPath(
       "resetAccountPassword",
     ),
+    "/v1/developer/reset/preview": {
+      get: {
+        tags: ["Developer"],
+        operationId: "getDeveloperResetPreview",
+        summary: "초기화 후보 영향 읽기 전용 조회",
+        description:
+          "active developer/session을 수집 전후 재검증합니다. 한 statement snapshot에서 테이블별 최대 10,001행의 독립 건수를 읽고 후보 그룹별 집계만 반환합니다. diagnosticComplete는 inventory 수집 완전성뿐이며 실제 삭제·재등록·Auth 변경·유지보수 전환·실행 승인·복구 증명이 아닙니다. 각 후보 그룹의 행 수는 확정 삭제 건수가 아닙니다. 실행은 항상 false입니다. 신규 migration과 API 배포 전에는 운영 사용 불가입니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["developer"],
+        responses: {
+          "200": developerResponse("읽기 전용 후보 영향", "preview", {
+            $ref: "#/components/schemas/DeveloperResetPreview",
+          }),
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "429": errorResponse,
+          "503": errorResponse,
+        },
+      },
+    },
     "/v1/developer/room-catalog": {
       get: {
         tags: ["Developer"],
@@ -11999,6 +12020,59 @@ export const openApiDocument = {
             type: "array",
             items: { $ref: "#/components/schemas/RoomTypeCatalogItem" },
           },
+        },
+      },
+      DeveloperResetCandidateImpact: {
+        type: "object",
+        additionalProperties: false,
+        required: ["relations", "observedRows", "exact"],
+        properties: {
+          relations: integer,
+          observedRows: integer,
+          exact: { type: "boolean" },
+        },
+      },
+      DeveloperResetPreview: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "readOnly",
+          "diagnosticComplete",
+          "executionEnabled",
+          "capturedAt",
+          "snapshotId",
+          "relationCount",
+          "missingRelations",
+          "unknownRelations",
+          "unsupportedRelations",
+          "truncatedRelations",
+          "candidateImpact",
+          "blockers",
+        ],
+        properties: {
+          readOnly: { type: "boolean", enum: [true] },
+          diagnosticComplete: { type: "boolean" },
+          executionEnabled: { type: "boolean", enum: [false] },
+          capturedAt: { type: "string", format: "date-time" },
+          snapshotId: fingerprint,
+          relationCount: integer,
+          missingRelations: integer,
+          unknownRelations: integer,
+          unsupportedRelations: integer,
+          truncatedRelations: integer,
+          candidateImpact: {
+            type: "object",
+            additionalProperties: false,
+            required: ["preserve", "mixed", "reseed", "clear", "review"],
+            properties: Object.fromEntries(
+              ["preserve", "mixed", "reseed", "clear", "review"].map(
+                (group) => [group, {
+                  $ref: "#/components/schemas/DeveloperResetCandidateImpact",
+                }],
+              ),
+            ),
+          },
+          blockers: { type: "array", items: { type: "string" } },
         },
       },
       DeveloperRoomCatalogSummary: {
