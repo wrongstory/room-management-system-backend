@@ -246,6 +246,27 @@ function validateTls(client, host) {
   return { socket, peerCertificateSha256: hash(certificate.raw) };
 }
 
+/** Internal shared validation for the separately authorized atomic runtime. Never print this value. */
+export function migrationPostgresConnectionInput(input) {
+  try { return validateInput(input); } catch { throw failure('POSTGRES_INPUT_INVALID'); }
+}
+export function migrationPostgresTlsIdentity(client, host) {
+  try { return validateTls(client, host); } catch { throw failure('POSTGRES_TLS_INVALID'); }
+}
+export async function readMigrationHistoryInTransaction(query, expectedVersions, alternateVersions = null) {
+  try {
+    validateCatalog(await query(catalogSql));
+    const census = rows(await query(censusSql), ['row_count', 'invalid_shape'], 1);
+    if (census.length !== 1 || census[0][1] !== '0') fail('POSTGRES_HISTORY_INVALID');
+    const count = integer(census[0][0], 0, HISTORY_CODEC_MAX_ROWS, 'POSTGRES_HISTORY_LIMIT');
+    const sizes = rows(await query(sizeSql), ['encoded_bytes'], 1);
+    if (sizes.length !== 1) fail('POSTGRES_HISTORY_INVALID');
+    integer(sizes[0][0], 0, HISTORY_CODEC_MAX_TOTAL_BYTES, 'POSTGRES_HISTORY_LIMIT');
+    const versions = alternateVersions && count === alternateVersions.length ? alternateVersions : expectedVersions;
+    return decodeHistory(await query(historySql), { versions }, count);
+  } catch { throw failure('POSTGRES_HISTORY_INVALID'); }
+}
+
 /** Only this internal pg.Client I/O path can mint an observation. No driver/factory callback input. */
 export async function observePostgresMigrationHistory(input) {
   let value;

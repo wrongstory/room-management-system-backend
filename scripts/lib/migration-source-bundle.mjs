@@ -85,7 +85,7 @@ function input(value) {
     || !/^supabase\/migration-manifest\.(?:dev|v\d+\.\d+\.\d+)\.json$/u.test(copy.manifestPath)) fail('SOURCE_BUNDLE_PATH_INVALID');
   if (![15, 17].includes(copy.parserMajor)) fail('SOURCE_BUNDLE_VERSION_UNSUPPORTED');
   copy.planPaths = list(copy.planPaths).map(sqlPath);
-  if (copy.planPaths.length < 1) fail('SOURCE_BUNDLE_INPUT_INVALID');
+  // An empty selection verifies already-applied history without minting an executable plan.
   unique(copy.planPaths, (path) => path);
   copy.wrapperApprovals = list(copy.wrapperApprovals).map((row) => {
     const item = data(row, ['path', 'approval']);
@@ -318,6 +318,34 @@ async function withinDeadline(action, deadline) {
 /** Identity/provenance only, never an execution or operational approval capability. */
 export function isOwnedMigrationSourceBundle(value) { return owned.has(value); }
 
+/** Match history bytes without requiring permission to execute an already-applied file. */
+export function bindMigrationHistorySource(value) {
+  try {
+    const input = data(value, ['bundle', 'path', 'sqlBytes']);
+    const evidence = owned.get(input.bundle);
+    if (!evidence) fail('SOURCE_BUNDLE_NOT_OWNED');
+    const file = input.bundle.files.find((row) => row.path === input.path);
+    const raw = evidence.historyBytes.get(input.path);
+    if (!file || !raw || !Buffer.isBuffer(input.sqlBytes) || !raw.equals(input.sqlBytes)) fail('SOURCE_BUNDLE_HISTORY_MISMATCH');
+    return Object.freeze({ bundleSha256: input.bundle.bundleSha256, path: file.path,
+      version: file.version, name: file.name, sqlSha256: sha256(raw), byteLength: raw.length,
+      parserEvidenceBound: file.plan !== null, planStatementsSha256: file.plan?.statementsSha256 ?? null });
+  } catch (error) { throw new Error(safeErrors.get(error) ?? 'SOURCE_BUNDLE_HISTORY_MISMATCH'); }
+}
+
+/** Internal runtime boundary: a copy of parser-owned bytes, never part of CLI output/evidence. */
+export function migrationExecutionMaterial(bundle, path) {
+  const entry = owned.get(bundle);
+  const file = entry && bundle.files.find(row => row.path === path);
+  if (!file?.plan || !entry.historyBytes.has(path)) throw new Error('SOURCE_BUNDLE_EXECUTION_PLAN_MISSING');
+  return Object.freeze({ plan: file.plan, sqlBytes: Buffer.from(entry.historyBytes.get(path)) });
+}
+export function migrationHistorySourceBytes(bundle, path) {
+  const raw = owned.get(bundle)?.historyBytes.get(path);
+  if (!raw) throw new Error('SOURCE_BUNDLE_HISTORY_MISMATCH');
+  return Buffer.from(raw);
+}
+
 /** Build from immutable local Git objects; caller claims and mutable SQL buffers are not accepted. */
 export async function createMigrationSourceBundle(value) {
   try {
@@ -339,7 +367,7 @@ async function build(options, deadline) {
     if (gitHash('blob', rawManifest) !== tree.manifest.oid || sha256(rawManifest) !== options.expectedSource.manifestSha256) fail('SOURCE_BUNDLE_MANIFEST_HASH_MISMATCH');
     const manifest = manifestBytes(rawManifest);
     if (tree.migrations.length !== manifest.totalCount) fail('SOURCE_BUNDLE_FILE_SET_MISMATCH');
-    const rows = []; const privatePlans = []; const privateBytes = []; let totalBytes = rawManifest.length; let selectedIndex = 0;
+    const rows = []; const privatePlans = []; const privateBytes = []; const historyBytes = new Map(); let totalBytes = rawManifest.length; let selectedIndex = 0;
     for (const [index, entry] of tree.migrations.entries()) {
       remaining(deadline);
       const name = /^supabase\/migrations\/(\d{14})_([a-z0-9_]+)\.sql$/u.exec(entry.path);
@@ -368,6 +396,7 @@ async function build(options, deadline) {
         remaining(deadline);
         privatePlans.push(plan); privateBytes.push(Buffer.from(raw));
       }
+      historyBytes.set(entry.path, Buffer.from(raw));
       rows.push(Object.freeze({ path: entry.path, version: name[1], order: expected.order, name: expected.name, gitBlobSha1: entry.oid,
         gitRawSha256: sha256(original), canonicalSha256: expected.sha256, gitByteLength: original.length,
         inputMode, plan }));
@@ -385,6 +414,6 @@ async function build(options, deadline) {
         files: rows.map((row) => ({ path: row.path, gitBlobSha1: row.gitBlobSha1, gitRawSha256: row.gitRawSha256,
           canonicalSha256: row.canonicalSha256, inputMode: row.inputMode,
           planSqlSha256: row.plan?.sqlSha256 ?? null, statementsSha256: row.plan?.statementsSha256 ?? null })) })) });
-    owned.set(bundle, { privatePlans, privateBytes });
+    owned.set(bundle, { privatePlans, privateBytes, historyBytes });
     return bundle;
 }

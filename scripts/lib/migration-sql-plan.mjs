@@ -140,12 +140,19 @@ function analyze(raw, parsed, parserMajor) {
       }
       const declarationSettings = new WeakSet();
       if (kind === 'CreateFunctionStmt' || kind === 'AlterFunctionStmt') {
-        // SET search_path inside a function declaration is not a top-level SET.
-        // This exception is positional and still requires source/body review.
+        // Function-local search_path and positive bounded timeout declarations are not top-level SET.
+        // The position and literal are checked; bodies still require source review.
         for (const option of node.options ?? node.actions ?? []) {
           const argument = option.DefElem?.arg;
-          if (option.DefElem?.defname === 'set' && argument?.VariableSetStmt?.name === 'search_path'
-            && argument.VariableSetStmt.kind === 'VAR_SET_VALUE') declarationSettings.add(argument);
+          const setting = argument?.VariableSetStmt;
+          if (option.DefElem?.defname !== 'set' || setting?.kind !== 'VAR_SET_VALUE') continue;
+          if (setting.name === 'search_path') declarationSettings.add(argument);
+          if (['statement_timeout', 'lock_timeout'].includes(setting.name) && !setting.is_local
+            && setting.args?.length === 1) {
+            const literal = setting.args[0].A_Const?.sval?.sval;
+            const finite = typeof literal === 'string' && /^([1-9][0-9]{0,5})(ms|s)$/u.exec(literal);
+            if (finite && Number(finite[1]) * (finite[2] === 's' ? 1000 : 1) <= 120000) declarationSettings.add(argument);
+          }
         }
       }
       astInventory(node, declarationSettings);

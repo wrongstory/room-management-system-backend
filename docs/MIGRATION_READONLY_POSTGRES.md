@@ -1,5 +1,10 @@
 # #378 실제 PostgreSQL 읽기 전용 adapter — 구현 후보
 
+> **2026-10-25 실행 연결 보완**
+
+현재 runtime 경계는 [MIGRATION_EXECUTION_RUNTIME.md](./MIGRATION_EXECUTION_RUNTIME.md)를 따른다. 기존 read-only entry는 유지하고, 입력/TLS 검증과 transaction-local history collector를 별도 atomic driver에서 재사용한다. 아래 이전 단계의 driver 경계와 과거 TLS fixture 결과를 새 writer의 실제 DB 검증으로 승격하지 않는다. 이번 연결·TLS fixture는 0회 / NOT RUN이다.
+
+
 > 최신 CI 실패 checkpoint: source0f49dde/run37261192734에서 application은2,344 PASS/1 FAIL,
 > migration은 고정 이미지 pull의 ECR rate limit으로 FAIL(TLS19·후속 DB suite NOT RUN)이었다.
 > CI Node22.23.3과 로컬22.20.0의 native IPv6 SAN 판정 차이는 공식 upstream #64032와 일치한다.

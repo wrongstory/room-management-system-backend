@@ -1,4 +1,6 @@
-# 운영 migration 유한 실행기 — #378 정책 모델 후보
+# 운영 migration 유한 실행기 — #378 정책 모델과 실행 후보
+
+> **2026-10-25 현재:** 실제 pg driver, finite supervisor, CLI, source/history mapping, owner-protected 1회 receipt 및 remote/full DB proof 확인 경로를 추가했다. 현재 계약·미검증 범위는 [실행 경로 문서](./MIGRATION_EXECUTION_RUNTIME.md)를 따른다. 아래의 “미구현/실행 불가” 표기는 기존 순수 정책 모듈과 이전 단계에 한정한 기록이다. 이번 실제 DB/TLS 연결·migration 실행은 0회 / NOT RUN이며 #378 전체 완료를 선언하지 않는다. 백업 범위는 `RESERVATION_AUTO_BACKUP.md`의 최신 예약 범위가 정본이다.
 
 > 상태: **부분 source 후보 / 운영 실행 불가**. `migration-executor-policy.mjs`는 입력 자료를 비교하고 상태 전이를 모형화하는 순수 모듈이다. 별도 [AST·원문 byte 계획](./MIGRATION_SQL_PLAN.md)은 실제 parser와 유한 worker의 source 검증만 추가한다. PostgreSQL driver, TLS 연결, 별도 DB process supervisor, 실제 출처·승인·DB 증거 수집·검증, DB 실행과 백업은 구현하거나 실행하지 않았다. 이 문서는 운영 명령 또는 승인 절차를 대체하지 않는다. #378은 완료하지 않는다.
 

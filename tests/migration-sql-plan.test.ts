@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { readFile, readdir } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { runInNewContext } from 'node:vm';
 import { Worker } from 'node:worker_threads';
@@ -37,6 +37,14 @@ async function wrapperInput(sql = "-- 승인 원문\r\nBEGIN;\r\nSELECT '가;나
 }
 
 describe('#378 real PG15/PG17 parser byte evidence', () => {
+  it.each([15, 17])('accepts only finite function-local timeout declarations for PG%i', async major => {
+    const sql = "CREATE FUNCTION public.f() RETURNS void LANGUAGE plpgsql SET search_path='' SET lock_timeout='2s' SET statement_timeout='7s' AS $$BEGIN RETURN; END;$$;";
+    expect((await api.createMigrationSqlPlan(input(sql, major))).statements).toHaveLength(1);
+    for (const setting of ["statement_timeout='0'", "statement_timeout='0ms'", "statement_timeout='-1s'", "statement_timeout='121s'", "statement_timeout=DEFAULT", 'statement_timeout FROM CURRENT', "idle_in_transaction_session_timeout='1s'"]) {
+      await expect(api.createMigrationSqlPlan(input(`CREATE FUNCTION public.f() RETURNS void LANGUAGE plpgsql SET ${setting} AS $$BEGIN RETURN; END;$$;`, major))).rejects.toThrow();
+    }
+    await expect(api.createMigrationSqlPlan(input("SET statement_timeout='7s'; SELECT 1;", major))).rejects.toThrow('SQL_PLAN_STATEMENT_DISALLOWED');
+  });
   it.each([15, 17])('uses an actual pinned parser in a bounded private worker for PG%i', async (major) => {
     const value = input("-- 한글\r\nSELECT '가;나'; /* 중첩 ; /* ; */ */\r\nSELECT $$끝;문장$$", major);
     const plan = await api.createMigrationSqlPlan(value);

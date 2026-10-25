@@ -1,5 +1,10 @@
 # #378 PostgreSQL AST·원문 byte 계획 후보
 
+> **2026-10-25 실행 연결 보완**
+
+현재 runtime 경계는 [MIGRATION_EXECUTION_RUNTIME.md](./MIGRATION_EXECUTION_RUNTIME.md)를 따른다. 함수 선언 위치의 양수 literal `lock_timeout`/`statement_timeout`(ms/s, 최대 120초)을 source review 대상으로 허용한다. top-level SET, 0/음수/default/from-current는 계속 거부한다. parser 증거 자체가 운영 실행 승인은 아니다.
+
+
 > 상태: **source-only / 실행 불가**. 실제 PostgreSQL parser와 유한 worker 격리는 구현했으나 DB driver, TLS, 운영 연결, 실제 승인·Git/manifest/history 검증, migration 실행과 백업은 구현·실행하지 않았다. 모든 결과는 `executionAllowed=false`다. 이 단계로 #378 전체를 완료하거나 배포를 허용하지 않는다. 기존 [정책 모델](./PRODUCTION_MIGRATION_EXECUTOR.md)의 운영 gate를 대체하지 않는다.
 
 ## 변경 범위와 근거

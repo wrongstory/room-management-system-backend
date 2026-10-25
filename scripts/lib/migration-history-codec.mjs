@@ -1,6 +1,6 @@
 /** #378 bounded decoded history/source models. No DB, wire codec or SQL accessor. */
 import { createHash } from 'node:crypto';
-import { isOwnedMigrationSourceBundle } from './migration-source-bundle.mjs';
+import { bindMigrationHistorySource, isOwnedMigrationSourceBundle } from './migration-source-bundle.mjs';
 
 export const HISTORY_CODEC_CLI_VERSION = '2.115.0';
 export const HISTORY_CODEC_CLI_COMMIT = '18ae43a34a2257458197b62f74e2a97e2b5cf7f9';
@@ -110,7 +110,8 @@ function logicalStatements(text) {
       position++;
       let closed = false;
       while (position < text.length) {
-        if (text[position] === '\\') fail('HISTORY_CODEC_SCANNER_UNSUPPORTED');
+        // Ordinary quoted literals keep backslashes verbatim. The pinned CLI
+        // QuoteState does the same; E-string prefixes remain rejected above.
         if (text[position] === quote) {
           if (text[position + 1] === quote) { position += 2; continue; }
           position++; closed = true; break;
@@ -195,11 +196,13 @@ function sourceBinding(value, raw, expectedVersion, expectedName) {
   const binding = data(value, ['bundle', 'path']);
   if (!isOwnedMigrationSourceBundle(binding.bundle)) fail('HISTORY_CODEC_SOURCE_NOT_OWNED');
   if (typeof binding.path !== 'string') fail('HISTORY_CODEC_SOURCE_MISMATCH');
-  const file = binding.bundle.files.find((candidate) => candidate.path === binding.path);
-  if (!file?.plan || file.version !== expectedVersion || file.name !== expectedName
-    || file.plan.sqlSha256 !== sha256(raw) || file.plan.byteLength !== raw.length) fail('HISTORY_CODEC_SOURCE_MISMATCH');
+  let evidence;
+  try { evidence = bindMigrationHistorySource({ ...binding, sqlBytes: raw }); }
+  catch { fail('HISTORY_CODEC_SOURCE_MISMATCH'); }
+  if (evidence.version !== expectedVersion || evidence.name !== expectedName) fail('HISTORY_CODEC_SOURCE_MISMATCH');
   return Object.freeze({ bundleSha256: binding.bundle.bundleSha256, path: binding.path,
-    planSqlSha256: file.plan.sqlSha256, planStatementsSha256: file.plan.statementsSha256 });
+    planSqlSha256: evidence.sqlSha256, planStatementsSha256: evidence.planStatementsSha256,
+    parserEvidenceBound: evidence.parserEvidenceBound });
 }
 function snapshot(rows, provenance) {
   const frozen = Object.freeze(rows);
@@ -216,6 +219,25 @@ function snapshot(rows, provenance) {
 /** Identity only; this handle is never a DB proof or execution capability. */
 export function isOwnedMigrationHistoryModel(value) { return models.has(value); }
 
+/** Internal driver material; do not serialize into logs, reports or public API responses. */
+export function migrationHistoryWriteMaterial(model) {
+  const row = models.get(model);
+  if (!row || !model.sourceEvidenceBound || !model.parserEvidenceBound) throw new Error('HISTORY_CODEC_EXECUTION_MODEL_REQUIRED');
+  return { version: row.version, name: row.name, statements: [...row.statements.values] };
+}
+
+/** Strict policy projection. Legacy NULL/unknown history cannot be silently repaired. */
+export function migrationHistoryPolicyRows(snapshot) {
+  const entry = snapshots.get(snapshot);
+  if (!entry) throw new Error('HISTORY_CODEC_SNAPSHOT_NOT_OWNED');
+  return Object.freeze(entry.rows.map(row => {
+    if (!row.name || !row.statements || row.statements.values.some(value => value === null)
+      || row.statements.dimensions.length > 0 && row.statements.dimensions[0].lowerBound !== 1) throw new Error('HISTORY_CODEC_LEGACY_HISTORY_UNSUPPORTED');
+    return Object.freeze({ version: row.version, name: row.name,
+      statementsSha256: digest('cli-history-logical-statements-v1', row.statements.values) });
+  }));
+}
+
 /** Raw source input -> private ordered CLI logical tokens, including wrappers. */
 export function createMigrationHistoryModel(input) {
   return guarded(() => {
@@ -229,7 +251,8 @@ export function createMigrationHistoryModel(input) {
     const result = Object.freeze({ ...flags, mode: 'CLI_HISTORY_SOURCE_MODEL',
       provenance: binding ? 'OWNED_LOCAL_SOURCE_BOUND_MODEL' : 'UNTRUSTED_INPUT_MODEL',
       cliVersion: HISTORY_CODEC_CLI_VERSION, cliSourceCommit: HISTORY_CODEC_CLI_COMMIT,
-      parserEvidenceBound: binding !== null, sourceReviewRequired: true, version: expectedVersion, name: expectedName,
+      parserEvidenceBound: binding?.parserEvidenceBound ?? false, sourceEvidenceBound: binding !== null,
+      sourceReviewRequired: true, version: expectedVersion, name: expectedName,
       sqlSha256: sha256(raw), byteLength: raw.length, logicalStatementCount: statements.length,
       historyStatementsSha256: digest('cli-history-logical-statements-v1', statements),
       rowSha256: digest('decoded-pg-history-row-v1', expectedRow), sourceBinding: binding });
@@ -254,16 +277,32 @@ export function createDecodedMigrationHistorySnapshot(input) {
 /** Build expected rows from owned models without exposing their statement strings. */
 export function createExpectedMigrationHistorySnapshot(input) {
   return guarded(() => {
-    const value = data(input, ['models']);
+    const mapped = Object.hasOwn(input, 'mappings');
+    const value = data(input, mapped ? ['models', 'mappings'] : ['models']);
     const handles = list(value.models, HISTORY_CODEC_MAX_ROWS);
+    const mappings = mapped ? list(value.mappings, HISTORY_CODEC_MAX_ROWS) : [];
+    const mappingBySource = new Map();
+    for (const item of mappings) {
+      const mapping = data(item, ['sourceVersion', 'historyVersion', 'name', 'sqlSha256', 'statementsSha256']);
+      version(mapping.sourceVersion); version(mapping.historyVersion);
+      if (mapping.sourceVersion === mapping.historyVersion || mappingBySource.has(mapping.sourceVersion)) fail('HISTORY_CODEC_SOURCE_MAPPING_INVALID');
+      mappingBySource.set(mapping.sourceVersion, mapping);
+    }
+    let used = 0;
     const rows = handles.map((handle) => {
       if (!models.has(handle)) fail('HISTORY_CODEC_MODEL_NOT_OWNED');
-      return models.get(handle);
+      const row = models.get(handle); const mapping = mappingBySource.get(row.version);
+      if (!mapping) return row;
+      if (!handle.sourceEvidenceBound || mapping.name !== handle.name || mapping.sqlSha256 !== handle.sqlSha256
+        || mapping.statementsSha256 !== handle.historyStatementsSha256) fail('HISTORY_CODEC_SOURCE_MAPPING_INVALID');
+      used += 1;
+      return Object.freeze({ ...row, version: mapping.historyVersion });
     });
+    if (used !== mappings.length) fail('HISTORY_CODEC_SOURCE_MAPPING_INVALID');
     for (let index = 1; index < rows.length; index++) if (rows[index].version <= rows[index - 1].version) fail('HISTORY_CODEC_VERSION_ORDER_INVALID');
     const budget = { bytes: 0 };
     for (const item of rows) textArray(item.statements, budget);
-    return snapshot(rows, handles.every((handle) => handle.parserEvidenceBound) && handles.length > 0
+    return snapshot(rows, handles.every((handle) => handle.sourceEvidenceBound) && handles.length > 0
       ? 'OWNED_LOCAL_SOURCE_BOUND_MODEL' : 'UNTRUSTED_INPUT_MODEL');
   });
 }

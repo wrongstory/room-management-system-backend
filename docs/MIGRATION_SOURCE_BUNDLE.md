@@ -1,5 +1,10 @@
 # #378 고정된 로컬 Git 소스 묶음 검증 후보
 
+> **2026-10-25 실행 연결 보완**
+
+현재 runtime 경계는 [MIGRATION_EXECUTION_RUNTIME.md](./MIGRATION_EXECUTION_RUNTIME.md)를 따른다. 이미 적용된 source의 history 결합은 `planPaths: []`도 허용하며, 역사적 extension/role SQL에 실행 AST 허용을 부여하지 않는다. 내부 trusted runtime에만 defensive SQL byte copy를 제공하는 `migrationExecutionMaterial`/`migrationHistorySourceBytes`가 추가됐다. 아래 이전 단계의 “SQL accessor 없음”은 공개 evidence/CLI 출력 계약으로 유지하며 내부 실행 모듈 API에는 해당하지 않는다. 이 API 추가는 운영 승인이나 실행 증거가 아니다.
+
+
 > 상태: **source-only / 실행 불가 / 보완 후 독립 software QA PASS**. 이 문서의 구현은 Git 원문·manifest·선택한 실제 parser 계획을 결합한다. 운영 승인, 원격 Git 정본·보호된 병합, DB history/full state, DB driver/TLS, migration 실행, 백업·복원·배포는 검증하지 않는다. 결과는 항상 `executionAllowed=false`, `operationalApproval=false`, `DBHistoryVerified=false`, `fullStateVerified=false`다. #378 전체 완료 또는 배포 허용 근거가 아니다. 아래 작성자 검토 대기 표현은 당시 checkpoint다.
 
 ## 범위와 유지한 foundation

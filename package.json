@@ -47,7 +47,9 @@
     "openapi:frontend:check": "tsx scripts/check-frontend-openapi-contract.mjs",
     "openapi:template-client:check": "tsx scripts/check-cleaning-template-client.mjs",
     "db:test:template-contract": "tsx scripts/test-cleaning-template-contract.mjs",
-    "db:test:migration-readonly-tls": "node scripts/test-migration-readonly-postgres-tls.mjs"
+    "db:test:migration-readonly-tls": "node scripts/test-migration-readonly-postgres-tls.mjs",
+    "migration:plan": "node scripts/execute-production-migrations.mjs plan",
+    "migration:apply": "node scripts/execute-production-migrations.mjs apply"
   },
   "dependencies": {
     "@fastify/cors": "11.3.0",

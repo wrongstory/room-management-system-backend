@@ -19,6 +19,8 @@ type Api = { HISTORY_CODEC_MAX_SQL_BYTES: number; HISTORY_CODEC_MAX_ROWS: number
   createMigrationHistoryModel(input: unknown): Model; isOwnedMigrationHistoryModel(input: unknown): boolean;
   createDecodedMigrationHistorySnapshot(input: unknown): Snapshot;
   createExpectedMigrationHistorySnapshot(input: unknown): Snapshot;
+  migrationHistoryWriteMaterial(input: unknown): { version: string; name: string; statements: string[] };
+  migrationHistoryPolicyRows(input: unknown): { version: string; name: string; statementsSha256: string }[];
   compareMigrationHistorySnapshots(input: unknown): { matches: boolean; executionAllowed: false; DBHistoryVerified: false; cliParityVerified: false } };
 const api = await import(new URL('../scripts/lib/migration-history-codec.mjs', import.meta.url).href) as Api;
 const bundleApi = await import(new URL('../scripts/lib/migration-source-bundle.mjs', import.meta.url).href) as {
@@ -76,6 +78,12 @@ describe('#378 bounded independent CLI logical statement source model', () => {
     const crlf = api.createMigrationHistoryModel(modelInput('-- 가\r\nSELECT $$😀;$$;'));
     expect(lf.historyStatementsSha256).not.toBe(crlf.historyStatementsSha256);
     expect(lf.sqlSha256).not.toBe(crlf.sqlSha256);
+  });
+  it('preserves ordinary backslashes with the pinned CLI quote boundary', () => {
+    tokens("SELECT '(^WWW\\.|HTTP)'; SELECT 'a\\b';", ["SELECT '(^WWW\\.|HTTP)'", "SELECT 'a\\b'"]);
+    expect(() => api.createMigrationHistoryModel(modelInput("SELECT E'a\\b';"))).toThrow('HISTORY_CODEC_SCANNER_UNSUPPORTED');
+    const raw = readFileSync(new URL('../supabase/migrations/20260910114525_payroll_payment_results.sql', import.meta.url));
+    expect(api.createMigrationHistoryModel({ version: '20260910114525', name: 'payroll_payment_results', sqlBytes: raw, sourceBinding: null }).logicalStatementCount).toBeGreaterThan(1);
   });
   it.each(["SELECT 'unfinished", 'SELECT "unfinished', 'SELECT $$unfinished', '/* missing', 'SELECT (1;', '/* x /* y */'])('fails closed on unfinished scanner input %j', (sql) => {
     expect(() => api.createMigrationHistoryModel(modelInput(sql))).toThrow('HISTORY_CODEC_SCANNER_UNTERMINATED');
@@ -248,19 +256,19 @@ describe('#378 ownership, safe public metadata and hostile objects', () => {
     expect((failure as Error).message).toBe('HISTORY_CODEC_INPUT_INVALID');
     expect((failure as Error).cause).toBeUndefined();
   });
-  it('has no DB/process/credential/wire/SQL accessor or external source import', () => {
+  it('has no DB/process/credential/wire import and exposes only the reviewed internal driver boundary', () => {
     const source = readFileSync(new URL('../scripts/lib/migration-history-codec.mjs', import.meta.url), 'utf8');
     expect(source).not.toMatch(/node:(?:child_process|fs|net|tls)|process\.env|postgres|legacySplitSql|class \w+State/u);
     expect(Object.keys(api).sort()).toEqual(['HISTORY_CODEC_CLI_COMMIT', 'HISTORY_CODEC_CLI_VERSION', 'HISTORY_CODEC_MAX_ROWS',
       'HISTORY_CODEC_MAX_SQL_BYTES', 'HISTORY_CODEC_MAX_STATEMENTS', 'HISTORY_CODEC_MAX_TOTAL_BYTES',
       'compareMigrationHistorySnapshots', 'createDecodedMigrationHistorySnapshot', 'createExpectedMigrationHistorySnapshot',
-      'createMigrationHistoryModel', 'isOwnedMigrationHistoryModel'].sort());
+      'createMigrationHistoryModel', 'isOwnedMigrationHistoryModel', 'migrationHistoryWriteMaterial', 'migrationHistoryPolicyRows'].sort());
   });
 });
 
 // Synthetic immutable Git objects + actual owned bundle and actual pinned parser.
 // This is NOT an actual approved-ref positive, CLI parity, PostgreSQL or DB test.
-async function ownedBundle(major: number, sql: string) {
+async function ownedBundle(major: number, sql: string, planned = true) {
   const repositoryPath = resolve(dirname(fileURLToPath(import.meta.url)), '..');
   const path = `supabase/migrations/${migrationVersion}_first.sql`;
   const manifestPath = 'supabase/migration-manifest.dev.json';
@@ -297,10 +305,34 @@ async function ownedBundle(major: number, sql: string) {
     return child;
   }) as unknown as typeof spawn);
   const bundle = await bundleApi.createMigrationSourceBundle({ repositoryPath, expectedSource: modelSource, manifestPath,
-    parserMajor: major, planPaths: [path], wrapperApprovals: [], lfCopyApprovals: [], limits: { totalMs: 120000, gitProcessMs: 1000 } });
+    parserMajor: major, planPaths: planned ? [path] : [], wrapperApprovals: [], lfCopyApprovals: [], limits: { totalMs: 120000, gitProcessMs: 1000 } });
   return { bundle, path };
 }
 describe('#378 actual owned plan link within synthetic Git source fixtures', () => {
+  it.each(['CREATE EXTENSION btree_gist;', 'ALTER ROLE postgres SET search_path TO public;'])('binds applied history raw bytes without permitting execution: %s', async (sql) => {
+    const binding = await ownedBundle(17, sql, false);
+    const model = api.createMigrationHistoryModel({ ...modelInput(sql), sourceBinding: binding });
+    expect(model).toMatchObject({ provenance: 'OWNED_LOCAL_SOURCE_BOUND_MODEL', parserEvidenceBound: false, sourceEvidenceBound: true, executionAllowed: false });
+    expect(api.createExpectedMigrationHistorySnapshot({ models: [model] }).provenance).toBe('OWNED_LOCAL_SOURCE_BOUND_MODEL');
+    expect(matches(api.createExpectedMigrationHistorySnapshot({ models: [model] }), observed(row([sql.slice(0, -1)])))).toBe(true);
+    expect(() => api.createMigrationHistoryModel({ ...modelInput(`${sql} SELECT 1;`), sourceBinding: binding })).toThrow('HISTORY_CODEC_SOURCE_MISMATCH');
+    expect(() => api.migrationHistoryWriteMaterial(model)).toThrow('HISTORY_CODEC_EXECUTION_MODEL_REQUIRED');
+  });
+  it('exposes a defensive write copy only for parser-owned source-bound history', async () => {
+    const binding = await ownedBundle(17, 'SELECT 1;');
+    const model = api.createMigrationHistoryModel({ ...modelInput(), sourceBinding: binding });
+    const material = api.migrationHistoryWriteMaterial(model); material.statements[0] = 'UNTRUSTED REPLACEMENT';
+    expect(api.migrationHistoryWriteMaterial(model).statements).toEqual(['SELECT 1']);
+    expect(() => api.migrationHistoryWriteMaterial(clone(model))).toThrow();
+    expect(() => api.migrationHistoryWriteMaterial(api.createMigrationHistoryModel(modelInput()))).toThrow();
+    expect(JSON.stringify(model)).not.toContain('SELECT 1');
+  });
+  it('keeps legacy NULL history unrepairable in the execution projection', () => {
+    expect(() => api.migrationHistoryPolicyRows(observed(row(null)))).toThrow('HISTORY_CODEC_LEGACY_HISTORY_UNSUPPORTED');
+    expect(() => api.migrationHistoryPolicyRows(observed(row(['SELECT 1'], null)))).toThrow('HISTORY_CODEC_LEGACY_HISTORY_UNSUPPORTED');
+    expect(() => api.migrationHistoryPolicyRows(clone(observed()))).toThrow('HISTORY_CODEC_SNAPSHOT_NOT_OWNED');
+    expect(api.migrationHistoryPolicyRows(expected())).toMatchObject([{ version: migrationVersion, name: 'first' }]);
+  });
   it.each([15, 17])('uses actual owned bundle/parser bytes for PG%i without history execution claims', async (major) => {
     const sql = "-- 한글\r\nSELECT '가;😀';\r\n";
     const binding = await ownedBundle(major, sql);

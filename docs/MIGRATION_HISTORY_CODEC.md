@@ -1,5 +1,10 @@
 # #378 strict decoded history / bounded CLI logical token source 단위
 
+> **2026-10-25 실행 연결 보완**
+
+현재 runtime 경계는 [MIGRATION_EXECUTION_RUNTIME.md](./MIGRATION_EXECUTION_RUNTIME.md)를 따른다. 전체 역사적 Git source는 AST 실행 허용 없이 결합할 수 있다. 정확한 owner-source/history hash를 확인한 명시적 `mappings`는 예상 snapshot의 version만 대응시키며 실제 DB 이력을 수정하지 않는다. 내부 driver에는 defensive `migrationHistoryWriteMaterial`을 제공하되 parser-bound pending만 허용한다. 공개 digest 결과에는 SQL 문자열을 넣지 않는다. pinned CLI의 일반 quoted string 경계에 따라 역슬래시는 보존하며 E-string 등의 미지원 syntax는 계속 거부한다. 아래 이전 단계의 “write accessor 없음”은 현재 내부 runtime API에 해당하지 않는다.
+
+
 > 상태: **source-only / 실행 불가**. 운영 driver, PostgreSQL history read/write, 실제 CLI parity, 실제 approved-ref positive, DB/TLS/full-state/백업/배포는 구현·실행하지 않았다. 모든 공개 결과는 `executionAllowed=false`, `operationalApproval=false`, `DBHistoryVerified=false`, `fullStateVerified=false`, `cliParityVerified=false`다. 모델 일치는 실제 migration 적용·이력 원자성·owner 승인 증거가 아니다. #378 전체 완료 또는 병합·운영 승격을 선언하지 않는다.
 
 ## 범위·독립 구현·근거
