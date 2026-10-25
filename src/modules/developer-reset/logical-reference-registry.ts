@@ -51,6 +51,12 @@ add('private.photo_drive_identities', ['room_number'], 'HISTORICAL_SNAPSHOT', 'r
 add('private.photo_drive_folder_identities', ['scope_room_number'], 'HISTORICAL_SNAPSHOT', 'folder-room', photos);
 add('private.photo_storage_names', ['room_number'], 'HISTORICAL_SNAPSHOT', 'room-number', naming);
 add('private.photo_storage_names', ['file_name'], 'EXTERNAL_LOCATOR', 'file-name', naming);
+const receiptStore = '20261025051231_developer_reset_receipt_store.sql';
+// Append-only handover provenance deliberately has no current Auth/profile FK.
+// Preserve the original journal; never hydrate old actors or execute its events.
+add('private.developer_reset_receipt_heads', ['actor_profile_id'], 'HISTORICAL_SNAPSHOT', 'uuid', receiptStore);
+add('private.developer_reset_receipt_heads', ['binding', 'header'], 'HISTORICAL_SNAPSHOT', 'json-object', receiptStore);
+add('private.developer_reset_receipt_events', ['entry'], 'HISTORICAL_SNAPSHOT', 'json-object', receiptStore);
 
 export const RESET_LOGICAL_REFERENCE_RULES: readonly LogicalReferenceRule[] = Object.freeze(
   rules.sort((a, b) => `${a.relation}:${a.path}` < `${b.relation}:${b.path}` ? -1 : 1),

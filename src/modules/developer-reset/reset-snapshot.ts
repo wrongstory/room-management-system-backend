@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { requestHash } from '../../lib/command.js';
-import { inspectResetReferencePlan, resetReferencePlanSchema } from './reset-reference-plan.js';
+import { inspectResetReferencePlan, inspectResetReferenceCapture, resetReferencePlanSchema, resetReferenceCaptureSchema } from './reset-reference-plan.js';
 
 const hash = z.string().regex(/^[a-f0-9]{64}$/);
 const relation = z.string().regex(/^(public|private|auth)\.[a-z][a-z0-9_]*$/).max(128);
@@ -26,15 +26,24 @@ const schema = z.object({
     relation, key, constraint, snapshotId: hash, sourceNulls: z.array(z.boolean()).min(1).max(64),
   }).strict()).max(100000),
 }).strict();
+const captureSchema = schema.extend({ plan: resetReferenceCaptureSchema }).strict();
 
 /** Validates a collector's coherent bounded proposal. Never connects or authorizes reset.
  * This is not a trusted collector: labels/hashes supplied by an API client prove nothing.
  * SQL equality/collation and target row resolution must be performed in the collector DB.
  */
 export function inspectResetSnapshot(input: unknown) {
+  return inspect(input, false);
+}
+/** FK/NULL/content structure only; pending dispositions stay undecided. */
+export function inspectResetSnapshotCapture(input: unknown) {
+  const { snapshotValid, ...result } = inspect(input, true);
+  return { ...result, structureValid: snapshotValid };
+}
+function inspect(input: unknown, capture: boolean) {
   const blocked = (blockers: string[]) => ({ snapshotValid: false, executionEnabled: false,
     blockers, fingerprint: null, counts: null });
-  const parsed = schema.safeParse(input);
+  const parsed = (capture ? captureSchema : schema).safeParse(input);
   if (!parsed.success) return blocked(['INVALID_SNAPSHOT_INPUT']);
   const p = parsed.data;
   const blockers = new Set<string>();
@@ -44,7 +53,7 @@ export function inspectResetSnapshot(input: unknown) {
       p.plan.catalogFingerprint !== p.expected.catalogFingerprint || p.plan.snapshotCatalogFingerprint !== p.expected.catalogFingerprint) {
     blockers.add('SNAPSHOT_BINDING_MISMATCH');
   }
-  const graph = inspectResetReferencePlan(p.plan);
+  const graph = capture ? inspectResetReferenceCapture(p.plan) : inspectResetReferencePlan(p.plan);
   for (const code of graph.blockers) blockers.add(code);
   const identity = (table: string, rowKey: string) => `${table}:${rowKey}`;
   const rowMap = new Map(p.plan.rows.map((row) => [identity(row.relation, row.key), row]));

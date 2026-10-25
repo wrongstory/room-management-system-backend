@@ -19,6 +19,13 @@ export const resetReferencePlanSchema = z.object({
     references: z.array(z.object({ constraint: identifier, targetKey: key.nullable() }).strict()).max(200),
   }).strict()).max(10000),
 }).strict();
+// Content review can validate actual FK edges before a disposition is decided.
+// It does not turn pending candidates into keep/remove choices.
+export const resetReferenceCaptureSchema = resetReferencePlanSchema.extend({
+  rows: z.array(resetReferencePlanSchema.shape.rows.element.extend({
+    disposition: z.enum(['keep', 'remove', 'roomBaseline', 'templateSource', 'unresolved']),
+  }).strict()).max(10000),
+}).strict();
 
 /** Checks supplied row edges only. Completeness must be established by a trusted collector.
  * Reseeded rows must be separately materialized/remapped before this check; no inferred rewrite.
@@ -26,11 +33,19 @@ export const resetReferencePlanSchema = z.object({
  */
 export function inspectResetReferencePlan(input: unknown) {
   const parsed = resetReferencePlanSchema.safeParse(input);
+  return inspect(parsed.success ? parsed.data : null);
+}
+/** Technical FK coverage only, never a selected removal/preservation plan. */
+export function inspectResetReferenceCapture(input: unknown) {
+  const parsed = resetReferenceCaptureSchema.safeParse(input);
+  const { referencesValid, ...result } = inspect(parsed.success ? parsed.data : null);
+  return { ...result, structureValid: referencesValid };
+}
+function inspect(p: z.infer<typeof resetReferenceCaptureSchema> | null) {
   const blocked = (blockers: string[]) => ({
     referencesValid: false, executionEnabled: false, blockers, counts: null,
   });
-  if (!parsed.success) return blocked(['INVALID_INPUT']);
-  const p = parsed.data;
+  if (!p) return blocked(['INVALID_INPUT']);
   const blockers = new Set<string>();
   if (!p.complete) blockers.add('INCOMPLETE_SNAPSHOT');
   if (p.catalogFingerprint !== p.snapshotCatalogFingerprint) blockers.add('CATALOG_MISMATCH');
