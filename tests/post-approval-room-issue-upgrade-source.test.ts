@@ -219,6 +219,14 @@ describe('#336 isolated110->111 source/preflight only (no DB PASS claim)', () =>
     record.sha256 = createHash('sha256').update(tail.raw).digest('hex');
     expect(() => validatePostApprovalUpgradeSource(changedManifest, changed)).toThrow('Only the source-reviewed read-only row-impact127 tail');
   });
+  it('pins operation gates128 without accepting a rehashed replacement', () => {
+    const changed = clone(entries), changedManifest = clone(manifest);
+    const tail = changed[127], record = changedManifest.migrations[127];
+    if (!tail || !record) throw new Error('EXPECTED128_TAIL');
+    tail.raw = Buffer.from('select 1;\n');
+    record.sha256 = createHash('sha256').update(tail.raw).digest('hex');
+    expect(() => validatePostApprovalUpgradeSource(changedManifest, changed)).toThrow('Only the source-reviewed operation-gates128 tail');
+  });
   it('pins photo batch126 without accepting a rehashed replacement', () => {
     const changed = clone(entries), changedManifest = clone(manifest);
     const tail = changed[125], record = changedManifest.migrations[125];

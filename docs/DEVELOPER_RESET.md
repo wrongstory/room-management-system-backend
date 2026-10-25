@@ -1,5 +1,14 @@
 # #396 운영 인계 전 초기화
 
+## 2026-10-25 source 128: 운영 잠금·재인증·admission
+
+[운영 안전 장치 계약](DEVELOPER_OPERATION_GATES.md)에 control marker, 최근 비밀번호
+재인증과 임시 세션 폐기 확인, nonce/CAS에 묶인 전환, 유지보수 admission을 설명한다.
+marker와 TTL seed는 없으며 미설정은 UNKNOWN이다. 4개 신규 private 보안 관계는
+보존 후보에 명시하여 총 189개 관계를 진단한다. 신규 gateEvidence는 기존 일관 snapshot에
+합류하며 실제 실행 권한을 주지 않는다. 전 경로 admission hook과 coverage 검증은 후속
+독립 개발이다. 실제 DB·Auth·운영 활성화·삭제는 NOT RUN이다.
+
 ## 2026-10-25 v1 준비: 실행 없는 공통 진단 확장
 
 PR402의 관계별 독립 행 수 검사를 보존하고 dev `96ec94b`와 통합한 소스를 기준으로

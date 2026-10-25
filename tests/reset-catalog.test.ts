@@ -72,7 +72,7 @@ describe('local-only reset catalog diagnostic', () => {
     const result = readLocalResetCatalog(deps);
     expect(result).toMatchObject({
       executionEnabled: false, classificationComplete: false, relationCount: 2,
-      unclassifiedRelationCount: 0, missingRelationCount: 183, crossSchemaForeignKeyCount: 1,
+      unclassifiedRelationCount: 0, missingRelationCount: 187, crossSchemaForeignKeyCount: 1,
       reviewRequirements: { relationCount: 137, classificationComplete: false, executionEnabled: false },
     });
     expect(result.executionBlockers).toEqual(expect.arrayContaining([

@@ -66,3 +66,6 @@ D01 보호 범위/방식, template 상태 선택, 사진 HOLD, 실행 승인과 
 
 개발 검증: `ci:quality` 160파일/4,430 tests PASS, focused snapshot79 tests와 typecheck/lint PASS.
 독립 QA에서 전체 builder/경계/테스트를 검토하고 별도79 tests PASS, 주요 차단0을 확인했다.
+
+최신 dev943f220 통합 후 `ci:quality` 163파일/4,478 tests와 manifest128/기존 generator 검사 PASS.
+Edge·Python·DB source는 해당 dev와 동일하며 이 단위에서 별도 실행하지 않았다. 전체 DB NOT RUN.

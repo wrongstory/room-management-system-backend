@@ -27,11 +27,11 @@ describe('historical upgrade notification catalog compatibility', () => {
       expect(() => assertUpgradeNotificationCatalog(old, after, 111)).toThrow();
     }
     expect(() => assertUpgradeNotificationCatalog(installed(), installed(), 111)).toThrow();
-    for (const count of [94, 128, 111.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+    for (const count of [94, 129, 111.5, Number.NaN, Number.POSITIVE_INFINITY]) {
       expect(() => assertUpgradeNotificationCatalog(old, installed(), count)).toThrow();
     }
   });
-  it.each([113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127])('preserves the exact catalog and digest contract at reviewed migration %i', count => {
+  it.each([113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128])('preserves the exact catalog and digest contract at reviewed migration %i', count => {
     expect(() => assertUpgradeNotificationCatalog(old, installed(), count)).not.toThrow();
     for (const key of Object.keys(addition)) {
       const after = installed();
@@ -61,7 +61,7 @@ describe('historical upgrade notification catalog compatibility', () => {
     expect(runner.indexOf('validatePostApprovalUpgradeSource(manifest,')).toBeGreaterThan(0);
     expect(runner.indexOf('validatePostApprovalUpgradeSource(manifest,')).toBeLessThan(runner.indexOf('resetStarted = true'));
   });
-  it.each(Array.from({ length: 16 }, (_, index) => 112 + index))('keeps exactly the same111 catalog exception at audited head %i', count => {
+  it.each(Array.from({ length: 17 }, (_, index) => 112 + index))('keeps exactly the same111 catalog exception at audited head %i', count => {
     expect(() => assertUpgradeNotificationCatalog(old, installed(), count)).not.toThrow();
     for (const after of [old, [...installed(), { event_family: 'unknown' }],
       [addition], [...installed(), addition], [{ ...old[0], preserved: { value: 2 } }, addition],
