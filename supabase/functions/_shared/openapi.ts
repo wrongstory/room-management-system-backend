@@ -2190,7 +2190,7 @@ export const openApiDocument = {
         operationId: "getDeveloperResetPreview",
         summary: "초기화 후보 영향 읽기 전용 조회",
         description:
-          "active developer/session을 수집 전후 재검증합니다. 한 statement snapshot에서 테이블별 최대 10,001행의 독립 건수를 읽고 후보 그룹별 집계만 반환합니다. diagnosticComplete는 inventory 수집 완전성뿐이며 실제 삭제·재등록·Auth 변경·유지보수 전환·실행 승인·복구 증명이 아닙니다. 각 후보 그룹의 행 수는 확정 삭제 건수가 아닙니다. 실행은 항상 false입니다. 신규 migration과 API 배포 전에는 운영 사용 불가입니다.",
+          "active developer/session을 수집 전후 재검증합니다. 한 statement snapshot에서 테이블별 최대 10,001행의 독립 건수와 역할별 행 후보·실제 FK 참조 영향을 집계합니다. diagnosticComplete는 inventory 수집 완전성뿐이며 rowImpact는 별도 수집 완전성/지원 FK 결과를 표시합니다. 동일 건수의 행 교체·내용 drift·논리 JSON 참조·삭제 순서·실행 승인·복구는 증명하지 않습니다. 후보 건수는 확정 삭제 건수가 아니며 실행은 항상 false입니다. 신규 migration과 API 배포 전에는 운영 사용 불가입니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["developer"],
         responses: {
@@ -12128,6 +12128,77 @@ export const openApiDocument = {
           exact: { type: "boolean" },
         },
       },
+      DeveloperResetRowImpact: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "available",
+          "diagnosticComplete",
+          "referencesValid",
+          "candidateCounts",
+          "authAccounts",
+          "preservedToRemoved",
+          "missingTargets",
+          "partialNulls",
+          "unresolvedTargets",
+          "unsupportedForeignKeys",
+          "blockers",
+        ],
+        properties: {
+          available: { type: "boolean" },
+          diagnosticComplete: { type: "boolean" },
+          referencesValid: { type: "boolean" },
+          candidateCounts: {
+            type: ["object", "null"],
+            additionalProperties: false,
+            required: [
+              "preserve",
+              "roomBaseline",
+              "resetCandidate",
+              "templateSource",
+              "photoHold",
+              "unresolved",
+            ],
+            properties: Object.fromEntries(
+              [
+                "preserve",
+                "roomBaseline",
+                "resetCandidate",
+                "templateSource",
+                "photoHold",
+                "unresolved",
+              ].map((label) => [label, integer]),
+            ),
+          },
+          authAccounts: {
+            type: ["object", "null"],
+            additionalProperties: false,
+            required: [
+              "observedRows",
+              "preserve",
+              "resetCandidate",
+              "unresolved",
+            ],
+            properties: Object.fromEntries(
+              ["observedRows", "preserve", "resetCandidate", "unresolved"].map(
+                (label) => [label, integer],
+              ),
+            ),
+          },
+          ...Object.fromEntries(
+            [
+              "preservedToRemoved",
+              "missingTargets",
+              "partialNulls",
+              "unresolvedTargets",
+              "unsupportedForeignKeys",
+            ].map(
+              (label) => [label, { type: ["integer", "null"], minimum: 0 }],
+            ),
+          ),
+          blockers: { type: "array", items: { type: "string" } },
+        },
+      },
       DeveloperResetPreview: {
         type: "object",
         additionalProperties: false,
@@ -12143,6 +12214,7 @@ export const openApiDocument = {
           "unsupportedRelations",
           "truncatedRelations",
           "candidateImpact",
+          "rowImpact",
           "blockers",
         ],
         properties: {
@@ -12168,6 +12240,7 @@ export const openApiDocument = {
               ),
             ),
           },
+          rowImpact: { $ref: "#/components/schemas/DeveloperResetRowImpact" },
           blockers: { type: "array", items: { type: "string" } },
         },
       },

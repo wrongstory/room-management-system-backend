@@ -382,6 +382,7 @@ def main() -> None:
         required = [
             package / "api" / "developer" / "get_developer_reset_preview.py",
             package / "models" / "developer_reset_preview.py",
+            package / "models" / "developer_reset_row_impact.py",
             package / "models" / "developer_reset_candidate_impact.py",
             package / "api" / "photos" / "get_photo_thumbnail.py",
             package / "api" / "photos" / "admit_attempt_photo_collection_batch.py",
