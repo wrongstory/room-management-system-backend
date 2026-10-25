@@ -125,9 +125,9 @@ const serviceAcl = { ...ownerAcl, grantee: 'service_role' };
 
 export function validatePostApprovalUpgradeSource(manifest, entries) {
   assert.equal(manifest.schemaVersion, 1); assert.equal(manifest.release, 'dev');
-  assert.equal(manifest.hashAlgorithm, 'sha256-lf-utf8'); assert([111,112,113,114,115,116,117,118,119,120,121,122,123,124,125,126,127,128,129,130,131,132].includes(manifest.totalCount));
+  assert.equal(manifest.hashAlgorithm, 'sha256-lf-utf8'); assert([111,112,113,114,115,116,117,118,119,120,121,122,123,124,125,126,127,128,129,130,131,132,133].includes(manifest.totalCount));
   assert.equal(manifest.migrations.length, manifest.totalCount); assert.equal(entries.length, manifest.totalCount);
-  assert.equal(manifest.head, { 111: 'post_approval_room_issue_ledger', 112: 'room_event_effective_lookup_indexes', 113: 'common_auth_context_read', 114: 'room_board_issue_counts_single_scan', 115: 'assignment_tomorrow_backlog', 116: 'payroll_remittance_basis_materialized', 117: 'payroll_projection_materialization', 118: 'assignment_midnight_rollover', 119: 'room_pin_transfer', 120: 'photo_upload_pre_provider_retry', 121: 'photo_finalize_snapshot', 122: 'post_approval_memo_only', 123: 'cleaning_overdue_delivery_clock', 124: 'assignment_card_hydration', 125: 'developer_reset_preview', 126: 'photo_collection_upload_batch', 127: 'developer_reset_row_impact', 128: 'developer_operational_safety_gates', 129: 'developer_reset_template_inventory', 130: 'operation_admission_authority', 131: 'operation_atomic_audit_admission', 132: 'operation_worker_admission' }[manifest.totalCount]);
+  assert.equal(manifest.head, { 111: 'post_approval_room_issue_ledger', 112: 'room_event_effective_lookup_indexes', 113: 'common_auth_context_read', 114: 'room_board_issue_counts_single_scan', 115: 'assignment_tomorrow_backlog', 116: 'payroll_remittance_basis_materialized', 117: 'payroll_projection_materialization', 118: 'assignment_midnight_rollover', 119: 'room_pin_transfer', 120: 'photo_upload_pre_provider_retry', 121: 'photo_finalize_snapshot', 122: 'post_approval_memo_only', 123: 'cleaning_overdue_delivery_clock', 124: 'assignment_card_hydration', 125: 'developer_reset_preview', 126: 'photo_collection_upload_batch', 127: 'developer_reset_row_impact', 128: 'developer_operational_safety_gates', 129: 'developer_reset_template_inventory', 130: 'operation_admission_authority', 131: 'operation_atomic_audit_admission', 132: 'operation_worker_admission', 133: 'operation_scheduler_admission' }[manifest.totalCount]);
   assert.equal(manifest.pending.head, manifest.head); assert.equal(manifest.pending.count, manifest.totalCount - 78);
   assert.deepEqual(manifest.baseline, { count: 78, head: 'reservation_bookability_optional_guest_count' });
   assert.equal(sha(JSON.stringify(manifest.migrations.slice(0, 110))), POST_APPROVAL_UPGRADE_PREFIX_SHA256);
@@ -252,6 +252,11 @@ export function validatePostApprovalUpgradeSource(manifest, entries) {
     assert.equal(validated[131].sha256, '8b047f6cb444411556943eb670f0f8f87282a7ae2415d4cf653c5bca31efe099',
       'Only the source-reviewed notification-worker132 tail is permitted');
   }
+  if (validated.length >= 133) {
+    assert.equal(validated[132].file, '20261025043054_operation_scheduler_admission.sql');
+    assert.equal(validated[132].sha256, '769a44fff26efbf6b43643c045e8120a891e9076ec3705225489a4412a367bdd',
+      'Only the source-reviewed scheduler-worker133 tail is permitted');
+  }
   return { entries: validated, ledger: validated[110].canonical };
 }
 export function validatePostApprovalUpgradeLocal({ args, env, config, endpoint, status, container, cliVersion }) {
@@ -269,7 +274,7 @@ export function validatePostApprovalUpgradeLocal({ args, env, config, endpoint, 
   return { ...local, endpoint: localEndpoint };
 }
 export function assertPostApprovalUpgradeHistory(actual, source, installed = source.entries.length) {
-  assert([110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132].includes(installed) && installed <= source.entries.length);
+  assert([110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132, 133].includes(installed) && installed <= source.entries.length);
   assert.deepEqual(actual, source.entries.slice(0, installed).map(({ version, name }) => ({ version, name })),
     'Exact version/name history is required, not count/head only');
 }

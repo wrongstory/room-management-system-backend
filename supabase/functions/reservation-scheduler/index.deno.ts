@@ -109,3 +109,100 @@ Deno.test("reservation scheduler signed mode binds fixed operation and preserves
     }
   }
 });
+
+Deno.test("scheduler admission protects the actual handler and preserves partial commit boundaries", async () => {
+  const names = [
+    "SCHEDULER_INVOKE_SECRET",
+    "SCHEDULER_INVOKE_MODE",
+    "RESERVATION_SCHEDULER_ACTOR_PROFILE_ID",
+    "SCHEDULER_OPERATION_ADMISSION_MODE",
+    "SCHEDULER_OPERATION_BUDGET_MS",
+    "DEVELOPER_OPERATION_TARGET",
+    "SUPABASE_URL",
+  ];
+  const old = new Map(names.map((name) => [name, Deno.env.get(name)]));
+  const key = "synthetic-scheduler-invoke-key-12345678",
+    id = "13300000-0000-4000-8000-000000000001";
+  try {
+    Deno.env.set("SCHEDULER_INVOKE_SECRET", key);
+    Deno.env.delete("SCHEDULER_INVOKE_MODE");
+    Deno.env.set("RESERVATION_SCHEDULER_ACTOR_PROFILE_ID", id);
+    Deno.env.set("SCHEDULER_OPERATION_ADMISSION_MODE", "required");
+    Deno.env.set("SCHEDULER_OPERATION_BUDGET_MS", "1000");
+    Deno.env.set("DEVELOPER_OPERATION_TARGET", "a".repeat(20));
+    Deno.env.set("SUPABASE_URL", `https://${"a".repeat(20)}.supabase.co`);
+    for (
+      const failed of [
+        null,
+        "acquire_operation_reservation_scheduler",
+        "process_due_assignment_lifecycle",
+        "record_scheduler_heartbeat",
+        "complete_operation_reservation_scheduler",
+      ]
+    ) {
+      const calls: string[] = [];
+      const response = await handleReservationScheduler(
+        new Request("https://example.test/reservation-scheduler", {
+          method: "POST",
+          headers: { "x-scheduler-secret": key },
+          body: "{}",
+        }),
+        {
+          createClients: () =>
+            ({
+              admin: {
+                rpc: (name: string) => {
+                  calls.push(name);
+                  if (name === failed) {
+                    return Promise.resolve({
+                      data: null,
+                      error: { code: "SYNTHETIC_UNKNOWN" },
+                    });
+                  }
+                  const data = name.startsWith("acquire_")
+                    ? { admissionId: id }
+                    : name.startsWith("complete_")
+                    ? { completed: true }
+                    : {};
+                  return Promise.resolve({ data, error: null });
+                },
+              },
+            }) as never,
+        },
+      );
+      assert(response.status === (failed ? 503 : 200));
+      assert(calls[0] === "acquire_operation_reservation_scheduler");
+      if (failed) assert(calls.at(-1) === failed);
+      else {assert(
+          calls.join(",") ===
+            "acquire_operation_reservation_scheduler,process_due_reservation_transitions,process_due_assignment_lifecycle,record_scheduler_heartbeat,complete_operation_reservation_scheduler",
+        );}
+    }
+    Deno.env.delete("SCHEDULER_OPERATION_BUDGET_MS");
+    let called = false;
+    const invalid = await handleReservationScheduler(
+      new Request("https://example.test/reservation-scheduler", {
+        method: "POST",
+        headers: { "x-scheduler-secret": key },
+        body: "{}",
+      }),
+      {
+        createClients: () =>
+          ({
+            admin: {
+              rpc: () => {
+                called = true;
+                throw new Error("unexpected write");
+              },
+            },
+          }) as never,
+      },
+    );
+    assert(invalid.status === 503 && !called);
+  } finally {
+    for (const [name, value] of old) {
+      if (value === undefined) Deno.env.delete(name);
+      else Deno.env.set(name, value);
+    }
+  }
+});

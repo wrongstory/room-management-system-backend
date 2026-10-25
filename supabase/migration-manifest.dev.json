@@ -2,17 +2,17 @@
   "schemaVersion": 1,
   "release": "dev",
   "hashAlgorithm": "sha256-lf-utf8",
-  "totalCount": 132,
+  "totalCount": 133,
   "baseline": {
     "count": 78,
     "head": "reservation_bookability_optional_guest_count"
   },
   "pending": {
-    "count": 54,
+    "count": 55,
     "first": "assignment_unavailability_reassignment",
-    "head": "operation_worker_admission"
+    "head": "operation_scheduler_admission"
   },
-  "head": "operation_worker_admission",
+  "head": "operation_scheduler_admission",
   "migrations": [
     {
       "order": 1,
@@ -673,6 +673,11 @@
       "order": 132,
       "name": "operation_worker_admission",
       "sha256": "8b047f6cb444411556943eb670f0f8f87282a7ae2415d4cf653c5bca31efe099"
+    },
+    {
+      "order": 133,
+      "name": "operation_scheduler_admission",
+      "sha256": "769a44fff26efbf6b43643c045e8120a891e9076ec3705225489a4412a367bdd"
     }
   ]
 }
