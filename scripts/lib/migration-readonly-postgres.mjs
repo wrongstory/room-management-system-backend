@@ -3,6 +3,8 @@ import { createHash, randomUUID, X509Certificate } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import { checkServerIdentity, TLSSocket } from 'node:tls';
 import { Client } from 'pg';
+import { readBaselineMetadata,BASELINE_OUTPUT_SETTINGS,BASELINE_OUTPUT_CONFIGURE_SQL,BASELINE_OUTPUT_READ_SQL } from './migration-baseline-metadata.mjs';
+import { createHistoricalBaselineReviewDesign } from './migration-baseline-review-design.mjs';
 import {
   compareMigrationHistorySnapshots,
   createDecodedMigrationHistorySnapshot,
@@ -17,6 +19,7 @@ export const READONLY_POSTGRES_MAX_QUERY_MS = 5_000;
 const closeMillis = 500;
 const maxWireBytes = 40 * 1024 * 1024;
 const observations = new WeakMap();
+const baselineObservations = new WeakSet();
 const errors = new WeakMap();
 const flags = Object.freeze({ executionAllowed: false, operationalApproval: false,
   DBHistoryVerified: false, fullStateVerified: false, cliParityVerified: false,
@@ -268,7 +271,19 @@ export async function readMigrationHistoryInTransaction(query, expectedVersions,
 }
 
 /** Only this internal pg.Client I/O path can mint an observation. No driver/factory callback input. */
-export async function observePostgresMigrationHistory(input) {
+export async function observePostgresMigrationHistory(input) { return observeFixedPostgres(input, null); }
+
+/** H1 metadata only. The owned immutable source binds names/source provenance;
+ * expectedVersions remains an explicit reviewed history mapping, not approval. */
+export async function observePostgresBaselineMetadata(input, bundle) {
+  let design;
+  try { design = createHistoricalBaselineReviewDesign(bundle); }
+  catch { throw failure('POSTGRES_BASELINE_SOURCE_INVALID'); }
+  return observeFixedPostgres(input, { design, names: bundle.files.slice(0,122).map(file => file.name) });
+}
+export function isOwnedPostgresBaselineObservation(value) { return baselineObservations.has(value); }
+
+async function observeFixedPostgres(input, baseline) {
   let value;
   let client;
   let config;
@@ -280,6 +295,8 @@ export async function observePostgresMigrationHistory(input) {
   try {
     const started = performance.now();
     value = validateInput(input);
+    if (baseline && (value.versions.length !== 122 || value.target.scope !== 'SUPABASE'
+      || value.target.projectRef !== baseline.design.modelSource.projectRef)) fail('POSTGRES_BASELINE_SOURCE_INVALID');
     const nonce = `rms_ro_${randomUUID()}`;
     config = { host: value.target.host, port: value.target.port, database: value.target.database,
       user: value.target.mode === 'session' ? `${value.target.role}.${value.target.projectRef}` : value.target.role,
@@ -319,6 +336,8 @@ export async function observePostgresMigrationHistory(input) {
       state, value.queryMs, 'POSTGRES_QUERY_FAILED');
     command(await query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY'), 'BEGIN');
     rows(await query(configureSql, [`${value.queryMs}ms`, `${value.lockMs}ms`]), ['statement_timeout', 'lock_timeout', 'idle_timeout', 'search_path'], 1);
+    const outputFields=BASELINE_OUTPUT_SETTINGS.map(s=>s.field),outputValues=BASELINE_OUTPUT_SETTINGS.map(s=>s.value);
+    if(baseline&&JSON.stringify(rows(await query(BASELINE_OUTPUT_CONFIGURE_SQL),outputFields,1))!==JSON.stringify([outputValues]))fail('POSTGRES_OUTPUT_SETTINGS_INVALID');
     const identity = validateIdentity(await query(identitySql), value, nonce);
     validateCatalog(await query(catalogSql));
     const census = rows(await query(censusSql), ['row_count', 'invalid_shape'], 1);
@@ -327,12 +346,29 @@ export async function observePostgresMigrationHistory(input) {
     const sizes = rows(await query(sizeSql), ['encoded_bytes'], 1);
     if (sizes.length !== 1) fail('POSTGRES_HISTORY_INVALID');
     integer(sizes[0][0], 0, HISTORY_CODEC_MAX_TOTAL_BYTES, 'POSTGRES_HISTORY_LIMIT');
-    const snapshot = decodeHistory(await query(historySql), value, count);
+    if (baseline && count !== 122) fail('POSTGRES_HISTORY_INVALID');
+    // No raw statements query is issued in the metadata branch. Schema/census/
+    // byte bounds above and the same owned transaction/lifecycle still apply.
+    const snapshot = baseline
+      ? await readBaselineMetadata(query, value.versions.map((version,i) => ({ version,name: baseline.names[i] })))
+      : decodeHistory(await query(historySql), value, count);
+    if(baseline&&JSON.stringify(rows(await query(BASELINE_OUTPUT_READ_SQL),outputFields,1))!==JSON.stringify([outputValues]))fail('POSTGRES_OUTPUT_SETTINGS_INVALID');
     const after = validateIdentity(await query(identitySql), value, nonce);
     if (JSON.stringify(after) !== JSON.stringify(identity) || validateTls(client, value.target.host).peerCertificateSha256 !== tls.peerCertificateSha256) fail('POSTGRES_IDENTITY_CHANGED');
     command(await query('ROLLBACK'), 'ROLLBACK');
     await bounded(() => client.end(), state, closeMillis, 'POSTGRES_CLOSE_FAILED');
     connectionClosed = true;
+    if (baseline) {
+      const result = Object.freeze({ ...flags, mode: 'POSTGRES_BASELINE_HASH_METADATA_OBSERVATION', scope: value.target.scope,
+        baselineAccepted: false,globalCoverageVerified: false,historicalEffectsVerified: false,
+        driverVersion: READONLY_POSTGRES_DRIVER_VERSION,driverReadbackObserved: true,tlsPeerValidated: true,
+        readOnlySnapshotObserved: true,connectionClosed: true,metadata: snapshot,
+        sourceBundleSha256: baseline.design.sourceBundleSha256,designSha256: baseline.design.designSha256,
+        backend: identity,caFingerprints: value.caFingerprints,peerCertificateSha256: tls.peerCertificateSha256,
+        observedAt: new Date().toISOString() });
+      baselineObservations.add(result);
+      return result;
+    }
     const result = Object.freeze({ ...flags, mode: 'POSTGRES_DRIVER_READ_ONLY_OBSERVATION', scope: value.target.scope,
       driverVersion: READONLY_POSTGRES_DRIVER_VERSION, driverReadbackObserved: true, tlsPeerValidated: true,
       readOnlySnapshotObserved: true, connectionClosed: true, observedHistorySha256: snapshot.historySha256,
