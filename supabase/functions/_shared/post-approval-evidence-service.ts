@@ -1,7 +1,7 @@
 // Generated from src/modules/post-approval-room-issues/post-approval-room-issue-evidence.service.ts. DO NOT EDIT.
 import { Buffer } from "node:buffer";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { z } from "npm:zod@4.4.3";
+import { z } from "npm:zod@4.6.6";
 import type { Actor } from "./post-approval-report-actor.ts";
 import { AppError } from "./post-approval-report-error.ts";
 import { requestHash } from "./post-approval-report-command.ts";

@@ -134,3 +134,7 @@ active 예약은 stay, 모든 예약은 schedule, 존재하는 stay는 segment �
 - 최신 dev `b13d3d8`의 #485 운영 검증 복원을 정상 통합했다. 통합 `ci:quality` PASS:
   typecheck·129개 파일 3,187개 테스트·build 및 비밀/OpenAPI/lint 검사 완료.
   전체 DB 재구축·migration 적용은 하지 않았다. 최신 source CI는 PR에서 별도로 확인한다.
+- 이후 dev `bc0e11e`의 #487 보안 패치를 추가 통합했다. 백업 실행 명령과 새 의존성을
+  함께 보존하고 충돌한 bundle manifest를 generator로 재생성·대조했다(834,853 bytes).
+  통합 `ci:quality` 129개 파일 3,191개 테스트 및 manifest 검사 PASS.
+  기존 작업공간의 미커밋 mirror 19개는 별도 작업공간에 그대로 보존했다.

@@ -33,7 +33,7 @@ for (const [source, target] of files) {
     value = value.slice(start, end);
   }
   if (target.endsWith('-contract.ts') || target.endsWith('-service.ts')) {
-    if (target !== 'post-approval-evidence-handover-service.ts') value = replace(value, "from 'zod'", "from 'npm:zod@4.4.3'");
+    if (target !== 'post-approval-evidence-handover-service.ts') value = replace(value, "from 'zod'", "from 'npm:zod@4.6.6'");
     if (target.startsWith('post-approval-report') || target.endsWith('-service.ts')) value = replace(value, "from '../../domain/actor.js'", "from './post-approval-report-actor.ts'");
     value = replace(value, "from '../../lib/app-error.js'", "from './post-approval-report-error.ts'");
   }

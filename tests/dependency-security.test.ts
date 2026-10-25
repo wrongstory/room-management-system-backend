@@ -2,11 +2,46 @@ import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { spawnSync } from 'node:child_process';
 import Fastify from 'fastify';
+import { z } from 'zod';
 import { describe, expect, it, vi } from 'vitest';
 import { buildApp, type AppServices } from '../src/app.js';
 import type { AppEnv } from '../src/config/env.js';
 
 const require = createRequire(import.meta.url);
+
+describe('#487 collection and URI security boundaries', () => {
+  it('rejects oversized constrained collections before validating their elements', () => {
+    const element = vi.fn(() => true);
+    const schema = z.array(z.string().refine(element)).max(10);
+    const result = schema.safeParse(Array.from({ length: 10000 }, () => 'synthetic'));
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues).toHaveLength(1);
+      expect(result.error.issues[0]?.code).toBe('too_big');
+    }
+    expect(element).not.toHaveBeenCalled();
+    expect(schema.safeParse(['synthetic']).success).toBe(true);
+    expect(element).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['ajv', '@fastify/ajv-compiler', 'fast-json-stringify'])('preserves URI boundaries through %s', consumer => {
+    const consumerRequire = createRequire(require.resolve(`${consumer}/package.json`));
+    const uri = consumerRequire('fast-uri');
+    for (const encoded of ['%6Aavascript:alert(1)', '%u006Aavascript:alert(1)']) {
+      expect(uri.parse(encoded).scheme).not.toBe('javascript');
+      expect(uri.normalize(encoded)).not.toBe('javascript:alert(1)');
+      expect(() => uri.resolve('https://example.test/', encoded)).toThrow('URI scheme is malformed');
+    }
+    expect(uri.equal('%68ttp://example.test/', 'http://example.test/')).toBe(false);
+    expect(uri.normalize('a/../b')).toBe('b');
+    expect(uri.equal('../x', 'x')).toBe(false);
+    expect(uri.normalize('./a:b')).toBe('./a:b');
+    const malformed = 'https://trusted.test\\@evil.test/';
+    expect(uri.parse(malformed).error).toBeDefined();
+    expect(uri.normalize(malformed)).toBe(malformed);
+    expect(uri.resolve('https://example.test/a/', '../b')).toBe('https://example.test/b');
+  });
+});
 
 describe('#478 runtime dependency security patch', () => {
   it.each([
@@ -117,7 +152,7 @@ describe('#334 dependency security patch', () => {
     };
     expect(manifest.dependencies.fastify).toBe('5.12.7');
     expect(manifest.overrides).toEqual({
-      'fast-uri@^3.0.0': '3.1.8', 'fast-uri@^4.0.0': '4.1.5', 'ip-address': '10.7.4',
+      'fast-uri@^3.0.0': '3.1.9', 'fast-uri@^4.0.0': '4.2.3', 'ip-address': '10.7.4',
       'source-map-js': '1.2.2', 'vite': '8.2.4'
     });
     expect(lock.packages['']?.dependencies?.fastify).toBe('5.12.7');
@@ -126,7 +161,7 @@ describe('#334 dependency security patch', () => {
       .filter(([path]) => path.endsWith(`/node_modules/${name}`) || path === `node_modules/${name}`)
       .map(([, metadata]) => metadata.version);
     expect(versions('fastify')).toEqual(['5.12.7']);
-    expect(new Set(versions('fast-uri'))).toEqual(new Set(['3.1.8', '4.1.5']));
+    expect(new Set(versions('fast-uri'))).toEqual(new Set(['3.1.9', '4.2.3']));
     expect(versions('ip-address').length).toBeGreaterThan(0);
     expect(versions('ip-address').every(version => version === '10.7.4')).toBe(true);
     expect(versions('source-map-js').length).toBeGreaterThan(0);
@@ -136,9 +171,9 @@ describe('#334 dependency security patch', () => {
 
   it('resolves patched installed packages through their real consumers', async () => {
     for (const [consumer, dependency, version] of [
-      ['ajv', 'fast-uri', '3.1.8'],
-      ['@fastify/ajv-compiler', 'fast-uri', '4.1.5'],
-      ['fast-json-stringify', 'fast-uri', '4.1.5'],
+      ['ajv', 'fast-uri', '3.1.9'],
+      ['@fastify/ajv-compiler', 'fast-uri', '4.2.3'],
+      ['fast-json-stringify', 'fast-uri', '4.2.3'],
       ['@fastify/rate-limit', 'ip-address', '10.7.4'],
       ['postcss', 'source-map-js', '1.2.2']
     ] as const) {
