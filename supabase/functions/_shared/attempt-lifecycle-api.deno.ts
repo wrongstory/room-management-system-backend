@@ -5,6 +5,7 @@ import {
   lifecycleDatabaseError,
   manageAttemptLifecycle,
 } from "./attempt-lifecycle-api.ts";
+import type { AdmissionRpc } from "./http-admission.ts";
 import {
   authenticate,
   authenticateLimitedAttempt,
@@ -91,6 +92,113 @@ function mutationResult() {
     effectiveAt: "2026-09-08T00:00:00Z",
     recordedAt: "2026-09-08T00:00:00Z",
   };
+}
+
+for (const action of ["allow_finish", "allow_upload", "interrupt_handover"]) {
+  Deno.test(`#396 lifecycle ${action} awaits its exact admission before the real handler RPC`, async () => {
+    const order: string[] = [];
+    let effectArgs: Record<string, unknown> | undefined;
+    let acquired: Record<string, unknown> | undefined;
+    const client = {
+      admin: {
+        rpc: (name: string, args: Record<string, unknown>) => ({
+          // biome-ignore lint/suspicious/noThenProperty: Model the SDK's lazy effect so ordering is actually checked.
+          then(resolve: (value: unknown) => unknown) {
+            assert(
+              name === "manage_cleaning_attempt_lifecycle",
+              "one existing business RPC",
+            );
+            order.push("effect");
+            effectArgs = args;
+            assert(
+              acquired?.p_action === args.p_action &&
+                acquired?.p_request_hash === args.p_request_hash,
+              "admission bound the actual validated action and fingerprint before dispatch",
+            );
+            return Promise.resolve(
+              resolve({ data: mutationResult(), error: null }),
+            );
+          },
+        }),
+      },
+    } as unknown as EdgeClients;
+    const rpc: AdmissionRpc = async (name, args) => {
+      order.push(name);
+      if (name === "get_operation_admission_control") {
+        return {
+          error: null,
+          data: {
+            mode: "OPEN",
+            targetRef: "synthetic-project",
+            controlVersion: "1",
+          },
+        };
+      }
+      if (name === "acquire_operation_lifecycle_admission") {
+        acquired = args;
+        return {
+          error: null,
+          data: {
+            admissionId: attemptId,
+            controlVersion: "1",
+            completionMode: "COMMAND_RECEIPT",
+          },
+        };
+      }
+      assert(
+        name === "complete_operation_http_admission",
+        "exact terminal readback only",
+      );
+      return { error: null, data: { completed: true } };
+    };
+    const payload = action === "interrupt_handover"
+      ? {
+        maidProfileId: maid.profileId,
+        sequenceNumber: 1,
+        serviceDate: "2026-10-25",
+        availableFrom: "2026-10-25T01:00:00Z",
+        dueAt: "2026-10-25T02:00:00Z",
+        deactivateOld: false,
+      }
+      : {};
+    const response = await handleApiRequest(
+      req("POST", `/v1/attempts/${attemptId}/lifecycle`, {
+        ...command,
+        expectedProfileVersion: 1,
+        action,
+        payload,
+        reasonCode: action === "allow_finish"
+          ? "DEACTIVATION_FINISH_CURRENT"
+          : action === "allow_upload"
+          ? "DEACTIVATION_UPLOAD_ONLY"
+          : "ADMIN_HANDOVER",
+      }),
+      {
+        createClients: () => client,
+        authenticateRequest: async () => admin,
+        operationAdmissionConfig: {
+          target: "synthetic-project",
+          budgetMs: 10000,
+        },
+        operationAdmissionRpc: rpc,
+      },
+    );
+    assert(response.status === 200, "existing lifecycle response preserved");
+    await response.body?.cancel();
+    assert(
+      order.join(",") ===
+        "get_operation_admission_control,acquire_operation_lifecycle_admission,effect,complete_operation_http_admission",
+      "acquire then existing effect then exact terminal",
+    );
+    assert(
+      effectArgs?.p_session_id === sessionId &&
+        acquired?.p_session === sessionId &&
+        effectArgs?.p_actor_profile_id === admin.profileId &&
+        acquired?.p_actor === admin.profileId &&
+        effectArgs?.p_idempotency_key === acquired?.p_idempotency_key,
+      "actual actor/session/key binding retained",
+    );
+  });
 }
 function req(method: string, path: string, body?: unknown) {
   return new Request(`https://example.invalid/functions/v1/api${path}`, {

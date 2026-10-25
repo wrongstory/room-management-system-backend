@@ -638,6 +638,7 @@
     "method": "POST",
     "path": "/v1/attempts/{attemptId}/lifecycle",
     "routeId": "manageAttemptLifecycle",
+    "completionAdapter": "LIFECYCLE_V137",
     "kind": "BUSINESS_WRITE",
     "authority": "ACTIVE_SESSION",
     "rpc": null,

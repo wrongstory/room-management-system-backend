@@ -15,6 +15,14 @@ export function admissionRouteRows(routes) {
       throw new Error('ADMISSION_MANIFEST_INVALID');
     }
     seen.add(route.routeId);
+    // The append137 adapter reuses the fixed source130 opaque route in the same
+    // transaction. This tag must never regenerate a different historical SQL.
+    if (route.completionAdapter !== undefined && (route.completionAdapter !== 'LIFECYCLE_V137'
+      || route.routeId !== 'manageAttemptLifecycle' || route.hashMode !== 'NONE'
+      || route.rpc !== null || route.commandName !== null || route.kind !== 'BUSINESS_WRITE'
+      || route.authority !== 'ACTIVE_SESSION' || route.keyArgument !== 'p_idempotency_key')) {
+      throw new Error('ADMISSION_MANIFEST_INVALID');
+    }
     if (route.hashMode === 'ATOMIC_RPC') {
       if (route.routeId !== 'markNotificationRead' || route.rpc !== 'mark_notification_read'
         || route.commandName !== null || route.authority !== 'ACTIVE_SESSION') {
