@@ -29,14 +29,22 @@ END
 $secret$;
 CREATE FUNCTION backup_ops.invoke_reservation_backup_monitor() RETURNS bigint
 LANGUAGE plpgsql SECURITY INVOKER SET search_path = '' AS $function$
-DECLARE invoke_key text; request_id bigint;
+DECLARE invoke_key text; request_id bigint; at_seconds text; nonce text; signature text;
 BEGIN
   SELECT decrypted_secret INTO STRICT invoke_key FROM vault.decrypted_secrets
     WHERE name = 'reservation_backup_monitor_invoke';
   IF invoke_key !~ '^[a-f0-9]{64}$' THEN RAISE EXCEPTION 'BACKUP_MONITOR_KEY_INVALID'; END IF;
+  at_seconds:=floor(extract(epoch FROM clock_timestamp()))::bigint::text;
+  nonce:=encode(extensions.gen_random_bytes(16),'hex');
+  -- Reuse the already configured private SHA256 key digest as a derived signing key.
+  -- The digest is now an authentication key: never expose it as public metadata.
+  signature:=encode(extensions.hmac(convert_to('rms-scheduled-invocation-v1'||E'\n'||
+    'reservation-backup-monitor:matalcofimnhuzslfhdd'||E'\n'||at_seconds||E'\n'||nonce||E'\nPOST','UTF8'),
+    extensions.digest(convert_to(invoke_key,'UTF8'),'sha256'),'sha256'),'hex');
   SELECT net.http_post(
     url := 'https://matalcofimnhuzslfhdd.supabase.co/functions/v1/reservation-backup-monitor',
-    headers := jsonb_build_object('Content-Type', 'application/json', 'x-rms-backup-monitor-key', invoke_key),
+    headers := jsonb_build_object('Content-Type','application/json','x-rms-invoke-at',at_seconds,
+      'x-rms-invoke-nonce',nonce,'x-rms-invoke-signature',signature),
     body := '{}'::jsonb, timeout_milliseconds := 120000
   ) INTO request_id;
   RETURN request_id;

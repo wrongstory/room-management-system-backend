@@ -6,12 +6,19 @@ import {
   requestId,
 } from "../_shared/runtime.ts";
 import { schedulerTransitionCount } from "../_shared/scheduler-transition-count.ts";
+import {
+  scheduledInvokeMode,
+  verifyScheduledInvocation,
+} from "../_shared/scheduled-invocation.ts";
 
 async function matchesSecret(
   provided: string,
   expected: string,
 ): Promise<boolean> {
-  if (provided.length < 32 || expected.length < 32) {
+  if (
+    provided.length < 32 || expected.length < 32 || provided.length > 4096 ||
+    expected.length > 4096
+  ) {
     return false;
   }
   const encoder = new TextEncoder();
@@ -57,7 +64,10 @@ function requiredEnv(name: string): string {
   return value;
 }
 
-Deno.serve(async (request) => {
+export async function handleReservationScheduler(
+  request: Request,
+  dependencies: { createClients?: typeof createEdgeClients } = {},
+): Promise<Response> {
   const id = requestId(request);
   const startedAt = new Date();
   try {
@@ -66,7 +76,28 @@ Deno.serve(async (request) => {
     }
     const expectedSecret = requiredEnv("SCHEDULER_INVOKE_SECRET");
     const providedSecret = request.headers.get("x-scheduler-secret") ?? "";
-    if (!await matchesSecret(providedSecret, expectedSecret)) {
+    let mode: ReturnType<typeof scheduledInvokeMode>;
+    try {
+      mode = scheduledInvokeMode(Deno.env.get("SCHEDULER_INVOKE_MODE"));
+    } catch {
+      throw new EdgeError(
+        503,
+        "RUNTIME_NOT_CONFIGURED",
+        "scheduler 호출 설정을 확인할 수 없습니다.",
+      );
+    }
+    const url = new URL(request.url);
+    const valid = mode === "signed-v1"
+      ? !request.headers.has("x-scheduler-secret") && !url.search &&
+        ["/functions/v1/reservation-scheduler", "/reservation-scheduler"]
+          .includes(url.pathname) &&
+        await verifyScheduledInvocation(
+          request.headers,
+          new TextEncoder().encode(expectedSecret),
+          "reservation-scheduler:aodikrxcczbogjpsjwjt",
+        )
+      : await matchesSecret(providedSecret, expectedSecret);
+    if (!valid) {
       throw new EdgeError(
         401,
         "INVALID_SCHEDULER_SECRET",
@@ -87,9 +118,11 @@ Deno.serve(async (request) => {
         "scheduler 관리자 설정이 올바르지 않습니다.",
       );
     }
-    const payload = await request.json().catch(() => ({})) as {
-      scheduledAt?: unknown;
-    };
+    // Signed invocations perform only the fixed current-time operation. Caller body is ignored.
+    const payload =
+      (mode === "signed-v1" ? {} : await request.json().catch(() => ({}))) as {
+        scheduledAt?: unknown;
+      };
     const scheduledAt = typeof payload.scheduledAt === "string"
       ? new Date(payload.scheduledAt)
       : new Date();
@@ -107,7 +140,7 @@ Deno.serve(async (request) => {
       "",
     );
     const invocationKey = `reservation-scheduler-${bucket}`;
-    const clients = createEdgeClients();
+    const clients = (dependencies.createClients ?? createEdgeClients)();
     const commandAt = new Date().toISOString();
     const { data, error } = await clients.admin.rpc(
       "process_due_reservation_transitions",
@@ -190,4 +223,7 @@ Deno.serve(async (request) => {
   } catch (error) {
     return errorResponse(error, id, {});
   }
-});
+}
+if (import.meta.main) {
+  Deno.serve((request) => handleReservationScheduler(request));
+}
