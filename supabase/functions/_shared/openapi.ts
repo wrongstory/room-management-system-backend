@@ -1809,6 +1809,41 @@ export const openApiDocument = {
         },
       },
     },
+    "/v1/photos/{photoId}/thumbnail": {
+      get: {
+        ...photoOperation(
+          "getPhotoThumbnail",
+          "동일 사진 권한의 비공개 목록 미리보기",
+          "PhotoUploadOperation",
+          ["admin", "maid"],
+        ),
+        parameters: [photoPathId("photoId")],
+        description:
+          "개발 후보입니다. 원본 content와 같은 active admin/본인 현재 회차 maid·live session·보존 조건을 전후 재검증합니다. 기존 Drive 객체의 자동 미리보기만 서버에서 읽으며 새 객체/보존 clock/공개 URL/캐시를 만들지 않습니다. 원본을 매번 decode하지 않습니다. 미리보기 미생성·checksum 부재·지원하지 않는 provider 응답은 PHOTO_THUMBNAIL_UNAVAILABLE(503)이며 클라이언트가 기존 content를 별도 요청할 수 있습니다. 원본 자동 전송·업로드 재시도·Range·query는 지원하지 않습니다.",
+        responses: {
+          ...photoOperation("unused", "unused", "PhotoUploadOperation")
+            .responses,
+          "200": {
+            description:
+              "최대64KiB/가로세로512px JPEG 미리보기. 실제 provider 생성 여부와 성능은 운영 검증 전입니다.",
+            headers: {
+              "Cache-Control": noStoreHeader,
+              "X-Content-Type-Options": { schema: { const: "nosniff" } },
+              "Content-Disposition": {
+                schema: { const: 'inline; filename="thumbnail.jpg"' },
+              },
+              "Server-Timing": {
+                schema: { type: "string" },
+                description: "고정 숫자 구간만 반환; URL/locator/token 없음",
+              },
+            },
+            content: {
+              "image/jpeg": { schema: { type: "string", format: "binary" } },
+            },
+          },
+        },
+      },
+    },
     "/health": {
       get: {
         tags: ["System"],
@@ -14555,7 +14590,8 @@ for (const [path, item] of Object.entries(openApiDocument.paths)) {
       path.startsWith("/v1/limited/") || path === "/v1/offline-events" ||
       (path === "/v1/attempts/{attemptId}/submissions" && method === "post") ||
       (operation.tags?.includes("Photos") &&
-        path !== "/v1/photos/{photoId}/content")
+        path !== "/v1/photos/{photoId}/content" &&
+        path !== "/v1/photos/{photoId}/thumbnail")
     ) {
       continue;
     }

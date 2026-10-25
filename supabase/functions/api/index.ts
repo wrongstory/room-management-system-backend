@@ -613,16 +613,21 @@ async function handleApiRequestCore(
       let service = (dependencies.photoService ?? createPhotoService)(
         clients,
       );
-      if (photo.kind === "content") {
+      if (photo.kind === "content" || photo.kind === "thumbnail") {
         actor = await dependencies.authenticateRequest(request, clients);
         requirePasswordChanged(actor);
         service = service.withTiming();
-        const result = await service.content(request, {
-          profileId: actor.profileId,
-          sessionId: verifiedRequestSessionId(request),
-          role: actor.role,
-          profileStatus: "active",
-        }, photo.photoId);
+        const result = await service.content(
+          request,
+          {
+            profileId: actor.profileId,
+            sessionId: verifiedRequestSessionId(request),
+            role: actor.role,
+            profileStatus: "active",
+          },
+          photo.photoId,
+          photo.kind,
+        );
         for (const [key, value] of Object.entries(corsHeaders)) {
           result.headers.set(key, value);
         }
