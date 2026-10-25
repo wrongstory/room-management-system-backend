@@ -81,6 +81,13 @@ Python formatter는 삽입된 줄의 혼합 EOL 때문에 한 번 FAIL했고 파
 - 독립 QA: latest SQLpatch/CPU30min/deferred FK/CAS/expiry/retention와 경합 source 검토에 차단사항 없음.
   QA가 직접 실행한 관련4파일194tests PASS. 실제 SQL 또는 Drive 검증을 대신하지 않는다.
 
+최신 dev493(예약 호출 서명 보안 변경)을 충돌 없이 통합한 뒤 application143파일·3512tests와
+manifest126이 다시 PASS했다. 본 기능의 API157/169와 migration126은 변경하지 않았다.
+동시 실행 중이던 세 worktree 검증에서는 기존 WASM decode가1500ms budget을 넘겨
+Edge542 PASS/1 FAIL이었다. 다른 두 실행을 마친 뒤 코드·테스트·budget을 변경하지 않고
+단독 재검사하여65+543+68 tests와 전체 gate가 PASS했다. report 후보19,930,953 bytes
+(여유69,047 bytes), backup99,006 bytes다. 이 관측은 실제 운영 부하 검증을 대체하지 않는다.
+
 초기화 영향 조회의 source 목록에도 두 새 metadata 테이블을 사진 HOLD의 review 종속성으로
 반영했다. 전체185관계·mixed/review137이며 삭제 승인이나 초기화 실행 구현은 추가하지 않았다.
 
