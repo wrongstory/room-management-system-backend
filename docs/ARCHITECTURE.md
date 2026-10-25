@@ -1386,3 +1386,10 @@ Boolean으로 drain을 증명하지 않는다. 실제 활성화와 DB 실행은 
 않는다. 구성 실패 heartbeat도 같은 transaction으로 보호한다. 별도 opt-in이며 scheduler,
 PIN/사진 worker 및 직접 운영 접근의 전체 coverage를 대신하지 않는다.
 [Worker 계약과 미실행 SQL](./OPERATION_WORKER_ADMISSION.md)을 따른다.
+
+### Source133 예약 scheduler admission
+
+기본 비활성인 예약 scheduler 연결은 기존 두 업무 transaction과 partial success를 유지한다.
+명시된 유한 관측 예산 안에서 acquire→예약 전이→배정 lifecycle→성공 heartbeat→정확한 DB 완료 readback을 수행한다.
+두 immutable command receipt와 동일 request의 heartbeat가 모두 있어야 완료하며 만료/다음 실행/현재 상태로 해제하지 않는다.
+운영 활성화·실제 DB 검증·전체 coverage는 미완료이고 details는 SCHEDULER_OPERATION_ADMISSION.md를 따른다.

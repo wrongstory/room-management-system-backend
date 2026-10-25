@@ -1568,3 +1568,7 @@ command/key digest/hash를 결합한다. 세션/key 원문과 raw 요청은 보�
 동일 transaction에서 실제 attempt/target/leaseVersion/claim digest만 저장하며 민감 payload는
 보관하지 않는다. 만료나 나중 시도의 성공은 이전 unknown 효과를 완료하지 않는다.
 [Worker 입장 계약](./OPERATION_WORKER_ADMISSION.md)의 실제 DB 미실행·기본 비활성 경계를 따른다.
+
+133은 같은 admissions.worker_kind/context의 예약 scheduler 형식만 추가한다. 새 relation이나 source127 분류는 없다.
+context에는 actor/invocation bucket/request ID와 command digest만 저장하며 민감 업무 payload를 저장하지 않는다.
+partial unique request ID와 exact immutable command_executions 2개·scheduler heartbeat 연결로 완료를 검증한다.
