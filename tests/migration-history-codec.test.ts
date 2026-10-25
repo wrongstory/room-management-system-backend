@@ -15,8 +15,10 @@ type Model = { mode: string; provenance: string; parserEvidenceBound: boolean; v
   executionAllowed: false; operationalApproval: false; DBHistoryVerified: false; cliParityVerified: false;
   sourceReviewRequired: true; logicalStatementCount: number; historyStatementsSha256: string; rowSha256: string; sqlSha256: string };
 type Snapshot = { historySha256: string; rowCount: number; provenance: string; rows: { name: string | null; statementsIsNull: boolean; statementCount: number | null; rowSha256: string }[] };
+type HistoricalModel = Omit<Model, 'logicalStatementCount'> & { logicalStatementCount: null; representation: string; statementSha256: string; storedStatementCount: 1 };
 type Api = { HISTORY_CODEC_MAX_SQL_BYTES: number; HISTORY_CODEC_MAX_ROWS: number; HISTORY_CODEC_MAX_STATEMENTS: number;
   createMigrationHistoryModel(input: unknown): Model; isOwnedMigrationHistoryModel(input: unknown): boolean;
+  createHistoricalMigrationHistoryModel(input: unknown): HistoricalModel;
   createDecodedMigrationHistorySnapshot(input: unknown): Snapshot;
   createExpectedMigrationHistorySnapshot(input: unknown): Snapshot;
   migrationHistoryWriteMaterial(input: unknown): { version: string; name: string; statements: string[] };
@@ -259,10 +261,10 @@ describe('#378 ownership, safe public metadata and hostile objects', () => {
   it('has no DB/process/credential/wire import and exposes only the reviewed internal driver boundary', () => {
     const source = readFileSync(new URL('../scripts/lib/migration-history-codec.mjs', import.meta.url), 'utf8');
     expect(source).not.toMatch(/node:(?:child_process|fs|net|tls)|process\.env|postgres|legacySplitSql|class \w+State/u);
-    expect(Object.keys(api).sort()).toEqual(['HISTORY_CODEC_CLI_COMMIT', 'HISTORY_CODEC_CLI_VERSION', 'HISTORY_CODEC_MAX_ROWS',
+    expect(Object.keys(api).sort()).toEqual(['HISTORY_CODEC_CLI_COMMIT', 'HISTORY_CODEC_CLI_VERSION', 'HISTORY_CODEC_HISTORICAL_REPRESENTATIONS', 'HISTORY_CODEC_MAX_ROWS',
       'HISTORY_CODEC_MAX_SQL_BYTES', 'HISTORY_CODEC_MAX_STATEMENTS', 'HISTORY_CODEC_MAX_TOTAL_BYTES',
       'compareMigrationHistorySnapshots', 'createDecodedMigrationHistorySnapshot', 'createExpectedMigrationHistorySnapshot',
-      'createMigrationHistoryModel', 'isOwnedMigrationHistoryModel', 'migrationHistoryWriteMaterial', 'migrationHistoryPolicyRows'].sort());
+      'createHistoricalMigrationHistoryModel', 'createMigrationHistoryModel', 'isOwnedMigrationHistoryModel', 'migrationHistoryWriteMaterial', 'migrationHistoryPolicyRows'].sort());
   });
 });
 
@@ -346,5 +348,100 @@ describe('#378 actual owned plan link within synthetic Git source fixtures', () 
       expect(() => api.createMigrationHistoryModel(input)).toThrow('HISTORY_CODEC_SOURCE_MISMATCH');
     }
     expect(() => api.createMigrationHistoryModel({ ...modelInput(sql), sourceBinding: clone(binding) })).toThrow('HISTORY_CODEC_SOURCE_NOT_OWNED');
+  });
+});
+
+describe('#378 exact historical whole-file representations, never CLI write material', () => {
+  const sql = "-- synthetic-sensitive-marker\nSELECT $$가;😀$$;\nSELECT 2;\n";
+  const historicalInput = (sourceBinding: unknown, representation = 'SOURCE_EXACT', stored = sql) => ({
+    ...modelInput(sql), sourceBinding, representation, statementSha256: sha(stored),
+  });
+  const mapping = (model: HistoricalModel, historyVersion = migrationVersion) => ({
+    sourceVersion: model.version, historyVersion, name: model.name, sqlSha256: model.sqlSha256,
+    statementsSha256: model.historyStatementsSha256, representation: model.representation, statementSha256: model.statementSha256,
+  });
+  it.each([
+    ['SOURCE_EXACT', sql], ['SOURCE_APPEND_CRLF', `${sql}\r\n`],
+    ['LF_TO_CRLF_APPEND_CRLF', `${sql.replaceAll('\n', '\r\n')}\r\n`],
+  ])('retains one exact UTF-8 element using %s and an explicit identity mapping', async (representation, stored) => {
+    const binding = await ownedBundle(17, sql);
+    const input = historicalInput(binding, representation, stored);
+    const model = api.createHistoricalMigrationHistoryModel(input); input.sqlBytes.fill(32);
+    const value = api.createExpectedMigrationHistorySnapshot({ models: [model], mappings: [mapping(model)] });
+    expect(matches(value, observed(row([stored])))).toBe(true);
+    expect(matches(value, observed(row([stored.trim()])))).toBe(false);
+    expect(model).toMatchObject({ mode: 'HISTORICAL_WHOLE_FILE_SOURCE_MODEL', logicalStatementCount: null,
+      storedStatementCount: 1, parserEvidenceBound: false, sourceEvidenceBound: true, executionAllowed: false,
+      operationalApproval: false, DBHistoryVerified: false, fullStateVerified: false, cliParityVerified: false });
+    expect(() => api.migrationHistoryWriteMaterial(model)).toThrow('HISTORY_CODEC_EXECUTION_MODEL_REQUIRED');
+    expect(() => api.migrationHistoryWriteMaterial(clone(model))).toThrow('HISTORY_CODEC_EXECUTION_MODEL_REQUIRED');
+    expect(JSON.stringify({ model, value })).not.toContain('synthetic-sensitive-marker');
+    expect(api.isOwnedMigrationHistoryModel(model)).toBe(true);
+    expect(Object.isFrozen(model)).toBe(true);
+    const cli = api.createMigrationHistoryModel({ ...modelInput(sql), sourceBinding: binding });
+    expect(cli.logicalStatementCount).toBe(2);
+    expect(cli.historyStatementsSha256).not.toBe(model.historyStatementsSha256);
+    expect(api.migrationHistoryWriteMaterial(cli).statements).toHaveLength(2);
+  });
+  it('requires both the whole-file representation and exact source/history version mapping', async () => {
+    const model = api.createHistoricalMigrationHistoryModel(historicalInput(await ownedBundle(17, sql, false)));
+    const mapped = mapping(model, '20261001000001');
+    const value = api.createExpectedMigrationHistorySnapshot({ models: [model], mappings: [mapped] });
+    const actual = api.createDecodedMigrationHistorySnapshot({ expectedVersions: [mapped.historyVersion], rows: [{ ...row([sql]), version: mapped.historyVersion }] });
+    expect(matches(value, actual)).toBe(true);
+    expect(() => api.createExpectedMigrationHistorySnapshot({ models: [model] })).toThrow('HISTORY_CODEC_SOURCE_MAPPING_INVALID');
+    const { representation: _representation, statementSha256: _statementSha256, ...legacy } = mapped;
+    expect(() => api.createExpectedMigrationHistorySnapshot({ models: [model], mappings: [legacy] })).toThrow('HISTORY_CODEC_SOURCE_MAPPING_INVALID');
+    for (const key of ['sourceVersion', 'name', 'sqlSha256', 'statementsSha256', 'representation', 'statementSha256']) {
+      expect(() => api.createExpectedMigrationHistorySnapshot({ models: [model], mappings: [{ ...mapped, [key]: key === 'sourceVersion' ? '20261003000000' : 'unknown' }] })).toThrow('HISTORY_CODEC_SOURCE_MAPPING_INVALID');
+    }
+    expect(() => api.createExpectedMigrationHistorySnapshot({ models: [model], mappings: [mapped, mapped] })).toThrow('HISTORY_CODEC_SOURCE_MAPPING_INVALID');
+  });
+  it.each(['STRIP_COMMENTS', 'TRIM', 'UNWRAP_TRANSACTION', 'SOURCE_APPEND_LF', '', null])('rejects unsupported transform %#', async (representation) => {
+    const input = historicalInput(await ownedBundle(17, sql, false));
+    expect(() => api.createHistoricalMigrationHistoryModel({ ...input, representation })).toThrow('HISTORY_CODEC_HISTORICAL_REPRESENTATION_INVALID');
+  });
+  it('rejects unknown raw hashes, semicolon loss, wrappers and content differences instead of normalizing observations', async () => {
+    const input = historicalInput(await ownedBundle(17, sql, false));
+    for (const stored of [sql.trim(), sql.replace('SELECT 2;', 'SELECT 3;'), sql.replace('-- synthetic-sensitive-marker\n', ''), `BEGIN;\n${sql}COMMIT;\n`, `${sql}\n`]) {
+      expect(() => api.createHistoricalMigrationHistoryModel({ ...input, statementSha256: sha(stored) })).toThrow('HISTORY_CODEC_HISTORICAL_HASH_MISMATCH');
+    }
+    for (const statementSha256 of [null, '', 'A'.repeat(64), 'f'.repeat(63)]) {
+      expect(() => api.createHistoricalMigrationHistoryModel({ ...input, statementSha256 })).toThrow('HISTORY_CODEC_HISTORICAL_REPRESENTATION_INVALID');
+    }
+    expect(() => api.createHistoricalMigrationHistoryModel({ ...input, sqlBytes: Buffer.from(`${sql}SELECT 3;`) })).toThrow('HISTORY_CODEC_SOURCE_MISMATCH');
+  });
+  it('requires an owned exact source and does not expose a whole-file arbitrary-SQL constructor', async () => {
+    const input = historicalInput(await ownedBundle(17, sql, false));
+    expect(() => api.createHistoricalMigrationHistoryModel({ ...input, sourceBinding: null })).toThrow('HISTORY_CODEC_HISTORICAL_SOURCE_REQUIRED');
+    expect(() => api.createHistoricalMigrationHistoryModel({ ...input, sourceBinding: clone(input.sourceBinding) })).toThrow('HISTORY_CODEC_SOURCE_NOT_OWNED');
+    for (const extra of [{ sql: 'SELECT 3' }, { transform: (text: string) => text }, { approved: true }]) {
+      expect(() => api.createHistoricalMigrationHistoryModel({ ...input, ...extra })).toThrow('HISTORY_CODEC_INPUT_INVALID');
+    }
+    const getter = vi.fn(() => { throw new Error('private marker'); });
+    Object.defineProperty(input, 'representation', { enumerable: true, get: getter });
+    expect(() => api.createHistoricalMigrationHistoryModel(input)).toThrow('HISTORY_CODEC_INPUT_INVALID');
+    expect(getter).not.toHaveBeenCalled();
+  });
+  it.each(['SELECT 1;\r\n', '-- mixed\r\nSELECT 1;\n'])('does not guess conversions for CRLF/mixed source', async (source) => {
+    const binding = await ownedBundle(17, source, false);
+    const input = { ...modelInput(source), sourceBinding: binding, statementSha256: sha(source) };
+    const model = api.createHistoricalMigrationHistoryModel({ ...input, representation: 'SOURCE_EXACT' });
+    expect(matches(api.createExpectedMigrationHistorySnapshot({ models: [model], mappings: [mapping(model)] }), observed(row([source])))).toBe(true);
+    for (const representation of ['SOURCE_APPEND_CRLF', 'LF_TO_CRLF_APPEND_CRLF']) {
+      expect(() => api.createHistoricalMigrationHistoryModel({ ...input, representation, statementSha256: sha(`${source}\r\n`) })).toThrow('HISTORY_CODEC_HISTORICAL_REPRESENTATION_INVALID');
+    }
+  });
+  it('checks the transformed byte limit, not only the smaller input size', async () => {
+    const source = '\n'.repeat(api.HISTORY_CODEC_MAX_SQL_BYTES);
+    const input = { ...modelInput(source), sourceBinding: await ownedBundle(17, source, false), representation: 'SOURCE_APPEND_CRLF', statementSha256: sha(`${source}\r\n`) };
+    expect(() => api.createHistoricalMigrationHistoryModel(input)).toThrow('HISTORY_CODEC_SIZE_LIMIT');
+  });
+  it('rejects null, different array bounds and split CLI tokens for a historical row', async () => {
+    const model = api.createHistoricalMigrationHistoryModel(historicalInput(await ownedBundle(17, sql, false)));
+    const value = api.createExpectedMigrationHistorySnapshot({ models: [model], mappings: [mapping(model)] });
+    for (const different of [row(null), row([null]), row([sql, '']), { ...row([sql]), statements: array([sql], 0) }]) {
+      expect(matches(value, observed(different))).toBe(false);
+    }
   });
 });

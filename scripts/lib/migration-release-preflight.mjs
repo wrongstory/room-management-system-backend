@@ -2,6 +2,7 @@
 import { createHash } from 'node:crypto';
 import { copyMigrationData, exactMigrationKeys } from './migration-evidence-input.mjs';
 import { createMigrationPolicyModel } from './migration-executor-policy.mjs';
+import { HISTORY_CODEC_HISTORICAL_REPRESENTATIONS } from './migration-history-codec.mjs';
 
 const prepared = new WeakMap();
 const sourceKeys = ['projectRef', 'sourceRef', 'headSha1', 'treeSha1', 'manifestSha256', 'historySha256'];
@@ -26,11 +27,15 @@ export function prepareMigrationRelease(input) {
       if (!Array.isArray(value.historySourceMappings)) throw new Error();
       const seen = new Set();
       for (const mapping of value.historySourceMappings) {
-        exactMigrationKeys(mapping, ['sourceVersion', 'historyVersion', 'name', 'sqlSha256', 'statementsSha256']);
+        const historical = Object.hasOwn(mapping, 'representation');
+        exactMigrationKeys(mapping, ['sourceVersion', 'historyVersion', 'name', 'sqlSha256', 'statementsSha256',
+          ...(historical ? ['representation', 'statementSha256'] : [])]);
         if (!/^[0-9]{14}$/u.test(mapping.sourceVersion) || !/^[0-9]{14}$/u.test(mapping.historyVersion)
-          || mapping.sourceVersion === mapping.historyVersion || seen.has(mapping.sourceVersion)
+          || (!historical && mapping.sourceVersion === mapping.historyVersion) || seen.has(mapping.sourceVersion)
           || !/^[a-f0-9]{64}$/u.test(mapping.sqlSha256) || !/^[a-f0-9]{64}$/u.test(mapping.statementsSha256)
           || !value.policy.expectedHistory.some(row => row.version === mapping.historyVersion && row.name === mapping.name && row.statementsSha256 === mapping.statementsSha256)) throw new Error();
+        if (historical && (!HISTORY_CODEC_HISTORICAL_REPRESENTATIONS.includes(mapping.representation)
+          || !/^[a-f0-9]{64}$/u.test(mapping.statementSha256))) throw new Error();
         seen.add(mapping.sourceVersion);
       }
     }

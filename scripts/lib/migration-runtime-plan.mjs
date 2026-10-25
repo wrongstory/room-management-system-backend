@@ -1,6 +1,6 @@
 /** Bind the reviewed request to actual local Git objects before loading a DB credential. */
 import { performance } from 'node:perf_hooks';
-import { createExpectedMigrationHistorySnapshot, createMigrationHistoryModel, migrationHistoryPolicyRows } from './migration-history-codec.mjs';
+import { createExpectedMigrationHistorySnapshot, createHistoricalMigrationHistoryModel, createMigrationHistoryModel, migrationHistoryPolicyRows } from './migration-history-codec.mjs';
 import { migrationReleaseConfiguration, prepareMigrationRelease } from './migration-release-preflight.mjs';
 import { createMigrationSourceBundle, migrationHistorySourceBytes } from './migration-source-bundle.mjs';
 
@@ -14,15 +14,23 @@ export async function buildMigrationRuntimePlan(input) {
     if (bundle.totalCount !== configuration.policy.expectedHistory.length + configuration.policy.pending.length
       || bundle.plannedCount !== configuration.policy.pending.length
       || !Object.keys(configuration.policy.expectedSource).every(key => bundle.modelSource[key] === configuration.policy.expectedSource[key])) throw new Error();
-    const models = [];
-    for (const file of bundle.files) {
-      if (performance.now() - started >= 120000) throw new Error();
-      const bytes = migrationHistorySourceBytes(bundle, file.path);
-      try { models.push(createMigrationHistoryModel({ version: file.version, name: file.name, sqlBytes: bytes, sourceBinding: { bundle, path: file.path } })); }
-      finally { bytes.fill(0); }
-    }
     const baselineCount = configuration.policy.expectedHistory.length;
     const mappings = configuration.historySourceMappings ?? [];
+    const bySource = new Map(mappings.map(mapping => [mapping.sourceVersion, mapping]));
+    const models = [];
+    for (const [index, file] of bundle.files.entries()) {
+      if (performance.now() - started >= 120000) throw new Error();
+      const bytes = migrationHistorySourceBytes(bundle, file.path);
+      try {
+        const mapping = bySource.get(file.version);
+        // All version/representation mappings belong to already-applied baseline rows.
+        if (mapping && index >= baselineCount) throw new Error();
+        const modelInput = { version: file.version, name: file.name, sqlBytes: bytes, sourceBinding: { bundle, path: file.path } };
+        models.push(mapping?.representation ? createHistoricalMigrationHistoryModel({ ...modelInput,
+          representation: mapping.representation, statementSha256: mapping.statementSha256 }) : createMigrationHistoryModel(modelInput));
+      }
+      finally { bytes.fill(0); }
+    }
     let expected = createExpectedMigrationHistorySnapshot({ models: models.slice(0, baselineCount), mappings });
     if (expected.historySha256 !== configuration.policy.expectedSource.historySha256
       || JSON.stringify(migrationHistoryPolicyRows(expected)) !== JSON.stringify(configuration.policy.expectedHistory)) throw new Error();
