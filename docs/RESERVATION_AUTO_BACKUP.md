@@ -2,12 +2,25 @@
 
 ## 현재 상태
 
-2026-10-24 사용자 결정에 따른 **source 후보**다. 전체 DB 복제 대신 예약 자료를
-추출하고 암호화해 기존 recovery Supabase에 보관한다. 운영 DB에 쓰지 않는다.
-현재 Secrets·bucket 생성·정책 변경·스케줄 활성화·실제 백업은 하지 않았다.
-새 migration은 없으며 실제 예약 자료 추출/Storage 검증은 NOT RUN이다.
-운영의 information_schema 컬럼 조회와 후보 SELECT의 EXPLAIN(ANALYZE 없음)은
-READ ONLY/ROLLBACK으로 통과했다. 업무 행·고객명·PIN을 조회하거나 출력하지 않았다.
+2026-10-24 사용자 결정에 따른 예약 자료 전용 백업이며 PR #484의 source 후보다.
+2026-10-25에 실제 예약 **28건**과 연결 이력을 읽기 전용으로 추출하고 암호화해
+기존 recovery Supabase에 저장했다. `2026-10-25.rms`는 **65,927 bytes**다.
+원격 재조회 byte 대조·복호화·예약 조회 모델의 참조/구간 검증이 통과했고,
+같은 날 재실행도 `verified-existing`으로 기존 사본을 덮어쓰지 않고 검증했다.
+전체 DB/복구 DB 테이블 복원이나 정기 자동 실행 완료를 뜻하지 않는다.
+
+recovery 프로젝트는 ACTIVE_HEALTHY이며 `reservation-backups`는 비공개다.
+GitHub `reservation-backup` environment에 필요한 세 Secrets를 등록하고
+main branch만 허용·관리자 우회 금지를 설정했다. TLS CA도 등록했으나
+repository variable `RESERVATION_BACKUP_ENABLED=false`로 정기 실행은 꺼져 있다.
+source 병합·main 반영·알림 수신·첫 정기 실행은 별도 gate다.
+
+사용자가 앞서 입력한 비밀번호는 recovery 프로젝트의 값으로 확인됐다.
+별도 명시 승인 후 **운영 DB 비밀번호만 1회 재설정**하고 현재 Windows 계정으로
+암호화 보관했다. 새 값으로 IPv6 direct 및 session pooler의 TLS/읽기 전용 인증을
+검증하고 백업 전용 GitHub Secret을 등록했다. recovery DB 비밀번호는 이 실행기에
+사용하지 않는다. API 배포·운영 업무 데이터 쓰기·migration·Auth/PIN 키 변경은 없다.
+예약 원문·비밀번호·키를 로그/Git/평문 파일에 기록하지 않았다.
 
 ## 백업 내용
 
@@ -65,19 +78,27 @@ active 예약은 stay, 모든 예약은 schedule, 존재하는 stay는 segment �
 [Actions 백업](https://supabase.com/docs/guides/deployment/ci/backups).
 실제 프로젝트 용량과 egress 잔량은 활성화 시 확인해야 한다.
 
-## 별도 활성화 gate (현재 미완료)
+## 활성화 gate
 
-1. PR/CI/독립 QA 통과 후 사용자 승인으로 저장소/설정 준비.
-2. recovery bucket과 policy를 확인하고 anon 및 실제 authenticated 역할의 목록/조회/생성/덮어쓰기/삭제
-   거부를 검증. 앱에 recovery key/backup key를 노출하지 않는다. 실제 권한 검증 전 변수는 false 유지.
+1. source CI/독립 QA와 사용자 승인에 따른 저장소/설정 준비는 완료했다.
+   PR #484는 실제 결과·최신 CI·리뷰를 확인한 뒤 dev/main 승격한다.
+2. recovery bucket과 policy를 확인하고 anon 및 실제 로그인한 authenticated 사용자 각각의
+   목록/조회/생성/덮어쓰기/삭제 거부 10종을 검증했다. 임시 합성 계정과 probe 파일은 정리하고
+   부재를 확인했다. 기존 계정·실제 백업은 변경하지 않았으며 앱에 recovery key/backup key를 노출하지 않는다.
 3. GitHub `reservation-backup` environment에 DB URL, 독립 32-byte base64 backup key,
-   recovery Storage token을 안전하게 등록. production PII키는 runner에 주입하지 않는다.
-   검증된 Supabase CA PEM은 환경 variable로 등록. 비밀번호/키를 채팅에 보내지 않는다.
-4. 실제 source 고정 SELECT의 호환성·TLS·timeout, 암호화 사본의 원격 재조회/구조/예약 수 검증.
+   recovery Storage token을 등록했다. 키는 저장소와 분리해 Windows 계정으로 보호해 보관한다.
+   production PII키는 runner에 주입하지 않는다. 검증된 Supabase CA PEM은 repository
+   variable에 등록했다. 비밀번호/키를 채팅에 보내지 않는다. main-only 환경 보호를 유지한다.
+4. 실제 source 고정 SELECT·TLS·암호화 사본 재조회/구조/예약 수 및 같은 날 재실행 PASS.
    실패·중복·용량 거부 시 이전 성공본 보호를 확인. 전체 DB reset은 불필요하다.
 5. GitHub 실패 알림 수신자를 설정하고 실패 run의 실제 수신 확인.
    job 실패/summary는 구현됐지만 이메일 등 외부 알림 도착은 아직 검증하지 않았다.
-6. 승인 후 활성화 변수를 켜고 첫 예약 실행 확인. 성공/실패 이력과 용량을 운영 점검한다.
+6. main 반영과 위 검증 후 활성화 변수를 켜고 첫 예약 실행을 확인한다.
+   성공/실패 이력과 용량을 점검하고, 최근 성공 사본 날짜로 미실행도 감지해야 한다.
+   GitHub PUBLIC repository는 60일 활동이 없으면 schedule이 비활성화될 수 있고
+   부하로 예약 run이 지연/누락될 수 있다([공식 schedule 제약](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule)).
+   현재 `failure()` 요약만으로 미실행은 탐지하지 못한다.
+   이 감시·실제 알림 수신 확인이 끝나기 전 #12/#273의 자동 백업 완료를 선언하지 않는다.
 
 ## 복구 범위와 한계
 
@@ -93,10 +114,23 @@ active 예약은 stay, 모든 예약은 schedule, 존재하는 stay는 segment �
   무작위 암호문 substring 테스트 오탐을 지적했고 보완했다.
 - 예약/프로세스/Workflow 관련 23건 PASS, 독립 에이전트 예약 회귀 16건 PASS.
   child timeout·SQL 오류/과다 stderr 비노출·argv 비밀번호 제외를 추가 검사했다.
-  실제 예약 자료 추출/원격 저장은 실행하지 않았다.
+  이 source 검토 당시에는 실제 예약 자료 추출/원격 저장을 실행하지 않았다.
 - 첫 전체 application 검사에서 workflow action 개수 기대값 1건 실패.
   신규 workflow를 포함하도록 기대 개수와 활성화 경계 회귀를 보완했다.
 - 전체 검증/CI 최종 결과는 연결 PR의 exact-head 증거를 따른다.
 - 2026-10-24 로컬 `ci:quality` PASS: 비밀 검사, OpenAPI 계약, lint,
   typecheck, 128개 파일의 3,154개 테스트, build 완료. lint 경고 37건/정보 60건은 남아 있다.
   migration manifest 122개 PASS이며 Full DB NOT RUN이다.
+- 2026-10-25 사용자 승인 운영 비밀번호 재설정·암호화 보관 후 IPv6 direct와 session pooler
+  인증 PASS. session의 클라이언트 TLS는 psql 연결 정보로 확인했다. pooler→DB 내부 연결의
+  `pg_stat_ssl`을 클라이언트 TLS 판정으로 혼동하지 않는다. 임시 IPv6 진단 함수는 삭제했다.
+- 실제 운영 예약 28건의 신규 암호화 저장/재조회/읽기 모델 검증 PASS,
+  같은 날짜 재실행 `verified-existing` PASS. 삭제한 만료 사본은 0건이며 실제 만료 사본
+  cleanup/용량 초과 시나리오는 합성 테스트 근거와 구분한다. 업무 DB 쓰기·migration 없음.
+- 보안 설정과 일회용 실행 helper 독립 QA 완료. 결과 판정의 PowerShell 논리 연산 우선순위
+  문제를 보완했고 정상/실패 합성 10건 PASS, 실제 백업도 PASS다.
+- 실제 anon·로그인 사용자 Storage 접근 거부 10종 PASS. service 접근과 무해 probe 내용
+  보존을 대조했으며, 임시 파일/합성 Auth 사용자 삭제·부재 확인 PASS다.
+- 최신 dev `b13d3d8`의 #485 운영 검증 복원을 정상 통합했다. 통합 `ci:quality` PASS:
+  typecheck·129개 파일 3,187개 테스트·build 및 비밀/OpenAPI/lint 검사 완료.
+  전체 DB 재구축·migration 적용은 하지 않았다. 최신 source CI는 PR에서 별도로 확인한다.
