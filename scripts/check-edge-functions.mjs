@@ -66,6 +66,7 @@ const sourcePaths = [
   'supabase/functions/_shared/web-push-binding-proof.ts',
   'supabase/functions/_shared/web-push-subscription-api.ts',
   'supabase/functions/_shared/notification-delivery-worker.ts',
+  'supabase/functions/_shared/worker-admission.ts',
   'supabase/functions/_shared/web-push-provider.ts',
   'supabase/functions/_shared/developer-api.ts',
   'supabase/functions/_shared/developer-reset-api.ts',
@@ -289,6 +290,8 @@ export function verifyPostApprovalReportEdgeBundle({ rawSourceDiagnostic = false
 
 function main() {
 const resetPreview = spawnSync(process.execPath, ['scripts/generate-reset-preview-edge.mjs', '--check'], { stdio: 'inherit' });
+const workerAdmission = spawnSync(process.execPath, ['scripts/generate-worker-admission-edge.mjs', '--check'], { stdio: 'inherit' });
+if (workerAdmission.status !== 0) throw new Error('Worker admission source drift');
 if (resetPreview.status !== 0) throw new Error('Reset preview generated source verification failed');
 const resetRows = spawnSync(process.execPath, ['scripts/generate-reset-row-impact.mjs', '--check'], { stdio: 'inherit' });
 if (resetRows.status !== 0) throw new Error('Reset row collector generated source verification failed');
