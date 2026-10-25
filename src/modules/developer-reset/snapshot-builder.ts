@@ -1,7 +1,8 @@
 import { createHmac, randomFillSync } from 'node:crypto';
 import { z } from 'zod';
 import { requestHash } from '../../lib/command.js';
-import { inspectResetSnapshot } from './reset-snapshot.js';
+import { inspectResetSnapshot, inspectResetSnapshotCapture } from './reset-snapshot.js';
+import { composeResetReview, resetReviewRequestSchema, resetReviewFailureCode, type ReviewRow } from './review-composition.js';
 
 const hash = z.string().regex(/^[a-f0-9]{64}$/);
 const name = z.string().regex(/^[a-z][a-z0-9_]{0,62}$/);
@@ -48,6 +49,7 @@ export interface ResetSnapshotSource {
     metadata: unknown;
     rows: AsyncIterable<unknown>;
     census: AsyncIterable<{ header: unknown; contents: AsyncIterable<unknown> }>;
+    review?: unknown;
   }>;
 }
 export interface ResetSnapshotLimits { rows?: number; bytes?: number; milliseconds?: number }
@@ -79,8 +81,8 @@ export function createResetSnapshotBuilder(expectedInput: unknown, limits: Reset
   const byteLimit = limit(limits.bytes, maxBytes);
   const timeLimit = limit(limits.milliseconds, maxMilliseconds);
 
-  async function build(source: ResetSnapshotSource, signal?: AbortSignal) {
-    if (used || disposed) return blocked('RESET_SNAPSHOT_BUILDER_CLOSED');
+  async function collect(source: ResetSnapshotSource, signal?: AbortSignal, reviewInput?: unknown) {
+    if (used || disposed) return { ...blocked('RESET_SNAPSHOT_BUILDER_CLOSED'), review: null };
     used = true;
     const secret = Buffer.alloc(32);
     const controller = new AbortController();
@@ -90,6 +92,8 @@ export function createResetSnapshotBuilder(expectedInput: unknown, limits: Reset
     const timer = setTimeout(() => { timedOut = true; controller.abort(); }, timeLimit);
     const deadline = performance.now() + timeLimit;
     let remainingBytes = byteLimit;
+    const reviewRows: ReviewRow[] = [];
+    const independent: { relation: string; key: string }[] = [];
     const check = () => {
       if (performance.now() >= deadline) { timedOut = true; controller.abort(); }
       if (joined.aborted || disposed) fail(timedOut ? 'RESET_SNAPSHOT_TIMEOUT' : 'RESET_SNAPSHOT_CANCELLED');
@@ -164,8 +168,12 @@ export function createResetSnapshotBuilder(expectedInput: unknown, limits: Reset
     try {
       randomFillSync(secret);
       const selected = expectedCapture ?? fail('RESET_SNAPSHOT_INPUT_INVALID');
+      // Clone the reviewed intent before yielding to the source. No callback,
+      // capture token or raw row handle is ever returned to the caller.
+      const reviewRequest = reviewInput === undefined ? null : parse(resetReviewRequestSchema, reviewInput);
       const expected: Binding = parse(bindingSchema, selected.binding);
       const collected = await wait(source.collect(joined));
+      const reviewSidecar = reviewRequest ? copy(collected.review) : null;
       const metadata: Metadata = parse(metadataSchema, collected.metadata);
       if (requestHash(expected) !== requestHash(metadata.binding)) fail('RESET_SNAPSHOT_BINDING_MISMATCH');
       const catalog = (input: Pick<Metadata, 'relations' | 'foreignKeys'>) => ({
@@ -226,6 +234,7 @@ export function createResetSnapshotBuilder(expectedInput: unknown, limits: Reset
         });
         rows.push({ relation: row.relation, key: encoded.key, disposition: row.disposition, references });
         content.push({ relation: row.relation, snapshotId, ...encoded });
+        if (reviewRequest) reviewRows.push({ relation: row.relation, key: encoded.key, keyFields: row.key.map(c => c.name), values: row.values, disposition: row.disposition });
       });
       const census: { relation: string; count: number; snapshotId: string; contentFingerprint: string }[] = [];
       let censusRows = 0;
@@ -239,7 +248,8 @@ export function createResetSnapshotBuilder(expectedInput: unknown, limits: Reset
           if (++censusRows > rowLimit) fail('RESET_SNAPSHOT_LIMIT_EXCEEDED');
           const item = parse(contentSchema, raw);
           if (item.relation !== header.relation) fail('RESET_SNAPSHOT_INPUT_INVALID');
-          contents.push(encode(item));
+          const encoded = encode(item); contents.push(encoded);
+          if (reviewRequest) independent.push({ relation: item.relation, key: encoded.key });
         });
         if (header.count !== contents.length || new Set(contents.map(c => c.key)).size !== contents.length) fail('RESET_SNAPSHOT_CENSUS_MISMATCH');
         contents.sort((a, b) => compare(a.key, b.key));
@@ -256,22 +266,45 @@ export function createResetSnapshotBuilder(expectedInput: unknown, limits: Reset
         if (row.disposition === 'templateSource') pending.add('RESET_TEMPLATE_DISPOSITION_UNRESOLVED');
         if (row.disposition === 'unresolved') pending.add('RESET_ROW_DISPOSITION_UNRESOLVED');
       }
-      // Content has been independently compared, but unresolved candidates are
-      // never converted into a keep/remove decision or a valid reference plan.
-      if (pending.size) return blocked([...pending].sort());
-      const result = inspectResetSnapshot({ expected, snapshot: { ...expected, id: snapshotId, readOnly: true, isolation },
+      const snapshotInput = { expected, snapshot: { ...expected, id: snapshotId, readOnly: true, isolation },
         plan: { catalogFingerprint: expected.catalogFingerprint, snapshotCatalogFingerprint: metadata.binding.catalogFingerprint,
           complete: true, relations: [...tables.keys()], relationRowCounts: census.map(({ relation, count }) => ({ relation, count })),
           foreignKeys: metadata.foreignKeys.map(({ source, target, name }) => ({ source, target, name })), rows },
-        census, content, foreignKeys: metadata.foreignKeys.map(({ source, name, sourceNullable, match, validated }) => ({ source, name, sourceNullable, match, validated })), nullEvidence });
-      return { ...result, consistency: metadata.consistency.kind };
+        census, content, foreignKeys: metadata.foreignKeys.map(({ source, name, sourceNullable, match, validated }) => ({ source, name, sourceNullable, match, validated })), nullEvidence };
+      // Pending policy must never bypass technical FK/NULL/target completeness.
+      // The capture checker retains undecided labels and grants no plan validity.
+      const structure = inspectResetSnapshotCapture(snapshotInput);
+      if (!structure.structureValid) return { ...blocked([...new Set([...structure.blockers, ...pending])].sort()), review: null };
+      let review = null;
+      if (reviewRequest) {
+        if (metadata.consistency.kind !== 'repeatable-read') fail('RESET_REVIEW_REPEATABLE_READ_REQUIRED');
+        const contentFingerprint = requestHash({ snapshotId, census: [...census].sort((a, b) => compare(a.relation, b.relation)) });
+        review = { ...composeResetReview({ request: reviewRequest, binding: { ...expected, snapshotId, contentFingerprint },
+          scopeId, relations: [...tables.keys()], rows: reviewRows, independent, census, sidecar: reviewSidecar, pending: [...pending].sort() }),
+          reviewPrepared: true, contentVerified: true };
+        check();
+      }
+      // Content has been independently compared, but unresolved candidates are
+      // never converted into a keep/remove decision or a valid reference plan.
+      if (pending.size) return { ...blocked([...pending].sort()), review };
+      const result = inspectResetSnapshot(snapshotInput);
+      // Technical FK/content failure must not expose a partial composition or receipt.
+      if (!result.snapshotValid) review = null;
+      return { ...result, consistency: metadata.consistency.kind, review };
     } catch (error) {
-      return blocked(error instanceof CaptureFailure ? error.message : 'RESET_SNAPSHOT_SOURCE_UNAVAILABLE');
+      return { ...blocked(error instanceof CaptureFailure ? error.message : resetReviewFailureCode(error) ?? 'RESET_SNAPSHOT_SOURCE_UNAVAILABLE'), review: null };
     } finally {
+      reviewRows.length = 0; independent.length = 0;
       clearTimeout(timer); secret.fill(0); disposed = true; controller.abort(); active = undefined;
     }
   }
-  return Object.freeze({ build, dispose: () => { disposed = true; active?.abort(); } });
+  return Object.freeze({
+    build: async (source: ResetSnapshotSource, signal?: AbortSignal) => {
+      const { review: _review, ...result } = await collect(source, signal); return result;
+    },
+    buildReview: (source: ResetSnapshotSource, request: unknown, signal?: AbortSignal) => collect(source, signal, request ?? null),
+    dispose: () => { disposed = true; active?.abort(); },
+  });
 }
 function blocked(code: string | string[]) {
   return { snapshotValid: false, executionEnabled: false, fingerprint: null, counts: null,

@@ -28,6 +28,10 @@ const canonical = (templates: Template[], references: Reference[]) => ({
     slots: [...t.content.slots].sort((a, b) => a.displayOrder - b.displayOrder) } })).sort((a, b) => cmp(a.id, b.id)),
   references: [...references].sort((a, b) => cmp(a.referenceId, b.referenceId)),
 });
+/** Shared canonical projection for the internal same-snapshot composer. */
+export function templateInventoryFingerprint(templates: unknown, references: unknown) {
+  return requestHash(canonical(z.array(template).max(10000).parse(templates), z.array(reference).max(10000).parse(references)));
+}
 class PlanFailure extends Error {}
 const fail = (code: string): never => { throw new PlanFailure(code); };
 

@@ -18,6 +18,9 @@ const referencePaths = [
     "previous_slots.template_version_id",
   ],
 ] as const;
+export const RESET_TEMPLATE_REFERENCE_PATHS = Object.freeze(
+  referencePaths.map((path) => Object.freeze(path)),
+);
 const statuses = ["draft", "published", "retired"] as const;
 const kinds = ["checkout", "stayover", "additional", "reclean"];
 const invalid = (): never => {
@@ -99,7 +102,7 @@ export function summarizeResetTemplateEvidence(
   const orphanSlots = count(data.orphanSlots);
   if (
     data.templates.length !== templateCount || orphanSlots > slotCount ||
-    data.references.length !== referencePaths.length
+    data.references.length !== RESET_TEMPLATE_REFERENCE_PATHS.length
   ) return invalid();
   agrees(census, "public.cleaning_template_versions", templateCount);
   agrees(census, "private.photo_template_slots", slotCount);
@@ -174,7 +177,9 @@ export function summarizeResetTemplateEvidence(
     const path = String(row.path);
     const key = `${relation}:${path}`;
     if (
-      !referencePaths.some(([r, p]) => r === relation && p === path) ||
+      !RESET_TEMPLATE_REFERENCE_PATHS.some(([r, p]) =>
+        r === relation && p === path
+      ) ||
       paths.has(key)
     ) return invalid();
     paths.add(key);

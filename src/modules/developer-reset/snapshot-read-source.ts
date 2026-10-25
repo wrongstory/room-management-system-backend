@@ -4,6 +4,7 @@ import { validateResetCatalog } from '../../../scripts/reset-catalog-contract.mj
 import { requestHash } from '../../lib/command.js';
 import { createResetSnapshotBuilder, type ResetSnapshotSource } from './snapshot-builder.js';
 import { createResetReadPlan, resetCatalogReadSql, resetReadIdentitySql, resetReadSafetySql } from './snapshot-read-plan.js';
+import { resetReviewStatementId } from './review-composition.js';
 
 /** Internal dedicated connection port. No default connection, credentials, CLI or HTTP entry.
  * The owner must open a new connection with verified transport, read-only defaults,
@@ -25,6 +26,13 @@ const settings = { statement_timeout: '4000ms', lock_timeout: '1000ms', idle_in_
   bytea_output: 'hex', extra_float_digits: '3' };
 const catalogSql = `SELECT source.payload::pg_catalog.text AS payload FROM (${resetCatalogReadSql.replace(/;$/, '')}) source(payload)`;
 const byteLimit = 16 * 1024 * 1024;
+// Existing STABLE collectors only. No policy configuration or write function.
+export const resetReviewEvidenceSql = `SELECT pg_catalog.jsonb_build_object(
+  'databaseSnapshot', pg_catalog.pg_current_snapshot()::pg_catalog.text,
+  'statementAt', pg_catalog.statement_timestamp()::pg_catalog.text,
+  'statementId', pg_catalog.encode(extensions.digest(pg_catalog.pg_current_snapshot()::pg_catalog.text || pg_catalog.statement_timestamp()::pg_catalog.text, 'sha256'), 'hex'),
+  'templateEvidence', private.collect_developer_reset_template_inventory(),
+  'gateEvidence', private.collect_developer_operation_gates())::pg_catalog.text AS payload`;
 const blocked = (code: string) => ({ snapshotValid: false, executionEnabled: false, fingerprint: null, counts: null,
   consistency: null, blockers: [code], liveDatabaseVerified: false });
 async function* stream<T>(rows: T[]) { for (const row of rows) yield row; }
@@ -33,10 +41,19 @@ async function* stream<T>(rows: T[]) { for (const row of rows) yield row; }
  * Returned evidence is coherent port input, not proof of a trusted live connector.
  */
 export async function inspectResetReadOnlySource(input: unknown, open: OpenResetReadClient, signal?: AbortSignal) {
-  const parsed = inputSchema.safeParse(input); if (!parsed.success) return blocked('RESET_READ_INPUT_INVALID');
+  const { review: _review, ...result } = await inspect(input, open, signal); return result;
+}
+
+/** Same closed transaction with internal composition. No public request or live-proof minting. */
+export function inspectResetReadOnlyReview(input: unknown, request: unknown, open: OpenResetReadClient, signal?: AbortSignal) {
+  return inspect(input, open, signal, request ?? null);
+}
+async function inspect(input: unknown, open: OpenResetReadClient, signal?: AbortSignal, request?: unknown) {
+  const reject = (code: string) => ({ ...blocked(code), review: null });
+  const parsed = inputSchema.safeParse(input); if (!parsed.success) return reject('RESET_READ_INPUT_INVALID');
   let plan: ReturnType<typeof createResetReadPlan>;
   try { plan = createResetReadPlan(parsed.data.catalog, parsed.data.binding); }
-  catch { return blocked('RESET_READ_PLAN_REJECTED'); }
+  catch { return reject('RESET_READ_PLAN_REJECTED'); }
   const builder = createResetSnapshotBuilder(plan.expected);
   let sourceFailure: string | undefined;
   let client: ResetReadClient | undefined;
@@ -159,18 +176,27 @@ export async function inspectResetReadOnlySource(input: unknown, open: OpenReset
         const group = groups.get(value.relation) ?? []; group.push({ ...value, scopeId }); groups.set(value.relation, group);
       }
       for (const [name, count] of countMap) census.push({ header: { relation: name, count, scopeId }, contents: groups.get(name) ?? [] });
+      let review: unknown;
+      if (request !== undefined) {
+        const parsed = z.object({ databaseSnapshot: z.string(), statementAt: z.string(), statementId: z.string(),
+          templateEvidence: z.unknown(), gateEvidence: z.unknown() }).strict().safeParse(oneJson(await query(resetReviewEvidenceSql)));
+        if (!parsed.success || parsed.data.databaseSnapshot !== before?.[14] ||
+          parsed.data.statementId !== resetReviewStatementId(parsed.data.databaseSnapshot, parsed.data.statementAt)) return fail('RESET_READ_REVIEW_SCOPE_CHANGED');
+        const { databaseSnapshot: _databaseSnapshot, ...observed } = parsed.data;
+        review = { scopeId, ...observed };
+      }
       verifyCatalog(await query(catalogSql));
       if (requestHash(checkSafety(await query(resetReadSafetySql, safetyArgs))) !== requestHash(relationIdentities)) fail('RESET_READ_RELATION_IDENTITY_CHANGED');
       if (requestHash(identity(await query(resetReadIdentitySql))) !== requestHash(before)) fail('RESET_READ_IDENTITY_CHANGED');
       await command('ROLLBACK', 'ROLLBACK');
       await wait(() => client?.close() ?? Promise.resolve(), abort, 350); closed = true;
       return { metadata: { ...plan.expected, consistency: { kind: 'repeatable-read', transactionId: scopeId } },
-        rows: stream(capturedRows), census: stream(census.map(entry => ({ header: entry.header, contents: stream(entry.contents) }))) };
+        rows: stream(capturedRows), census: stream(census.map(entry => ({ header: entry.header, contents: stream(entry.contents) }))), review };
     } catch { if (!sourceFailure) sourceFailure = 'RESET_READ_SOURCE_FAILED'; destroy(); throw new Error(sourceFailure); }
   } };
   try {
-    const result = await builder.build(source, signal);
-    return sourceFailure ? blocked(sourceFailure) : { ...result, liveDatabaseVerified: false };
+    const result = request === undefined ? { ...await builder.build(source, signal), review: null } : await builder.buildReview(source, request, signal);
+    return sourceFailure ? reject(sourceFailure) : { ...result, liveDatabaseVerified: false };
   } finally {
     builder.dispose(); if (!closed) destroy(); capturedRows.length = 0;
     for (const entry of census) entry.contents.length = 0; census.length = 0;
