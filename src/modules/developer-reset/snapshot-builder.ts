@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { requestHash } from '../../lib/command.js';
 import { inspectResetSnapshot, inspectResetSnapshotCapture } from './reset-snapshot.js';
 import { composeResetReview, resetReviewRequestSchema, resetReviewFailureCode, type ReviewRow } from './review-composition.js';
+import { captureResetPlanContent } from './plan-revalidation.js';
 
 const hash = z.string().regex(/^[a-f0-9]{64}$/);
 const name = z.string().regex(/^[a-z][a-z0-9_]{0,62}$/);
@@ -81,7 +82,7 @@ export function createResetSnapshotBuilder(expectedInput: unknown, limits: Reset
   const byteLimit = limit(limits.bytes, maxBytes);
   const timeLimit = limit(limits.milliseconds, maxMilliseconds);
 
-  async function collect(source: ResetSnapshotSource, signal?: AbortSignal, reviewInput?: unknown) {
+  async function collect(source: ResetSnapshotSource, signal?: AbortSignal, reviewInput?: unknown, planCapture?: object) {
     if (used || disposed) return { ...blocked('RESET_SNAPSHOT_BUILDER_CLOSED'), review: null };
     used = true;
     const secret = Buffer.alloc(32);
@@ -278,9 +279,10 @@ export function createResetSnapshotBuilder(expectedInput: unknown, limits: Reset
       let review = null;
       if (reviewRequest) {
         if (metadata.consistency.kind !== 'repeatable-read') fail('RESET_REVIEW_REPEATABLE_READ_REQUIRED');
+        if (planCapture) captureResetPlanContent(planCapture, { binding: expected, ...catalog(selected) }, reviewRequest, reviewRows);
         const contentFingerprint = requestHash({ snapshotId, census: [...census].sort((a, b) => compare(a.relation, b.relation)) });
         review = { ...composeResetReview({ request: reviewRequest, binding: { ...expected, snapshotId, contentFingerprint },
-          scopeId, relations: [...tables.keys()], rows: reviewRows, independent, census, sidecar: reviewSidecar, pending: [...pending].sort() }),
+          scopeId, relations: [...tables.keys()], rows: reviewRows, independent, census, sidecar: reviewSidecar, pending: [...pending].sort() }, planCapture),
           reviewPrepared: true, contentVerified: true };
         check();
       }
@@ -302,7 +304,7 @@ export function createResetSnapshotBuilder(expectedInput: unknown, limits: Reset
     build: async (source: ResetSnapshotSource, signal?: AbortSignal) => {
       const { review: _review, ...result } = await collect(source, signal); return result;
     },
-    buildReview: (source: ResetSnapshotSource, request: unknown, signal?: AbortSignal) => collect(source, signal, request ?? null),
+    buildReview: (source: ResetSnapshotSource, request: unknown, signal?: AbortSignal, planCapture?: object) => collect(source, signal, request ?? null, planCapture),
     dispose: () => { disposed = true; active?.abort(); },
   });
 }
