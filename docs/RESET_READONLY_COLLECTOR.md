@@ -74,3 +74,5 @@ parser 실행은 SQL 실행이나 권한·동시성·DB 통합 테스트가 아�
 개발 검증: `npm run ci:quality` 165파일/4,544 tests PASS, focused collector/snapshot/catalog
 4파일139 tests PASS, manifest129 PASS다. 컴파일된 Node 모듈 import도 DB 연결 없이 확인했다.
 Edge/Python/public API/migration 입력은 이 단위에서 변경하지 않았으며 별도 실행하지 않았다.
+dev8b40ef(130/131 및 관측 원장 포함) 정상 통합 후 `ci:quality`는170파일/4,736 tests PASS다.
+manifest131와 admission/atomic source 생성 검사 PASS, collector 고유 변경10파일을 유지했다.
