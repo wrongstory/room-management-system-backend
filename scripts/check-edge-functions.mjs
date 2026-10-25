@@ -10,6 +10,10 @@ const sourcePaths = [
   'supabase/functions/_shared/api-timing.ts',
   'supabase/functions/_shared/runtime.ts',
   'src/modules/auth/auth-context.ts',
+  'supabase/functions/_shared/reservation-backup-monitor.ts',
+  'supabase/functions/_shared/reservation-backup-alert.ts',
+  'supabase/functions/_shared/reservation-backup-github-app.ts',
+  'supabase/functions/reservation-backup-monitor/index.ts',
   'supabase/functions/_shared/room-pin-diagnostic.ts',
   'supabase/functions/_shared/activity-contract.ts',
   'supabase/functions/_shared/activity-api.ts',
@@ -81,6 +85,7 @@ const sourcePaths = [
   'supabase/functions/room-pin-sheet-sync/index.ts'
 ];
 const testPaths = [
+  'supabase/functions/reservation-backup-monitor/index.deno.ts',
   'supabase/functions/_shared/room-pin-transfer-api.deno.ts',
   'supabase/functions/_shared/scheduler-transition-count.deno.ts',
   'supabase/functions/_shared/activity-api.deno.ts',
@@ -185,6 +190,21 @@ export function verifyEdgeBundle() {
     const size = statSync(output).size;
     if (!Number.isSafeInteger(size) || size <= 0 || size >= 20000000) throw new Error('Edge bundle must remain below 20,000,000 bytes');
     console.log(`Edge bundle size gate PASS: ${size} bytes`);
+  });
+}
+
+export function verifyBackupMonitorBundle() {
+  withLfFormatCopy([], temporary => {
+    const output = resolve(temporary, 'reservation-backup-monitor.eszip');
+    const relativeOutput = relative(process.cwd(), output).split(sep).join('/');
+    const result = spawnSync('docker', ['run', '--rm', '-v', `${process.cwd()}:/workspace`, '-w', '/workspace/supabase/functions',
+      'ghcr.io/supabase/edge-runtime:v1.74.3@sha256:c52405002a890ca9fcf77978671c57f3a988e03174afb277f84ac65bc917013c',
+      'bundle', '--entrypoint', 'reservation-backup-monitor/index.ts', '--output', `/workspace/${relativeOutput}`,
+      '--checksum', 'sha256', '--timeout', '60'], { stdio: 'inherit', timeout: 70000 });
+    if (result.error || result.status !== 0) throw new Error('Backup monitor Edge bundle failed');
+    const size = statSync(output).size;
+    if (!Number.isSafeInteger(size) || size <= 0 || size >= 2000000) throw new Error('Backup monitor bundle exceeds 2,000,000 bytes');
+    console.log(`Backup monitor Edge bundle PASS: ${size} bytes`);
   });
 }
 
@@ -304,7 +324,7 @@ runDeno([
 runDeno([
   'test',
   '--allow-read=supabase/functions/api/assets',
-  '--allow-env=CORS_ORIGINS,SUPABASE_URL,SUPABASE_ANON_KEY,SUPABASE_PUBLISHABLE_KEY,SUPABASE_SERVICE_ROLE_KEY,SUPABASE_SECRET_KEY,ACCOUNT_PHONE_PEPPER,RESERVATION_PII_KEY_BASE64,RESERVATION_PII_KEY_VERSION,RESERVATION_PII_KEYRING_JSON,RESERVATION_GUEST_NAME_PEPPER,SCHEDULER_INVOKE_SECRET,GOOGLE_DRIVE_CLIENT_ID,GOOGLE_DRIVE_CLIENT_SECRET,GOOGLE_DRIVE_REFRESH_TOKEN,GOOGLE_DRIVE_ROOT_FOLDER_ID,PHOTO_PURGE_INVOKE_SECRET,POST_APPROVAL_ROOM_ISSUE_HANDOVER_KEY_BASE64,PAYROLL_CURSOR_HMAC_SECRET,NOTIFICATION_CURSOR_HMAC_SECRET,INSPECTION_CURSOR_HMAC_SECRET,WEB_PUSH_SUBSCRIPTION_KEY_BASE64,WEB_PUSH_SUBSCRIPTION_KEY_VERSION,WEB_PUSH_SUBSCRIPTION_KEYRING_JSON,WEB_PUSH_BINDING_DIGEST_SECRET,VAPID_SUBJECT,VAPID_CURRENT_KEY_VERSION,VAPID_PUBLIC_KEY,VAPID_PUBLIC_KEYRING_JSON,VAPID_PRIVATE_KEY,VAPID_KEYRING_JSON,NOTIFICATION_DELIVERY_INVOKE_SECRET,ROOM_PIN_KEY_BASE64,ROOM_PIN_KEY_VERSION,ROOM_PIN_KEYRING_JSON,ROOM_PIN_IMPORT_SPREADSHEET_ID,ROOM_PIN_IMPORT_SHEET_ID,ROOM_PIN_TRANSFER_HMAC_SECRET,ROOM_PIN_INITIAL_DIGITS,ROOM_PIN_SHEET_SYNC_INVOKE_SECRET,GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL,GOOGLE_SHEETS_SERVICE_ACCOUNT_PRIVATE_KEY,GOOGLE_SHEETS_SPREADSHEET_ID,GOOGLE_SHEETS_ROOM_PIN_TAB,RUNTIME_ENVIRONMENT,SUPABASE_PROJECT_REF',
+  '--allow-env=RESERVATION_BACKUP_MONITOR_KEY_SHA256,RESERVATION_BACKUP_MONITOR_ENABLED,RESERVATION_BACKUP_ALERT_APP_ID,RESERVATION_BACKUP_ALERT_INSTALLATION_ID,RESERVATION_BACKUP_ALERT_PRIVATE_KEY,RESERVATION_BACKUP_ALERT_ISSUE,CORS_ORIGINS,SUPABASE_URL,SUPABASE_ANON_KEY,SUPABASE_PUBLISHABLE_KEY,SUPABASE_SERVICE_ROLE_KEY,SUPABASE_SECRET_KEY,ACCOUNT_PHONE_PEPPER,RESERVATION_PII_KEY_BASE64,RESERVATION_PII_KEY_VERSION,RESERVATION_PII_KEYRING_JSON,RESERVATION_GUEST_NAME_PEPPER,SCHEDULER_INVOKE_SECRET,GOOGLE_DRIVE_CLIENT_ID,GOOGLE_DRIVE_CLIENT_SECRET,GOOGLE_DRIVE_REFRESH_TOKEN,GOOGLE_DRIVE_ROOT_FOLDER_ID,PHOTO_PURGE_INVOKE_SECRET,POST_APPROVAL_ROOM_ISSUE_HANDOVER_KEY_BASE64,PAYROLL_CURSOR_HMAC_SECRET,NOTIFICATION_CURSOR_HMAC_SECRET,INSPECTION_CURSOR_HMAC_SECRET,WEB_PUSH_SUBSCRIPTION_KEY_BASE64,WEB_PUSH_SUBSCRIPTION_KEY_VERSION,WEB_PUSH_SUBSCRIPTION_KEYRING_JSON,WEB_PUSH_BINDING_DIGEST_SECRET,VAPID_SUBJECT,VAPID_CURRENT_KEY_VERSION,VAPID_PUBLIC_KEY,VAPID_PUBLIC_KEYRING_JSON,VAPID_PRIVATE_KEY,VAPID_KEYRING_JSON,NOTIFICATION_DELIVERY_INVOKE_SECRET,ROOM_PIN_KEY_BASE64,ROOM_PIN_KEY_VERSION,ROOM_PIN_KEYRING_JSON,ROOM_PIN_IMPORT_SPREADSHEET_ID,ROOM_PIN_IMPORT_SHEET_ID,ROOM_PIN_TRANSFER_HMAC_SECRET,ROOM_PIN_INITIAL_DIGITS,ROOM_PIN_SHEET_SYNC_INVOKE_SECRET,GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL,GOOGLE_SHEETS_SERVICE_ACCOUNT_PRIVATE_KEY,GOOGLE_SHEETS_SPREADSHEET_ID,GOOGLE_SHEETS_ROOM_PIN_TAB,RUNTIME_ENVIRONMENT,SUPABASE_PROJECT_REF',
   '--frozen',
   '--lock',
   'supabase/functions/post-approval-report.deno.lock',
@@ -314,6 +334,7 @@ runDeno([
 ]);
 verifyEdgeBundle();
 verifyPostApprovalReportEdgeBundle();
+verifyBackupMonitorBundle();
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   if (process.argv.includes('--report-raw-bundle-diagnostic')) verifyPostApprovalReportEdgeBundle({ rawSourceDiagnostic: true });

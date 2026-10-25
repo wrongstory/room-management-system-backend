@@ -47,8 +47,8 @@ describe('GitHub Actions runtime pins', () => {
       }
     }
 
-    expect(checkoutUses).toBe(5);
-    expect(setupNodeUses).toBe(4);
+    expect(checkoutUses).toBe(6);
+    expect(setupNodeUses).toBe(5);
     expect(setupPythonUses).toBe(2);
   });
 
@@ -79,5 +79,11 @@ describe('GitHub Actions runtime pins', () => {
     expect(source).not.toMatch(/^\s+(pull_request|pull_request_target|push):/m);
     expect(source).not.toContain('upload-artifact');
     expect(source).not.toMatch(/db:reset|migration up|db push/);
+    const alertJob = source?.split('\n  alert:')[1];
+    expect(alertJob).toContain('needs: backup');
+    expect(alertJob).toContain('issues: write');
+    expect(alertJob).toContain("needs.backup.result != 'success'");
+    expect(alertJob).not.toContain('secrets.RESERVATION_BACKUP');
+    expect(alertJob).not.toContain('environment: reservation-backup');
   });
 });

@@ -400,6 +400,10 @@ verify_jwt = false
 [functions.room-pin-sheet-sync]
 verify_jwt = false
 
+# Recovery project only. A dedicated hashed invoke secret authenticates this endpoint.
+[functions.reservation-backup-monitor]
+verify_jwt = false
+
 # [edge_runtime.secrets]
 # secret_key = "env(SECRET_VALUE)"
 

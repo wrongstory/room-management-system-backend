@@ -47,3 +47,27 @@ jobs:
       - name: Failure summary
         if: failure()
         run: echo 'Reservation backup failed. Check the run status; previous verified copies were not overwritten.' >> "$GITHUB_STEP_SUMMARY"
+
+  alert:
+    needs: backup
+    if: always() && github.ref == 'refs/heads/main' && vars.RESERVATION_BACKUP_ENABLED == 'true' && needs.backup.result != 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 22
+          package-manager-cache: false
+      - name: Report failure without backup credentials
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RESERVATION_BACKUP_ENABLED: 'true'
+          RESERVATION_BACKUP_RESULT: ${{ needs.backup.result }}
+          RESERVATION_BACKUP_ALERT_ISSUE: ${{ vars.RESERVATION_BACKUP_ALERT_ISSUE }}
+        run: node --experimental-strip-types scripts/reservation-backup-alert.mjs
