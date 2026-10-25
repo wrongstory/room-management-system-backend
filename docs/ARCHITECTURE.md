@@ -1368,3 +1368,10 @@ public base table/RLS/원장 변경 없이 migration124 함수만 추가한다.
 경로로 전송한다. 고정된 원래 CAS와 다른 member의 accepted change 증거를 결합하며,
 파일별 identity/lease·quota·수량과 제출·삭제 차단을 유지한다. 실제 DB/Drive는 NOT RUN이다.
 계약·검증·rollback은 [사진 묶음 계약](./PHOTO_UPLOAD_BATCH_411.md)을 따른다.
+
+## #396 운영 안전 장치 후보
+
+128은 lifecycle/CAS와 password AMR 기반 재인증, 임시 세션 폐기 readback, nonce에 묶인
+admission/terminal 처리 primitive를 제공한다. marker 부재와 만료 미완료 effect는 UNKNOWN이다.
+전체 API·Auth·worker hook은 후속 구현이며 signed worker mode나 caller Boolean으로 drain을
+증명하지 않는다. 실제 활성화와 DB 실행은 NOT RUN이다. [정확한 경계](./DEVELOPER_OPERATION_GATES.md)를 따른다.

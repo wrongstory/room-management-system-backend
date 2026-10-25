@@ -66,6 +66,7 @@ const sourcePaths = [
   'supabase/functions/_shared/developer-api.ts',
   'supabase/functions/_shared/developer-reset-api.ts',
   'supabase/functions/_shared/reset-preview.ts',
+  'supabase/functions/_shared/operation-gates.ts',
   'supabase/functions/_shared/reset-row-impact.ts',
   'supabase/functions/_shared/reset-preview-groups.ts',
   'supabase/functions/_shared/openapi.ts',

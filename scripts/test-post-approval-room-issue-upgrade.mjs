@@ -125,9 +125,9 @@ const serviceAcl = { ...ownerAcl, grantee: 'service_role' };
 
 export function validatePostApprovalUpgradeSource(manifest, entries) {
   assert.equal(manifest.schemaVersion, 1); assert.equal(manifest.release, 'dev');
-  assert.equal(manifest.hashAlgorithm, 'sha256-lf-utf8'); assert([111,112,113,114,115,116,117,118,119,120,121,122,123,124,125,126,127].includes(manifest.totalCount));
+  assert.equal(manifest.hashAlgorithm, 'sha256-lf-utf8'); assert([111,112,113,114,115,116,117,118,119,120,121,122,123,124,125,126,127,128].includes(manifest.totalCount));
   assert.equal(manifest.migrations.length, manifest.totalCount); assert.equal(entries.length, manifest.totalCount);
-  assert.equal(manifest.head, { 111: 'post_approval_room_issue_ledger', 112: 'room_event_effective_lookup_indexes', 113: 'common_auth_context_read', 114: 'room_board_issue_counts_single_scan', 115: 'assignment_tomorrow_backlog', 116: 'payroll_remittance_basis_materialized', 117: 'payroll_projection_materialization', 118: 'assignment_midnight_rollover', 119: 'room_pin_transfer', 120: 'photo_upload_pre_provider_retry', 121: 'photo_finalize_snapshot', 122: 'post_approval_memo_only', 123: 'cleaning_overdue_delivery_clock', 124: 'assignment_card_hydration', 125: 'developer_reset_preview', 126: 'photo_collection_upload_batch', 127: 'developer_reset_row_impact' }[manifest.totalCount]);
+  assert.equal(manifest.head, { 111: 'post_approval_room_issue_ledger', 112: 'room_event_effective_lookup_indexes', 113: 'common_auth_context_read', 114: 'room_board_issue_counts_single_scan', 115: 'assignment_tomorrow_backlog', 116: 'payroll_remittance_basis_materialized', 117: 'payroll_projection_materialization', 118: 'assignment_midnight_rollover', 119: 'room_pin_transfer', 120: 'photo_upload_pre_provider_retry', 121: 'photo_finalize_snapshot', 122: 'post_approval_memo_only', 123: 'cleaning_overdue_delivery_clock', 124: 'assignment_card_hydration', 125: 'developer_reset_preview', 126: 'photo_collection_upload_batch', 127: 'developer_reset_row_impact', 128: 'developer_operational_safety_gates' }[manifest.totalCount]);
   assert.equal(manifest.pending.head, manifest.head); assert.equal(manifest.pending.count, manifest.totalCount - 78);
   assert.deepEqual(manifest.baseline, { count: 78, head: 'reservation_bookability_optional_guest_count' });
   assert.equal(sha(JSON.stringify(manifest.migrations.slice(0, 110))), POST_APPROVAL_UPGRADE_PREFIX_SHA256);
@@ -222,10 +222,15 @@ export function validatePostApprovalUpgradeSource(manifest, entries) {
     assert.equal(validated[125].sha256, 'e10388c5745b6e33523a090ccffe6b7d21e1cb9acd54d5386d89d212988ee3d6',
       'Only the source-reviewed bounded photo-batch126 tail is permitted');
   }
-  if (validated.length === 127) {
+  if (validated.length >= 127) {
     assert.equal(validated[126].file, '20261025024327_developer_reset_row_impact.sql');
-    assert.equal(validated[126].sha256, 'de2d14643d34162ec94b4a66550e17ec1618a1e55ae6048c9722e7a081ec34ee',
+    assert.equal(validated[126].sha256, '3ee8731e5fe1a5872e479a0015dd7427a0c2426a2ee9f45b5157b7253b6771fc',
       'Only the source-reviewed read-only row-impact127 tail is permitted');
+  }
+  if (validated.length === 128) {
+    assert.equal(validated[127].file, '20261025025742_developer_operational_safety_gates.sql');
+    assert.equal(validated[127].sha256, '4e598b0a464bc8f59716c11a1e4ea87f84d527b00f5a4e0f788cbd0052583f90',
+      'Only the source-reviewed operation-gates128 tail is permitted');
   }
   return { entries: validated, ledger: validated[110].canonical };
 }
@@ -244,7 +249,7 @@ export function validatePostApprovalUpgradeLocal({ args, env, config, endpoint, 
   return { ...local, endpoint: localEndpoint };
 }
 export function assertPostApprovalUpgradeHistory(actual, source, installed = source.entries.length) {
-  assert([110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127].includes(installed) && installed <= source.entries.length);
+  assert([110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128].includes(installed) && installed <= source.entries.length);
   assert.deepEqual(actual, source.entries.slice(0, installed).map(({ version, name }) => ({ version, name })),
     'Exact version/name history is required, not count/head only');
 }
