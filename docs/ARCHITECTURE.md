@@ -1354,3 +1354,10 @@ token, request body 또는 idempotency payload를 저장하지 않는다. 이 so
 ## #452 명시적 PIN 파일 전송
 
 관리자 전용 export/preview/apply는 [ROOM_PIN_TRANSFER.md](./ROOM_PIN_TRANSFER.md)를 따른다. 읽기 원본과 쓰기 projection은 분리하며 transaction에는 암호화 envelope만 전달한다. 새 revision source `sheet_import`, current CAS/nonce reservation/entitlement rotation을 재사용한다. 전체 SQL 실행은 최종 릴리스 승인 때 수행한다.
+
+## #415 배정 카드 조회 통합 후보
+
+service-only `get_assignment_card_hydration`은100개 assignment의 표시 관계를 묶으며
+기존 final actor/session/ownership·schedule RPC는 모든 hydration 이후 유지한다.
+public base table/RLS/원장 변경 없이 migration124 함수만 추가한다.
+[계약·완전성·DB 미실행 경계](./ASSIGNMENT_HYDRATION_COST_BASELINE.md)를 따른다.

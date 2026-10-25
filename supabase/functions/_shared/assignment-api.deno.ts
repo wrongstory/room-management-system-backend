@@ -723,6 +723,70 @@ function readClients(
     }),
     admin: {
       rpc: async (name: string, args: Record<string, unknown>) => {
+        if (name === "get_assignment_card_hydration") {
+          await options.beforeRead?.(name);
+          const ids = args.p_assignment_ids as string[];
+          const selected = ids.map((id) =>
+            [...rows, ...(options.overdue ?? [])].find((raw) =>
+              (raw as Record<string, unknown>).id === id
+            ) as Record<string, unknown>
+          );
+          const targetIds = [
+            ...new Set(selected.map((row) => row.cleaning_target_id)),
+          ];
+          const maidIds = [
+            ...new Set(selected.map((row) => row.maid_profile_id)),
+          ];
+          const pack = async (
+            source: ReturnType<typeof queryResult>,
+            key: string,
+            values: unknown[],
+            countOverride?: number | null,
+          ) => {
+            const result = await source.query.in(key, values).limit(1000);
+            const filtered = (result.data as Record<string, unknown>[]).filter(
+              (row) => values.includes(row[key]),
+            );
+            return {
+              rows: filtered,
+              count: countOverride === undefined
+                ? filtered.length
+                : countOverride,
+            };
+          };
+          const attemptRows = await pack(
+            attempts,
+            "assignment_id",
+            ids,
+            options.attemptCount,
+          );
+          attemptRows.rows.sort((a, b) =>
+            Number(b.attempt_number) - Number(a.attempt_number)
+          );
+          const latest = new Map();
+          for (const row of attemptRows.rows) {
+            if (!latest.has(row.assignment_id)) {
+              latest.set(row.assignment_id, row.id);
+            }
+          }
+          return {
+            data: {
+              assignments: selected.map((
+                { id, cleaning_target_id, maid_profile_id },
+              ) => ({ id, cleaning_target_id, maid_profile_id })),
+              targets: await pack(targets, "id", targetIds),
+              profiles: await pack(maids, "id", maidIds),
+              attempts: attemptRows,
+              submissions: latest.size
+                ? await pack(submissions, "cleaning_attempt_id", [
+                  ...latest.values(),
+                ], options.submissionCount)
+                : { rows: [], count: 0 },
+              schedules: await pack(schedules, "cleaning_target_id", targetIds),
+            },
+            error: null,
+          };
+        }
         assert(
           name === "get_assignment_schedule_read_for_plan",
           "exact read-only RPC",
@@ -768,73 +832,55 @@ function readClients(
   };
 }
 
-for (
-  const slowTable of [
-    "cleaning_targets",
-    "profiles",
-    "cleaning_target_schedule_revisions",
-  ]
-) {
-  Deno.test(`assignment submissions overlap slow ${slowTable}, final authority remains last`, async () => {
-    let release = () => {};
-    const gate = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    let reached = () => {};
-    const submitted = new Promise<void>((resolve) => {
-      reached = resolve;
-    });
-    const events: string[] = [];
-    const { clients } = readClients([assignmentRow()], {
-      beforeRead: async (table) => {
-        events.push(`start:${table}`);
-        if (table === slowTable) await gate;
-        events.push(`end:${table}`);
-        if (table === "cleaning_submissions") reached();
-      },
-      scheduleRead: () => {
-        events.push("authority");
-        return { data: null, error: { message: "SESSION_REVOKED" } };
-      },
-    });
-    const pending = captureEdgeError(() =>
-      listAssignments(
-        request("/v1/assignments?serviceDate=2026-09-04"),
-        clients,
-        admin,
-      )
-    );
-    let timeout: number | undefined;
-    try {
-      await Promise.race([
-        submitted,
-        new Promise((_, reject) => {
-          timeout = setTimeout(
-            () => reject(new Error("submissions blocked by unrelated read")),
-            2000,
-          );
-        }),
-      ]);
-      assert(
-        !events.includes(`end:${slowTable}`),
-        "unrelated read still blocked",
-      );
-      assert(
-        !events.includes("authority"),
-        "authority must wait for all hydration",
-      );
-    } finally {
-      clearTimeout(timeout);
-      release();
-    }
-    const error = await pending;
-    assert(
-      error.status === 401 && error.code === "SESSION_REVOKED",
-      "late revocation rejects whole response",
-    );
-    assert(events.at(-1) === "authority", "final DB authority remains last");
+Deno.test("complete bounded hydration precedes the final authority RPC", async () => {
+  let release = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
   });
-}
+  let entered = () => {};
+  const started = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const events: string[] = [];
+  const { clients } = readClients([assignmentRow()], {
+    beforeRead: async (name) => {
+      if (name !== "get_assignment_card_hydration") return;
+      events.push("hydration");
+      entered();
+      await gate;
+      events.push("hydrated");
+    },
+    scheduleRead: () => {
+      events.push("authority");
+      return { data: null, error: { message: "SESSION_REVOKED" } };
+    },
+  });
+  const pending = captureEdgeError(() =>
+    listAssignments(
+      request("/v1/assignments?serviceDate=2026-09-04"),
+      clients,
+      admin,
+    )
+  );
+  await started;
+  try {
+    assert(
+      JSON.stringify(events) === '["hydration"]',
+      "final authority cannot precede hydration",
+    );
+  } finally {
+    release();
+  }
+  const error = await pending;
+  assert(
+    error.status === 401 && error.code === "SESSION_REVOKED",
+    "late revocation rejects all cards",
+  );
+  assert(
+    JSON.stringify(events) === '["hydration","hydrated","authority"]',
+    "authority is last",
+  );
+});
 
 Deno.test("pipelined submissions retain exact-count failure and empty-attempt behavior", async () => {
   for (const submissionCount of [null, 1001, 2]) {
@@ -1376,10 +1422,8 @@ Deno.test("card cancellation is advisory admin/current only and checks all relev
       "no future date or live catalog fallback",
     );
     assert(
-      attempts.filters.some(([key, value]) =>
-        key === "select" && String(value).includes("started_at")
-      ),
-      "start proof selected",
+      attempts.filters.some(([key]) => key === "assignment_id"),
+      "all attempt evidence remains bound to the selected assignments",
     );
   }
   for (const actor of [admin, maid]) {
