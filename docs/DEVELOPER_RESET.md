@@ -443,3 +443,10 @@ report 진단19,986,351 bytes, backup91,678 bytes). 첫 Edge 검사에서는 생
 format 검사에 걸려 generator를 수정했고 최종 전체 재검증은 PASS다. PostgreSQL/pgTAP,
 hosted timeout/취소, DB 복구·운영 배포는 NOT RUN이다. 독립 QA는 source/권한/합계/동일 snapshot/
 Auth ID-only census/사진 HOLD를 검토해 차단 사항0, 별도3파일47 tests PASS를 확인했다.
+
+최종 dev `f25e5b6`(#378/#493/#494/#495) 정상 통합 후 application159파일/4,389 tests,
+manifest127 및 row/preview/report generator 검사가 PASS했다. 전체 Edge65/543/68 회귀와
+실제 API bundle18,989,717 bytes, report 후보19,655,418 bytes, backup99,006 bytes가 PASS다.
+report 생성물은664,758 bytes이며 기존20MB 상한을 유지했다. Python codegen/ruff는 dev60cd6af
+통합 입력에서 PASS했고 이후 f25e5b6까지 OpenAPI/Python 입력 변경0을 확인했다.
+이번127 변경의 실제 PostgreSQL·pgTAP·hosted 호출·reset/복구 실행은 여전히 NOT RUN이다.

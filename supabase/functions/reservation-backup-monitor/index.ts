@@ -1,6 +1,10 @@
 import { collectBackupHealth } from "../_shared/reservation-backup-monitor.ts";
 import { publishBackupAlert } from "../_shared/reservation-backup-alert.ts";
 import { createBackupAlertToken } from "../_shared/reservation-backup-github-app.ts";
+import {
+  scheduledInvokeMode,
+  verifyScheduledInvocation,
+} from "../_shared/scheduled-invocation.ts";
 
 const reply = (status: number, code: string) =>
   new Response(JSON.stringify({ code }), {
@@ -12,26 +16,52 @@ const reply = (status: number, code: string) =>
   });
 export async function handleBackupMonitor(request: Request): Promise<Response> {
   const url = new URL(request.url);
-  if (request.method !== "POST" || url.search) {
+  if (
+    request.method !== "POST" || url.search ||
+    !["/functions/v1/reservation-backup-monitor", "/reservation-backup-monitor"]
+      .includes(url.pathname)
+  ) {
     return reply(400, "MONITOR_REQUEST_INVALID");
   }
   const supplied = request.headers.get("x-rms-backup-monitor-key") ?? "";
   const expected = Deno.env.get("RESERVATION_BACKUP_MONITOR_KEY_SHA256") ?? "";
-  if (!/^[a-f0-9]{64}$/.test(expected) || !/^[a-f0-9]{64}$/.test(supplied)) {
+  let mode: ReturnType<typeof scheduledInvokeMode>;
+  try {
+    mode = scheduledInvokeMode(
+      Deno.env.get("RESERVATION_BACKUP_MONITOR_INVOKE_MODE"),
+    );
+  } catch {
+    return reply(503, "MONITOR_DISABLED");
+  }
+  if (
+    !/^[a-f0-9]{64}$/.test(expected) ||
+    (mode === "legacy" && !/^[a-f0-9]{64}$/.test(supplied)) ||
+    (mode === "signed-v1" && request.headers.has("x-rms-backup-monitor-key"))
+  ) {
     return reply(401, "MONITOR_UNAUTHORIZED");
   }
-  const bytes = new TextEncoder().encode(supplied);
-  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
   const expectedBytes = Uint8Array.from(
     expected.match(/../g) ?? [],
     (value) => parseInt(value, 16),
   );
   let difference = 0;
-  for (let i = 0; i < digest.length; i++) {
-    difference |= digest[i]! ^ expectedBytes[i]!;
+  if (mode === "signed-v1") {
+    difference = await verifyScheduledInvocation(
+        request.headers,
+        expectedBytes,
+        "reservation-backup-monitor:matalcofimnhuzslfhdd",
+      )
+      ? 0
+      : 1;
+  } else {
+    const bytes = new TextEncoder().encode(supplied);
+    const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+    for (let i = 0; i < digest.length; i++) {
+      difference |= digest[i]! ^ expectedBytes[i]!;
+    }
+    bytes.fill(0);
+    digest.fill(0);
   }
-  bytes.fill(0);
-  digest.fill(0);
   expectedBytes.fill(0);
   if (difference) return reply(401, "MONITOR_UNAUTHORIZED");
   if (

@@ -1,5 +1,9 @@
 import { createEdgeClients, requestId } from "../_shared/runtime.ts";
 import {
+  scheduledInvokeMode,
+  verifyScheduledInvocation,
+} from "../_shared/scheduled-invocation.ts";
+import {
   type EdgeDeliveryCryptoConfig,
   EdgeNotificationDeliveryWorker,
 } from "../_shared/notification-delivery-worker.ts";
@@ -249,6 +253,8 @@ const response = (status: number, id: string, result: unknown) =>
   );
 export interface NotificationDeliveryHandlerDependencies {
   loadInvokeSecret?: () => string;
+  loadInvokeMode?: () => string | undefined;
+  nowMs?: () => number;
   bodyReadDeadlineMs?: number;
   loadConfig?: typeof notificationDeliveryConfig;
   run?: (
@@ -304,12 +310,21 @@ export async function handleNotificationDelivery(
     if (utf8(invokeSecret).length < 32) {
       throw new Error("NOTIFICATION_DELIVERY_NOT_CONFIGURED");
     }
-    if (
-      !await authorized(
+    const mode = scheduledInvokeMode((dependencies.loadInvokeMode ?? (() =>
+      Deno.env.get("NOTIFICATION_DELIVERY_INVOKE_MODE")))());
+    const valid = mode === "signed-v1"
+      ? !request.headers.has("x-notification-delivery-invoke-secret") &&
+        await verifyScheduledInvocation(
+          request.headers,
+          utf8(invokeSecret),
+          "notification-delivery:aodikrxcczbogjpsjwjt",
+          (dependencies.nowMs ?? Date.now)(),
+        )
+      : await authorized(
         request.headers.get("x-notification-delivery-invoke-secret"),
         invokeSecret,
-      )
-    ) {
+      );
+    if (!valid) {
       return response(401, id, {
         error: {
           code: "INVALID_INVOKE_SECRET",

@@ -116,9 +116,9 @@
     "node_modules/zod/v4/locales/yo.js": "88b33f6527c1a2faaf159568330cf727c448dc468eac72142a6fb24f8714ac1e",
     "node_modules/zod/v4/locales/zh-CN.js": "8fc02f2bd4d92f46b24b8d82da0ee95c962fc80c14dd7dd469500e14de08d320",
     "node_modules/zod/v4/locales/zh-TW.js": "01d9b119e318d8b9f1a8fa720d06424457429425a61d0730984b750e6a5edf7d",
-    "package-lock.json": "154097df2fbdd0b5df1cc024227f71c593ca4983f8a6f59825f72f2a60dc2e2a",
-    "package.json": "4fcc36255f500c664ba9cbefd749b55c4df8757da8184adad34c790b571fbb40",
-    "scripts/generate-post-approval-report-bundle.mjs": "dcfcb129d08bbd789ea3b7ba0f57969f90bdb180dab6d195da3f62f028a437b8",
+    "package-lock.json": "d0e233c8a69b420c5b58f5fdf552832116ed954757eb6054d85f983a828767bc",
+    "package.json": "6b50595a8fa6da9f0652f011d8aca5e218977c37154de27f52dd9bcc659b80b8",
+    "scripts/generate-post-approval-report-bundle.mjs": "0b3a656990be9b97e93d0d4224611dd896f89465e64400ee4b30cc623f183a07",
     "scripts/generate-post-approval-report-edge.mjs": "dd0613aa4dead87f4eb886334121e1b686dc4472b9dfd2eb0eea1316f063dffb",
     "src/domain/actor.ts": "1864484f23e5d42b45b602c3ad8682463f9e7294ab48aa60a34d178791cb7d19",
     "src/lib/app-error.ts": "0372ddabf09fb7f075347c616a0e0d594201ea6f969918e98172b93a1285ff3c",
@@ -150,6 +150,6 @@
     "supabase/functions/_shared/runtime.ts": "49af3951bd6b59d5243e3f42e7b07d6f9f95c32edb2614b4cff3329a2f2557e5"
   },
   "artifact": "supabase/functions/_shared/post-approval-report.bundle.js",
-  "bytes": 834853,
-  "sha256": "aa6cfa024f3c22da5c50de80fda7577ece47c3fe15410a27599f5e6d677ce5b8"
+  "bytes": 664758,
+  "sha256": "802be14c996419a35377f09845790933f439719bdf60a5aca195092895a5d881"
 }

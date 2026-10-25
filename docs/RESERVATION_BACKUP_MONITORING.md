@@ -23,10 +23,12 @@ recovery 감시는 매시 17분에 실행한다. 조회 실패·제한 초과·�
   객체는 검증된 사본으로 간주하지 않는다. 본문을 다운로드하거나 복호화하지 않는다.
 - GitHub 조회는 공개 API로 인증 없이 수행한다. Storage 인증은 고정 recovery origin에만 보낸다.
   외부 redirect 금지, 응답 크기·개수 제한, 요청 7초/전체 45초 제한을 둔다.
-- Edge 호출은 전용 32-byte 난수의 SHA-256을 검사하며 프로젝트 주소도 recovery로 고정한다.
+- Edge 호출은 기본 legacy에서 전용 32-byte 난수의 SHA-256을 검사하며 프로젝트 주소도 recovery로 고정한다.
   호출 본문으로 시간·대상·키·수신자를 바꿀 수 없다. 비활성 상태가 기본값이다.
-- Cron에는 Vault의 전용 호출 키만 사용한다. pg_net 대기열에서 이 값이 관측되더라도
-  백업·DB·GitHub 권한을 얻지 않는다. broad service-role이나 DB 비밀번호를 HTTP 호출 키로 쓰지 않는다.
+- 새 Cron 설치 source는 `signed-v1`을 사용해 Vault 키 자체를 pg_net 헤더에 보내지 않는다.
+  Function Secret의 비공개 SHA-256 binary digest를 HMAC 키로 사용하므로 digest도 인증정보다.
+  짧은 시간창 안에서 같은 고정 감시 요청 재생은 가능하며 단일 사용 토큰으로 취급하지 않는다.
+  [호출 계약·전환 검증](SCHEDULED_INVOCATION_492.md)을 따른다. broad service-role이나 DB 비밀번호를 HTTP 호출 키로 쓰지 않는다.
 
 ## 알림
 
@@ -57,7 +59,8 @@ App slug는 `rms-reservation-backup-wrongstory`로 고정한다. 댓글 복구�
    기존 이름이 있으면 덮어쓰지 않고 중단한다. application 업무 table/RLS는 변경하지 않는다.
 4. 별도 승인된 최종 release의 전체 DB 검증을 통과한 뒤 main에 반영한다.
    업무 API 재배포와 backup 활성화는 구분한다. 이 후보에는 운영 pending migration이 없다.
-5. recovery에만 감시 함수를 배포하고 Vault 호출 키의 hash, App ID/installation ID/private key,
+5. recovery에만 감시 함수를 배포하고 `RESERVATION_BACKUP_MONITOR_INVOKE_MODE=signed-v1`,
+   Vault 호출 키의 비공개 hash, App ID/installation ID/private key,
    전용 issue 번호를 등록한다. 실제 비인가 거부·고정 recovery guard·알림 수신을 확인한다.
 6. main backup workflow를 활성화하고 1회 실행의 저장·재조회 성공과 감시 HEALTHY를 확인한다.
    Cron은 마지막에 활성화한다. 첫 정기 백업·독립 감시 기록을 확인한 뒤 #12 완료를 판단한다.
