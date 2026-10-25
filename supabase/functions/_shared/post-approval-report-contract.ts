@@ -1,5 +1,5 @@
 // Generated from src/modules/post-approval-room-issues/post-approval-room-issue-contract.ts. DO NOT EDIT.
-import { z } from "npm:zod@4.4.3";
+import { z } from "npm:zod@4.6.6";
 import type { AppRole } from "./post-approval-report-actor.ts";
 import { AppError } from "./post-approval-report-error.ts";
 import { requestHash } from "./post-approval-report-command.ts";
