@@ -24,6 +24,25 @@ dev137/과거 manifest 검사는 PASS다. 새 지문은 manifest와 기존 upgra
 수정본 설치와 photo batch SQL 회귀를 포함한 다음 격리 검증은 새 입력의 별도 승인 후에만
 수행한다. 실패한 검증이나 소스 parser 통과를 최종 Full DB 성공 증거로 재사용하지 않는다.
 
+### #528 수정본 R2 설치 실패와 후속 준비
+
+위126 수정은 PR527에서 dev `c12ba7b42195dec7e79ff363ab197ae1d1491bd9`로 보호 병합했다.
+별도 승인된 R2는 같은 Git tree의 source `ad76ddb05bda7753dcbd9e16e8369e87593fb82f`와
+새 격리 프로젝트·14개 회귀를 대상으로 설치1회 실행했으나 migration136 statement1의
+SQLSTATE42601로 실패했다. IF 조건의 괄호 없는 CASE 내부 THEN이 조건 경계로 읽힌 것이
+원인이다. 후속 metadata·14개 SQL 회귀는 NOT RUN이며 자동 재시도0, 승인1회는 소모했다.
+생성 자원·소유 호스트 프로세스0개와 기존10개 container·5개 volume·5개 network·동일 daemon
+보존을 확인했고 정리 독립 QA도 PASS다. 운영 DB·Auth/provider·실제 초기화는 실행하지 않았다.
+
+수정 전 원격 읽기에서 production122·recovery73,136/137 적용0을 확인하여 미적용136의
+생성 원본 CASE에 괄호2문자만 추가하고 SQL·manifest·기존 upgrade의 정확한 지문을 갱신했다.
+수정 전 실패2개를 재현한 회귀와 관련3파일41 tests, 전체200파일/5,385 tests·타입/빌드 및
+과거/dev137 manifest는 PASS다. 소스 AST와 좁은 IF 경계 검사는 전체 PL/pgSQL 컴파일이나
+실제 DB 설치를 증명하지 않는다. [원인·수정 범위·검증 한계](RESET_TEMPLATE_HANDOVER_EFFECT.md)를
+따른다. 수정본 설치·14개 SQL 회귀·최종 Full DB는 NOT RUN이고, 다음 실행은 정확한 새 입력과
+대상·정리 범위를 고정한 별도 승인이 필요하다. 실패한 사전검증으로 남은 #396 개발의 DB
+선행조건이나 v1 출시 gate가 충족됐다고 표시하지 않는다.
+
 ## 2026-10-25 추천 방향 선택 후 재개
 
 사용자는 공통 개발 종료 후 제시한 추천안을 선택했고, 실제 DB 실행 승인은 정확한 대상이
@@ -107,8 +126,9 @@ dev137/과거 manifest 검사는 PASS다. 새 지문은 manifest와 기존 upgra
 | #112 알림 운영 | 과거 실제 Push 수신 근거 보존 | 현재 heartbeat/Cron·대기 작업·실제 수신 재확인 |
 | #13 역할별 실제 사용 | 자동 검사와 프런트 계약 대조 | 실제 기기/UAT·현장 입력 |
 
-각 dev PR의 migration PASS는 manifest/source 검사다. **이번 진행에서 신규 SQL·전체 DB·
-운영 migration/reset은 NOT RUN**이다. CI 실패를 숨기지 않는다. PR402의 Python 수치 실패,
+각 dev PR의 migration PASS는 manifest/source 검사다. 별도 승인한 두 격리 설치는 위와 같이
+실패했으며 후속 SQL 회귀는 NOT RUN이다. **최종 전체 DB·운영 migration/reset은 NOT RUN**이다.
+CI 실패를 숨기지 않는다. PR402의 Python 수치 실패,
 PR392의 생성 manifest 입력 hash 실패 등은 후속 source 보완과 새 exact CI로 해결했다.
 과거 PR392의 실제 SQL 회귀 실패는 이번 합성 검사로 성공 처리하지 않는다.
 공통 단계의 전체 애플리케이션 검사는 187파일/5,104 tests PASS였으며,

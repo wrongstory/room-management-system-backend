@@ -269,7 +269,7 @@ export function validatePostApprovalUpgradeSource(manifest, entries) {
   }
   if (validated.length >= 136) {
     assert.equal(validated[135].file, '20261025072617_developer_template_handover_effect.sql');
-    assert.equal(validated[135].sha256, 'e1c74fad3ab1af9f9a22c0fed9ffbd7147f891d43a840448adb1e70a370558af',
+    assert.equal(validated[135].sha256, '2d087c3d4db572fefd32b8068f7a0c5956ea8a3d4ae494f1f4d9a9f1c14b8cca',
       'Only the source-reviewed template-handover136 tail is permitted');
   }
   if (validated.length >= 137) {

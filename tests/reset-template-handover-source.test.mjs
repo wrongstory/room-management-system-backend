@@ -9,7 +9,35 @@ const require = createRequire(import.meta.url);
 const read = p => readFileSync(p, 'utf8').replaceAll('\r\n', '\n');
 const migration = 'supabase/migrations/20261025072617_developer_template_handover_effect.sql';
 const whole = read(migration), source = whole.split('-- Preserve only exact handover audit rows;')[0], regression = 'supabase/tests/developer_template_handover_effect.sql';
+// Narrow IF-expression boundary regression, not a PL/pgSQL compiler. Like PG17
+// read_sql_construct, THEN terminates this expression only at bracket depth zero.
+function conditionThroughThen(text) {
+  let depth = 0;
+  const tokens = /--[^\n]*|\/\*[\s\S]*?\*\/|'(?:[^']|'')*'|"(?:[^"]|"")*"|[a-z_][a-z_0-9]*|[^\s]/gi;
+  for (const token of text.matchAll(tokens)) {
+    const value = token[0].toLowerCase();
+    if (value === '(' || value === '[') depth++;
+    else if (value === ')' || value === ']') depth--;
+    else if (value === 'then' && depth === 0) return text.slice(0, token.index);
+  }
+  throw new Error('Missing outer THEN');
+}
+
 describe('prepared S1 source contract (SQL not executed)', () => {
+  it.each(['v15', 'v17'])('reads the complete preservation IF across its CASE expression with %s', async version => {
+    const parser = require(`@pgsql/parser/${version}`);
+    const functions = (await parser.parse(whole)).stmts.map(({ stmt }) => stmt.CreateFunctionStmt);
+    const fn = functions.find(fn => fn?.funcname?.at(-1)?.String.sval === 'assert_reset_template_handover_rows');
+    const body = fn.options.find(({ DefElem }) => DefElem.defname === 'as').DefElem.arg.List.items[0].String.sval;
+    const start = body.indexOf('if previous.id is null');
+    expect(start).toBeGreaterThan(0);
+    const condition = conditionThroughThen(body.slice(start + 3));
+    // A bare CASE would stop at its own THEN, exactly where R2 installation failed.
+    const parsed = await parser.parse(`select ${condition}`);
+    expect(parsed.stmts).toHaveLength(1);
+    expect(condition).toContain("'retired' else 'published' end");
+    expect(condition).toContain("or (item->>'newId')::uuid in (select (value->>'id')::uuid from jsonb_array_elements(p_payload->'oldTemplates'))");
+  });
   it('regenerates136 and current preview while keeping historical135 byte-identical', () => {
     for (const script of ['generate-template-handover-effect', 'generate-reset-receipt-store', 'generate-reset-preview-edge'])
       execFileSync(process.execPath, [`scripts/${script}.mjs`, '--check']);
