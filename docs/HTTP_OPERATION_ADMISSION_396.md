@@ -45,12 +45,17 @@ Node/Edge 생성 manifest가 같은 유한 route ID, RPC, command identity를 �
   사용하는 130 전용 경로에 유한 인수 subset을 전달한다. raw args를 원장/로그에 저장하지 않는다.
 - postapproval 세 명령은 기존 `p_idempotency_key_digest`를 그대로 원장 키로 사용한다.
 
-현재 source 분류는 99개 HTTP 경로 중 65개 DB command receipt 후보, 6개 무효과 본체,
+source130/131의 분류는 99개 HTTP 경로 중 65개 DB command receipt 후보, 6개 무효과 본체,
 1개 알림 읽음 원자 처리, 27개 효과별 reconciliation 필요 경로다. 65개는 예약·객실·배정·가용일·제출/검수·주급·민원·
 템플릿·후속 객실 신고·Web Push 구독 DB 등록/회수 등을 포함한다. 사용자 송금이나 push 전달을
 수행/완료했다는 뜻이 아니다. 신규 후속 원장 adapter가 추가되면 이 수치와 manifest를 함께 갱신한다.
 계정 잠금 해제는 `unlock_account/account.unlock`의 DB 원장으로 확인한다. 역할·상태 변경은
 실제 Auth provider 변경이 앞뒤로 존재하므로 이 DB-only 계약으로 완료하지 않는다.
+
+source137의 [청소 진행 변경 연결](LIFECYCLE_OPERATION_ADMISSION.md)은 위 27개 중
+`manageAttemptLifecycle` 한 경로의 세 공개 action만 별도 고정 adapter로 처리한다.
+기존65개와 이1개는 정확한 DB 원장으로 완료를 관찰할 수 있고, 나머지26개는 계속 OPAQUE다.
+`expire_scheduled`나 다른 Auth/provider 경로를 확대하지 않으며, source130 SQL은 그대로 유지한다.
 
 예약 전환은 내부 receipt가 아닌 `reservation.process_due_transitions.v66`을 사용한다.
 검수는 `inspection.approved`/`inspection.rejected`이다. no-op 지급 메모의 `entity_id=NULL`도

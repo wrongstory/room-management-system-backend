@@ -6,7 +6,7 @@ HTTP 업무 경로에 연결할 수 있도록 service 전용 RPC를 제공한다
 
 ## 유한 경로와 원장
 
-정본은 `src/modules/developer-reset/http-admission-routes.json`이다. 99개 경로 중 65개는
+정본은 `src/modules/developer-reset/http-admission-routes.json`이다. source130에서 99개 경로 중 65개는
 기존 `private.command_executions` 완료 원장을 확인할 수 있다. 이 중 62개는 실제 업무 RPC의
 `p_request_hash`를 받고, 가능일 명령 3개는 원래 SQL의 UUID/날짜/enum/정규 날짜 배열로 해시를
 다시 계산한다. 암호화 전 HTTP body digest를 원장 hash로 대신하지 않는다.
@@ -15,6 +15,10 @@ HTTP 업무 경로에 연결할 수 있도록 service 전용 RPC를 제공한다
 발급하지 않는다. 나머지 27개 Auth/PIN/사진 등 외부 효과 경로는 OPAQUE이며 이 RPC로 완료할 수 없다.
 읽기 요청과 인증 오류의 감사 쓰기도 별도 고정 dispatch 범위에 포함해야 한다. 감사 기록을 생략해
 유지보수 장벽을 우회하지 않는다. 경로 개수만으로 실제 배포와 전체 쓰기 차단을 증명하지 않는다.
+
+후속 source137은 [별도 lifecycle adapter](LIFECYCLE_OPERATION_ADMISSION.md)로
+`manageAttemptLifecycle`의 세 공개 action을 정확한 원장에 결합한다. source130 자체와
+기존65개는 변경하지 않으며, 이 후속을 포함한 현재 나머지 OPAQUE는26개다.
 
 `generate-operation-admission-sql.mjs`는 이 정본의 검증된 유한 행만 SQL에 고정한다. 임의 RPC 실행,
 동적 SQL, 사용자 지정 command 승격은 없다. `operation-admission.sql.in`이 생성 원본이다.
