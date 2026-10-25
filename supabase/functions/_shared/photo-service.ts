@@ -123,7 +123,8 @@ export type PhotoRoute =
   }
   | { kind: "slots"; attemptId: string }
   | { kind: "status"; operationId: string }
-  | { kind: "content"; photoId: string };
+  | { kind: "content"; photoId: string }
+  | { kind: "thumbnail"; photoId: string };
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function invalid(): never {
@@ -207,6 +208,7 @@ export function photoRoute(method: string, path: string): PhotoRoute | null {
   const slots = path.match(/^\/v1\/attempts\/([^/]+)\/photo-slots$/);
   const status = path.match(/^\/v1\/photo-uploads\/([^/]+)$/);
   const content = path.match(/^\/v1\/photos\/([^/]+)\/content$/);
+  const thumbnail = path.match(/^\/v1\/photos\/([^/]+)\/thumbnail$/);
   if (method === "POST" && upload) {
     return {
       kind: "upload",
@@ -238,6 +240,9 @@ export function photoRoute(method: string, path: string): PhotoRoute | null {
   }
   if (method === "GET" && content) {
     return { kind: "content", photoId: uuid(content[1]) };
+  }
+  if (method === "GET" && thumbnail) {
+    return { kind: "thumbnail", photoId: uuid(thumbnail[1]) };
   }
   return null;
 }
@@ -990,6 +995,7 @@ export class PhotoService {
     request: Request,
     i: PhotoIdentity,
     photoId: string,
+    representation: "content" | "thumbnail" = "content",
   ): Promise<Response> {
     if (i.profileStatus !== "active" || !["admin", "maid"].includes(i.role)) {
       throw new PhotoError(403, "PHOTO_ACCESS_REQUIRED");
@@ -1006,15 +1012,24 @@ export class PhotoService {
       (firstRetention.expiresAt !== null &&
         Date.parse(firstRetention.expiresAt) <= Date.now())
     ) throw new PhotoError(403, "PHOTO_ACCESS_REQUIRED");
-    const bytes = await this.#measure(
-      "drive",
-      () => this.provider().read(object, ...this.#providerTiming()),
-    );
+    const bytes = await this.#measure("drive", () => {
+      const provider = this.provider();
+      if (representation === "content") {
+        return provider.read(object, ...this.#providerTiming());
+      }
+      if (!provider.thumbnail) {
+        throw new PhotoError(503, "PHOTO_THUMBNAIL_UNAVAILABLE");
+      }
+      return provider.thumbnail(object, ...this.#providerTiming());
+    });
     const latest = row(await this.#rpc("authorize_photo_read", args));
+    const latestObject = readObject(latest);
     const latestRetention = retentionMetadata(latest);
     if (
-      latest.providerFileId !== first.providerFileId ||
-      latest.sha256 !== first.sha256 ||
+      latestObject.fileId !== object.fileId ||
+      latestObject.sha256 !== object.sha256 ||
+      latestObject.mime !== object.mime ||
+      latestObject.sizeBytes !== object.sizeBytes ||
       photoStorageFileName(latest.fileName, object.mime) !== fileName ||
       JSON.stringify(latestRetention) !== JSON.stringify(firstRetention) ||
       latestRetention.mediaAvailability !== "available" ||
@@ -1023,11 +1038,15 @@ export class PhotoService {
     ) throw new PhotoError(403, "PHOTO_ACCESS_REQUIRED");
     return new Response(Uint8Array.from(bytes), {
       headers: {
-        "content-type": object.mime,
+        "content-type": representation === "thumbnail"
+          ? "image/jpeg"
+          : object.mime,
         "content-length": String(bytes.length),
         "cache-control": "no-store",
         "x-content-type-options": "nosniff",
-        "content-disposition": photoContentDisposition(fileName, object.mime),
+        "content-disposition": representation === "thumbnail"
+          ? 'inline; filename="thumbnail.jpg"'
+          : photoContentDisposition(fileName, object.mime),
         "access-control-expose-headers": "Content-Disposition",
       },
     });

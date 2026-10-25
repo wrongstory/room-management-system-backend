@@ -1,3 +1,4 @@
+import { AssignmentHydrationError, loadAssignmentHydration } from './assignment-hydration.js';
 import type { Actor } from '../../domain/actor.js';
 import { AppError } from '../../lib/app-error.js';
 import type { SupabaseClients } from '../../lib/supabase.js';
@@ -158,18 +159,7 @@ export class SupabaseAssignmentService implements AssignmentService {
     ].join(',');
   }
 
-  private async relatedRows(table: string, columns: string, key: string, ids: string[], order?: string): Promise<unknown[]> {
-    const rows: unknown[] = [];
-    for (let offset = 0; offset < ids.length; offset += hydrationBatchSize) {
-      let query = this.clients.admin.from(table).select(columns, { count: 'exact' })
-        .in(key, ids.slice(offset, offset + hydrationBatchSize));
-      if (order) query = query.order(order, { ascending: false });
-      rows.push(...completeRows(await query.limit(readLimit)));
-    }
-    return rows;
-  }
-
-  private async scheduleReads(actor: Actor, rows: AssignmentRow[], includeCurrent: boolean) {
+  private sessionId(actor: Actor): string {
     let sessionId: string;
     try {
       const claims = JSON.parse(Buffer.from(actor.accessToken.split('.')[1] ?? '', 'base64url').toString('utf8')) as { session_id?: unknown };
@@ -177,6 +167,11 @@ export class SupabaseAssignmentService implements AssignmentService {
         !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(claims.session_id)) throw new Error();
       sessionId = claims.session_id.toLowerCase();
     } catch { throw new AppError(401, 'INVALID_ACCESS_TOKEN', '로그인이 필요합니다.'); }
+    return sessionId;
+  }
+
+  private async scheduleReads(actor: Actor, rows: AssignmentRow[], includeCurrent: boolean) {
+    const sessionId = this.sessionId(actor);
     const result = new Map<string, AssignmentScheduleRead>();
     for (let offset = 0; offset < rows.length; offset += hydrationBatchSize) {
       const ids = rows.slice(offset, offset + hydrationBatchSize).map((row) => row.id);
@@ -194,25 +189,38 @@ export class SupabaseAssignmentService implements AssignmentService {
 
   private async hydrate(actor: Actor, rows: AssignmentRow[], includeCurrent: boolean): Promise<unknown[]> {
     if (rows.length === 0) return [];
-    const targetIds = [...new Set(rows.map((row) => row.cleaning_target_id))];
-    const maidIds = [...new Set(rows.map((row) => row.maid_profile_id))];
-    const assignmentIds = rows.map((row) => row.id);
-    const [targetRows, profileRows, attemptData, scheduleRows] = await Promise.all([
-      this.relatedRows('cleaning_targets',
-        'id,room_id,cleaning_kind,source,original_service_date,effective_service_date,carryover_count,status,assignment_version,room_type_snapshot,fee_snapshot,template_snapshot,rooms!inner(room_number)'
-      , 'id', targetIds),
-      this.relatedRows('profiles', 'id,display_name', 'id', maidIds),
-      this.attemptRead(assignmentIds),
-      this.relatedRows('cleaning_target_schedule_revisions', 'cleaning_target_id,revision,effective_service_date,reason_code', 'cleaning_target_id', targetIds, 'revision')
-    ]);
-    const targets = new Map((targetRows as TargetRow[]).map((row) => [row.id, row]));
-    const profiles = new Map((profileRows as ProfileRow[]).map((row) => [row.id, row]));
-    const { attempts, capabilityAttempts, submissionRows } = attemptData;
+    const sessionId = this.sessionId(actor);
+    let data: Awaited<ReturnType<typeof loadAssignmentHydration>>;
+    try {
+      data = await loadAssignmentHydration(rows, async ids => {
+        const response = await this.clients.admin.rpc('get_assignment_card_hydration', {
+          p_actor_profile_id: actor.profileId, p_session_id: sessionId,
+          p_assignment_ids: ids, p_expected_actor_role: actor.role
+        });
+        if (response.error) throw databaseError(response.error);
+        return response.data;
+      });
+    } catch (error) {
+      if (error instanceof AssignmentHydrationError) throw databaseError(null);
+      throw error;
+    }
+    const targets = new Map((data.targets as unknown as TargetRow[]).map(row => [row.id, row]));
+    const profiles = new Map((data.profiles as unknown as ProfileRow[]).map(row => [row.id, row]));
+    const attempts = new Map<string, AttemptRow>();
+    const capabilityAttempts = new Map<string, AttemptRow[]>();
+    for (const attempt of data.attempts as unknown as AttemptRow[]) {
+      if (!attempts.has(attempt.assignment_id)) attempts.set(attempt.assignment_id, attempt);
+      const all = capabilityAttempts.get(attempt.assignment_id) ?? [];
+      all.push(attempt);
+      capabilityAttempts.set(attempt.assignment_id, all);
+    }
+    const submissionRows = data.submissions;
+    const scheduleRows = data.schedules;
     const submissions = new Map<string, SubmissionRow>();
-    for (const submission of submissionRows as SubmissionRow[]) {
+    for (const submission of submissionRows as unknown as SubmissionRow[]) {
       if (!submissions.has(submission.cleaning_attempt_id)) submissions.set(submission.cleaning_attempt_id, submission);
     }
-    const schedules = indexAssignmentSchedules(scheduleRows as ScheduleRow[]);
+    const schedules = indexAssignmentSchedules(scheduleRows as unknown as ScheduleRow[]);
     // Revalidate actor/session/ownership last, in the same DB snapshot as the
     // new facts. History never hydrates current reservation/occupancy state.
     const scheduleReads = await this.scheduleReads(actor, rows, includeCurrent);
@@ -262,20 +270,4 @@ export class SupabaseAssignmentService implements AssignmentService {
     });
   }
 
-  private async attemptRead(assignmentIds: string[]) {
-    // Submissions depend only on the latest attempts, not on target/profile/history reads.
-    // Keep all attempts for cancellation guards and the final authority RPC in hydrate.
-    const attemptRows = await this.relatedRows('cleaning_attempts', 'id,assignment_id,attempt_number,status,started_at', 'assignment_id', assignmentIds, 'attempt_number');
-    const attempts = new Map<string, AttemptRow>();
-    const capabilityAttempts = new Map<string, AttemptRow[]>();
-    for (const attempt of attemptRows as AttemptRow[]) {
-      if (!attempts.has(attempt.assignment_id)) attempts.set(attempt.assignment_id, attempt);
-      const all = capabilityAttempts.get(attempt.assignment_id) ?? [];
-      all.push(attempt);
-      capabilityAttempts.set(attempt.assignment_id, all);
-    }
-    const attemptIds = [...attempts.values()].map((attempt) => attempt.id);
-    const submissionRows = await this.relatedRows('cleaning_submissions', 'cleaning_attempt_id,version,status', 'cleaning_attempt_id', attemptIds, 'version');
-    return { attempts, capabilityAttempts, submissionRows };
-  }
 }

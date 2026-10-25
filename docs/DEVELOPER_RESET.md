@@ -373,6 +373,15 @@ fixture5건으로 실행했다. Docker 전체 Edge bundle/통합 검증, 실제 
 운영 배포·실제 사용자 검증은 NOT RUN이다. 독립 QA는 소스/권한/계약을 검토해 차단 결함 없음,
 별도6파일/109 tests PASS를 확인했다. 원격 보호 CI·병합은 이 기록 시점 후속이다.
 
+2026-10-25 dev a355ba0 통합 후: `ci:quality` PASS(141파일/3,462 tests, lint/typecheck/build,
+OpenAPI156 paths/168 operations), manifest 정적 검사 PASS(125개, head developer_reset_preview).
+`edge:check` 전체 PASS: pinned Deno format/typecheck/합성 회귀 및 실제 배포 entrypoint
+bundle 19,105,177 bytes, report source+artifact 진단 bundle 19,940,970 bytes,
+backup monitor bundle 91,678 bytes. 진단 bundle은 20,000,000-byte 상한에 가깝기 때문에
+후속 API 추가도 같은 상한 검사를 통과해야 한다. 실제 SQL/pgTAP/DB reset/복구/운영 배포는
+계속 NOT RUN이다. preview 기본 단위에 대한 독립 QA 결과를 유지하며 dev 충돌은 양쪽
+기능과 migration123/124/125 정확한 source hash 검증을 보존해 해결했다.
+
 기존 GitHub 기록에서 secrets checker가 추적 파일만 검사한다고 설명했지만,
 실제 `scripts/check-secrets.mjs`는 git ls-files --cached --others --exclude-standard로
 미추적 신규 파일도 검사한다. 출력 문구의 tracked는 정확한 대상 설명이 아니다.

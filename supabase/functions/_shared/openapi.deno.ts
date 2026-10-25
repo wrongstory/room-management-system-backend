@@ -355,6 +355,11 @@ Deno.test("photo OpenAPI collection operations retain raw body boundary, CAS and
       .join() === "admin,maid",
     "developer original read denied",
   );
+  assert(
+    document.paths["/v1/photos/{photoId}/thumbnail"].get["x-required-roles"]
+      .join() === "admin,maid",
+    "thumbnail shares original content roles",
+  );
   const schemas = document.components.schemas;
   assert(
     upload.responses["408"].description.includes("PHOTO_BODY_TIMEOUT"),
@@ -411,13 +416,13 @@ Deno.test("photo OpenAPI collection operations retain raw body boundary, CAS and
     "limited cannot read original ID",
   );
   assert(
-    Object.keys(document.paths).length === 155 &&
+    Object.keys(document.paths).length === 156 &&
       Object.values(document.paths).flatMap((item) =>
           Object.keys(item).filter((method) =>
             ["get", "post", "put", "patch", "delete"].includes(method)
           )
-        ).length === 167,
-    "combined source contract 155/167 (not hosted deployment)",
+        ).length === 168,
+    "combined source contract 156/168 (not hosted deployment)",
   );
 });
 

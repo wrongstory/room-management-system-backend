@@ -12,7 +12,16 @@
 건수가 아니며, `exact=false`의 observedRows는 누락 또는 상한 때문에 전체 합계가 아니다.
 snapshotId는 실행 token·CAS·백업/복구 증명이 아니다. 실제 초기화 경로는 없으며 신규 SQL을
 실행하거나 프런트 화면을 수정하지 않았다. 개발자 콘솔 UI 연결은 별도 범위다.
-source OpenAPI 155 paths / 167 operations. [전체 계약](./DEVELOPER_RESET.md).
+source OpenAPI 156 paths / 168 operations. [전체 계약](./DEVELOPER_RESET.md).
+
+## 2026-10-25 #415 합성 기준선 통합
+
+#453/#455 계산 개선은 v0.9.5 이후 운영에 포함됐다. PR456의
+[합성 CPU 기준선](./ASSIGNMENT_HYDRATION_COST_BASELINE.md)을 최신 dev와 통합한다.
+CPU 비교는 실제 API·DB·네트워크·사용자 대기 시간의 개선율이 아니다.
+신규 bounded hydration RPC의 source 후보를 준비했다. 실제 DB 실행·운영 적용·속도 계측은 NOT RUN이며 #415는 OPEN이다.
+기존 endpoint/Swagger/프런트 호출을 유지한다. Full DB는 NOT RUN이며
+최종 릴리스 1회 실행 전에 별도 승인을 받는다.
 
 ## 2026-10-25 #487 보안 패치 후보
 
