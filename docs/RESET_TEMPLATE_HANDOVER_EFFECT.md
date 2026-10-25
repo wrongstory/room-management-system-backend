@@ -99,11 +99,12 @@ statement_timeout이 이미 시작된 hosted 요청을 정확히 끊는지와 �
 
 합성 Node 검사는 실제 owned builder/닫힌 collector 경로, 공개 비활성, 일회 전달/소비,
 PRECHECK·CREATE·STARTED·APPLY 실패, payload 변조, 응답 유실/timeout→READ, 폐기와 비밀 비노출을
-확인한다. PG15/17 parser는 migration 및 rollback-only pgTAP 소스 문법을 검사한다.
+확인한다. PG15/17 parser는 migration 및 rollback-only pgTAP의 바깥 SQL 구문을 검사하며,
+문자열로 저장된 PL/pgSQL 본문의 전체 컴파일을 대신하지 않는다.
 pgTAP 소스는 역할 권한, NULL/nonce/actor/CAS/내용·버전 차이, 게시 후 실패 전체 rollback,
 old provenance 보존, 실제 DB 시각 및 일회 결과를 검증하도록 준비했다.
 
-**SQL/pgTAP/Full DB/hosted RPC/Auth/provider/실제 승인 소비는 NOT RUN이다.** 실제 복구 보호,
+**수정본 SQL 설치/pgTAP/Full DB/hosted RPC/Auth/provider/실제 승인 소비는 NOT RUN이다.** 실제 복구 보호,
 사진 HOLD/FK 부모 보존 및 전체 초기화 범위 완전성, 실제 유지보수 drain·운영 상태 확인,
 정확한 대상·최종 소스 승인과 활성화 연결은 이 S1 효과 준비로 대체하지 않는다.
 정기 예약 백업은 Auth/PIN/템플릿/사진 등 전체 복구의 증거가 아니다.
@@ -115,3 +116,27 @@ report candidate 19,906,630 bytes/backup99,006 bytes PASS로 기존20MB 한도�
 독립 검토에서 dispose/slot metadata와 역사 참조 보호를 보완했고 최종 관련85tests,
 숫자 원문 대조 보완 뒤7tests 및 source 검토에서 차단 finding이 없었다. 이 수치는 실제 DB
 결과가 아니다. 이전135 manifest entry와 source135 바이트는 그대로다.
+
+### #528 R2 설치 실패와 미적용 source136 수정
+
+2026-10-25 별도 승인한 D03-P R2는 source `ad76ddb05bda7753dcbd9e16e8369e87593fb82f`의
+migration136 statement1(두 번째 문장)에서 SQLSTATE42601로 설치 실패했다. 기존 행을 대조하는
+`assert_reset_template_handover_rows`의 IF 조건에 괄호 없는 CASE 표현식이 있어,
+PL/pgSQL이 CASE 내부 THEN을 바깥 IF 조건의 끝으로 읽는 문제가 드러났다.
+후속 metadata와 고정14개 SQL 회귀는 NOT RUN이며 승인된1회는 소모했다. 자동 재시도는 없다.
+정리 후 이번 소유 자원·호스트 프로세스0개, 기존10개 container·5개 volume·5개 network와
+동일 Docker daemon 보존을 대조했고 독립 검토도 PASS였다. 설치 실패를 rollback/효과 검증
+성공으로 바꾸지 않는다.
+
+수정 전 원격 읽기 확인에서 production history122·recovery73이며136/137 적용은0건이었다.
+실패한 격리 자원도 정리되어, 이미 적용된 이력 대신 **미적용 source136 후보**를 고친다.
+정본 `scripts/template-handover-effect.sql.in`의 CASE 양쪽에 괄호2문자만 추가하고136을
+재생성했다. 상태 비교의 의도·권한·보존·효과 순서는 바꾸지 않으며 manifest와 기존 upgrade의
+정확한 소스 지문을 함께 갱신한다. 수정136의 UTF-8 LF SHA256은
+`2d087c3d4db572fefd32b8068f7a0c5956ea8a3d4ae494f1f4d9a9f1c14b8cca`다.
+
+좁은 IF 조건 경계 회귀2개는 수정 전 실패를 재현하고 수정 후 PG15/17 SELECT parser를
+통과했다. 관련3파일41 tests, 전체200파일/5,385 tests·typecheck/build 및 과거/dev137
+manifest 검사는 PASS다. 이 회귀는 PL/pgSQL 컴파일러나 실제 설치 검사가 아니므로 수정본의
+DB 설치·14개 SQL 회귀·최종 Full DB는 여전히 NOT RUN이다. 새 고정 소스·대상·정리 범위의
+다음 실행은 별도 승인이 필요하며, 공개 실행·실제 초기화·사진 삭제 HOLD 경계는 그대로다.

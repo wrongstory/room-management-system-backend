@@ -68,7 +68,7 @@ begin
     end if;
     select * into previous from public.cleaning_template_versions where id=(item->>'sourceId')::uuid;
     select * into rt from public.room_types where id=previous.room_type_id for share;
-    if previous.id is null or rt.id is null or previous.status<>case when p_after then 'retired' else 'published' end
+    if previous.id is null or rt.id is null or previous.status<>(case when p_after then 'retired' else 'published' end)
       or previous.version is distinct from (item->>'expectedCurrentVersion')::integer
       or previous.room_type_id::text is distinct from item#>>'{content,roomTypeId}'
       or previous.cleaning_kind::text<>'checkout'
