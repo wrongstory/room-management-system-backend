@@ -107,6 +107,7 @@ import {
   notificationReadPath,
 } from "../_shared/notification-api.ts";
 import { openApiResponse, swaggerUiResponse } from "../_shared/openapi.ts";
+import { developerResetPreview } from "../_shared/developer-reset-api.ts";
 import {
   carryForwardPayroll,
   carryLatePayrollEarning,
@@ -402,6 +403,9 @@ async function handleApiRequestCore(
     path = routePath(request.url);
     if (roomPinOperation(request.method, path)) id = crypto.randomUUID();
     corsHeaders = cors(request);
+    if (path === "/v1/developer/reset/preview") {
+      corsHeaders["cache-control"] = "no-store";
+    }
     const decodedLimitedPath = path.split("/").map((segment) => {
       try {
         return decodeURIComponent(segment);
@@ -613,16 +617,21 @@ async function handleApiRequestCore(
       let service = (dependencies.photoService ?? createPhotoService)(
         clients,
       );
-      if (photo.kind === "content") {
+      if (photo.kind === "content" || photo.kind === "thumbnail") {
         actor = await dependencies.authenticateRequest(request, clients);
         requirePasswordChanged(actor);
         service = service.withTiming();
-        const result = await service.content(request, {
-          profileId: actor.profileId,
-          sessionId: verifiedRequestSessionId(request),
-          role: actor.role,
-          profileStatus: "active",
-        }, photo.photoId);
+        const result = await service.content(
+          request,
+          {
+            profileId: actor.profileId,
+            sessionId: verifiedRequestSessionId(request),
+            role: actor.role,
+            profileStatus: "active",
+          },
+          photo.photoId,
+          photo.kind,
+        );
         for (const [key, value] of Object.entries(corsHeaders)) {
           result.headers.set(key, value);
         }
@@ -1166,6 +1175,14 @@ async function handleApiRequestCore(
             resetProfileId,
           ),
         },
+        200,
+        corsHeaders,
+      );
+    }
+
+    if (request.method === "GET" && path === "/v1/developer/reset/preview") {
+      return jsonResponse(
+        { preview: await developerResetPreview(request, clients, actor) },
         200,
         corsHeaders,
       );

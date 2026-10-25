@@ -1,5 +1,12 @@
 # 백엔드 서버 설계
 
+## #411 비공개 사진 미리보기 후보
+
+`GET /v1/photos/{photoId}/thumbnail`은 원본의 DB 읽기 권한과 보존 상태를 전후
+재검증한 뒤 같은 Drive 객체의 provider 미리보기를 서버에서 중계한다.
+별도 storage object/table/cache·보존 clock·삭제 worker 변경은 없다.
+구체 범위와 운영 미검증 사항은 [썸네일 계약](./PHOTO_THUMBNAIL_411.md)을 따른다.
+
 ## #414 주급 projection 재사용 후보
 
 117번째 후보는 private before_workflow의 단일행 CTE만 MATERIALIZED로
@@ -990,6 +997,9 @@ enrollment와 emitter에서 재검증합니다. 수신자 profile에 추가 역�
 동일 이벤트는 다른 실행 actor·10분 grouping 경계에서도 재생성하지 않습니다. 늦게 활성화된
 관리자의 새 inbox는 허용하지만 원 event 시각과 기존 push 24h TTL을 유지합니다.
 따라서 24시간 뒤 신규 관리자 push의 즉시 만료 가능성은 별도 #345 OPEN입니다.
+#345 source 후보는 신규 outbox에만 수신자 `enrolled_at`을 사용하고 deferred 검사도
+같은 시각을 요구합니다. 과거 event/inbox/outbox는 보존하며 적용·SQL 검증은 승인 대기입니다.
+[후보 및 검증 상태](./CLEANING_OVERDUE_DELIVERY_CLOCK_345.md)를 확인합니다.
 #343 신규 complaint family의 enrollment-clock delivery 보완을 기존 cleaning family 완료로 확대하지 않습니다.
 현장 완료·업로드·검수 대기에 새 SLA를 만들지 않으며 original domain row는 변경하지 않습니다.
 
@@ -1344,3 +1354,10 @@ token, request body 또는 idempotency payload를 저장하지 않는다. 이 so
 ## #452 명시적 PIN 파일 전송
 
 관리자 전용 export/preview/apply는 [ROOM_PIN_TRANSFER.md](./ROOM_PIN_TRANSFER.md)를 따른다. 읽기 원본과 쓰기 projection은 분리하며 transaction에는 암호화 envelope만 전달한다. 새 revision source `sheet_import`, current CAS/nonce reservation/entitlement rotation을 재사용한다. 전체 SQL 실행은 최종 릴리스 승인 때 수행한다.
+
+## #415 배정 카드 조회 통합 후보
+
+service-only `get_assignment_card_hydration`은100개 assignment의 표시 관계를 묶으며
+기존 final actor/session/ownership·schedule RPC는 모든 hydration 이후 유지한다.
+public base table/RLS/원장 변경 없이 migration124 함수만 추가한다.
+[계약·완전성·DB 미실행 경계](./ASSIGNMENT_HYDRATION_COST_BASELINE.md)를 따른다.

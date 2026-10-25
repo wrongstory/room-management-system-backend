@@ -758,6 +758,9 @@ deferred event/enrollment/notice/outbox trigger가 수신자별 정확히 한 in
 같은 commit에서 요구한다. 별도 singleton cursor는 mutable 기술 projection이며 100건씩 회전한다.
 알림은 informational history이고 업무 완료 뒤에도 원장·알림을 삭제하거나 다시 쌓지 않는다.
 
+#345 source 후보는 신규 수신자의 outbox 시각만 기존 `enrolled_at`에 결합한다.
+새 테이블이나 과거 이력 backfill은 없다. [검증·배포 상태](./CLEANING_OVERDUE_DELIVERY_CLOCK_345.md).
+
 #308 3차의 dev 통합 계약(PR #340)은 새 테이블 없이 기존 attempt와 immutable `cleaning.attempt_started` 감사에
 정상 청소 시작 알림을 결합한다. 관리자의 informational inbox와 비자기 push intent는
 시작 상태/CAS/receipt와 동일 transaction에 추가하고 source-controlled writer의 원자성과
@@ -1533,3 +1536,10 @@ active-only fresh wrapper1개뿐이며, 선행 실제7/19 chain 뒤 **source 예
 ## #452 PIN 가져오기
 
 private.room_pin_revisions.source에 sheet_import를 추가한다. 신규 public table 없이 current CAS·기존 nonce/entitlement trigger를 재사용한다. 상세 계약은 [ROOM_PIN_TRANSFER.md](./ROOM_PIN_TRANSFER.md)를 따른다.
+
+## #415 배정 카드 조회 통합 후보
+
+service-only `get_assignment_card_hydration`은100개 assignment의 표시 관계를 묶으며
+기존 final actor/session/ownership·schedule RPC는 모든 hydration 이후 유지한다.
+public base table/RLS/원장 변경 없이 migration124 함수만 추가한다.
+[계약·완전성·DB 미실행 경계](./ASSIGNMENT_HYDRATION_COST_BASELINE.md)를 따른다.

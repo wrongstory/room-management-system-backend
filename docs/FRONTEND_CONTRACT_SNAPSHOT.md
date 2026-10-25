@@ -1,5 +1,19 @@
 # 프런트엔드 계약 snapshot
 
+## 2026-10-25 #396 초기화 영향 조회 후보
+
+통합 source OpenAPI는 156 paths / 168 operations다. `GET /v1/developer/reset/preview`만 추가했으며
+active developer/session 전후 검증과 후보 그룹별 건수 조회를 제공한다. 실행은 항상 false이고
+`diagnosticComplete`는 수집 완전성만 나타낸다. 신규 migration/API는 운영 미적용이며 프런트
+코드는 변경하지 않았다. [진단 계약과 미실행 범위](./DEVELOPER_RESET.md)를 따른다.
+
+## 2026-10-25 #411 썸네일 개발 후보
+
+썸네일 단독 checkpoint의 source OpenAPI155 paths/167 operations: `GET /v1/photos/{photoId}/thumbnail` 1개 추가.
+원본과 같은 권한·retention/no-store이며 provider 미리보기가 없으면503이다.
+운영·프런트는 미반영이다. [계약·미실행 검증](./PHOTO_THUMBNAIL_411.md)을 따른다.
+기존154/166 계약과 아래 운영 기록은 해당 checkpoint의 이력이다.
+
 ## 2026-10-25 dev 통합 — #485
 
 운영의 마지막 확인 기록은 [v0.9.9 배포](https://github.com/wrongstory/room-management-system-backend/pull/477#issuecomment-6359461664)의 API53 / migration122 / main3e805249다. 아래 과거의 현재·후보·미배포 표현은 각 checkpoint 당시 상태다.

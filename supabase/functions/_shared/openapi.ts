@@ -1809,6 +1809,41 @@ export const openApiDocument = {
         },
       },
     },
+    "/v1/photos/{photoId}/thumbnail": {
+      get: {
+        ...photoOperation(
+          "getPhotoThumbnail",
+          "동일 사진 권한의 비공개 목록 미리보기",
+          "PhotoUploadOperation",
+          ["admin", "maid"],
+        ),
+        parameters: [photoPathId("photoId")],
+        description:
+          "개발 후보입니다. 원본 content와 같은 active admin/본인 현재 회차 maid·live session·보존 조건을 전후 재검증합니다. 기존 Drive 객체의 자동 미리보기만 서버에서 읽으며 새 객체/보존 clock/공개 URL/캐시를 만들지 않습니다. 원본을 매번 decode하지 않습니다. 미리보기 미생성·checksum 부재·지원하지 않는 provider 응답은 PHOTO_THUMBNAIL_UNAVAILABLE(503)이며 클라이언트가 기존 content를 별도 요청할 수 있습니다. 원본 자동 전송·업로드 재시도·Range·query는 지원하지 않습니다.",
+        responses: {
+          ...photoOperation("unused", "unused", "PhotoUploadOperation")
+            .responses,
+          "200": {
+            description:
+              "최대64KiB/가로세로512px JPEG 미리보기. 실제 provider 생성 여부와 성능은 운영 검증 전입니다.",
+            headers: {
+              "Cache-Control": noStoreHeader,
+              "X-Content-Type-Options": { schema: { const: "nosniff" } },
+              "Content-Disposition": {
+                schema: { const: 'inline; filename="thumbnail.jpg"' },
+              },
+              "Server-Timing": {
+                schema: { type: "string" },
+                description: "고정 숫자 구간만 반환; URL/locator/token 없음",
+              },
+            },
+            content: {
+              "image/jpeg": { schema: { type: "string", format: "binary" } },
+            },
+          },
+        },
+      },
+    },
     "/health": {
       get: {
         tags: ["System"],
@@ -2077,6 +2112,27 @@ export const openApiDocument = {
     "/v1/accounts/{profileId}/password-reset": accountMutationPath(
       "resetAccountPassword",
     ),
+    "/v1/developer/reset/preview": {
+      get: {
+        tags: ["Developer"],
+        operationId: "getDeveloperResetPreview",
+        summary: "초기화 후보 영향 읽기 전용 조회",
+        description:
+          "active developer/session을 수집 전후 재검증합니다. 한 statement snapshot에서 테이블별 최대 10,001행의 독립 건수를 읽고 후보 그룹별 집계만 반환합니다. diagnosticComplete는 inventory 수집 완전성뿐이며 실제 삭제·재등록·Auth 변경·유지보수 전환·실행 승인·복구 증명이 아닙니다. 각 후보 그룹의 행 수는 확정 삭제 건수가 아닙니다. 실행은 항상 false입니다. 신규 migration과 API 배포 전에는 운영 사용 불가입니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["developer"],
+        responses: {
+          "200": developerResponse("읽기 전용 후보 영향", "preview", {
+            $ref: "#/components/schemas/DeveloperResetPreview",
+          }),
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "429": errorResponse,
+          "503": errorResponse,
+        },
+      },
+    },
     "/v1/developer/room-catalog": {
       get: {
         tags: ["Developer"],
@@ -11966,6 +12022,59 @@ export const openApiDocument = {
           },
         },
       },
+      DeveloperResetCandidateImpact: {
+        type: "object",
+        additionalProperties: false,
+        required: ["relations", "observedRows", "exact"],
+        properties: {
+          relations: integer,
+          observedRows: integer,
+          exact: { type: "boolean" },
+        },
+      },
+      DeveloperResetPreview: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "readOnly",
+          "diagnosticComplete",
+          "executionEnabled",
+          "capturedAt",
+          "snapshotId",
+          "relationCount",
+          "missingRelations",
+          "unknownRelations",
+          "unsupportedRelations",
+          "truncatedRelations",
+          "candidateImpact",
+          "blockers",
+        ],
+        properties: {
+          readOnly: { type: "boolean", enum: [true] },
+          diagnosticComplete: { type: "boolean" },
+          executionEnabled: { type: "boolean", enum: [false] },
+          capturedAt: { type: "string", format: "date-time" },
+          snapshotId: fingerprint,
+          relationCount: integer,
+          missingRelations: integer,
+          unknownRelations: integer,
+          unsupportedRelations: integer,
+          truncatedRelations: integer,
+          candidateImpact: {
+            type: "object",
+            additionalProperties: false,
+            required: ["preserve", "mixed", "reseed", "clear", "review"],
+            properties: Object.fromEntries(
+              ["preserve", "mixed", "reseed", "clear", "review"].map(
+                (group) => [group, {
+                  $ref: "#/components/schemas/DeveloperResetCandidateImpact",
+                }],
+              ),
+            ),
+          },
+          blockers: { type: "array", items: { type: "string" } },
+        },
+      },
       DeveloperRoomCatalogSummary: {
         type: "object",
         additionalProperties: false,
@@ -14555,7 +14664,8 @@ for (const [path, item] of Object.entries(openApiDocument.paths)) {
       path.startsWith("/v1/limited/") || path === "/v1/offline-events" ||
       (path === "/v1/attempts/{attemptId}/submissions" && method === "post") ||
       (operation.tags?.includes("Photos") &&
-        path !== "/v1/photos/{photoId}/content")
+        path !== "/v1/photos/{photoId}/content" &&
+        path !== "/v1/photos/{photoId}/thumbnail")
     ) {
       continue;
     }

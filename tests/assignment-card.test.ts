@@ -107,7 +107,7 @@ function query(initialRows: Row[], countOverride?: number | null, onIds?: (ids: 
 
 function service(overrides: Partial<Record<string, Row[]>> = {}, clock: () => Date = () => new Date(), counts: Partial<Record<string, number | null>> = {}, onIds?: (ids: unknown[]) => void,
   read?: (args: Record<string, unknown>) => { data: unknown; error: { message: string } | null },
-  beforeRead?: (table: string) => Promise<void>) {
+  beforeRead?: (table: string) => Promise<void>, onRpc?: (name: string) => void) {
   const tables: Record<string, Row[]> = {
     cleaning_assignments: assignments,
     cleaning_targets: targets,
@@ -141,8 +141,31 @@ function service(overrides: Partial<Record<string, Row[]>> = {}, clock: () => Da
     : tables[table] ?? [], counts[table], onIds, () => beforeRead?.(table) ?? Promise.resolve());
   return new SupabaseAssignmentService({
     admin: { from, rpc: vi.fn(async (name: string, args: Record<string, unknown>) => {
-      expect(name).toBe('get_assignment_schedule_read_for_plan');
+      onRpc?.(name);
       expect(args.p_session_id).toBe(sessionId);
+      if (name === 'get_assignment_card_hydration') {
+        const ids = args.p_assignment_ids as string[];
+        onIds?.(ids);
+        await beforeRead?.(name);
+        const selected = (tables.cleaning_assignments ?? []).filter(row => ids.includes(row.id as string));
+        const targetIds = [...new Set(selected.map(row => row.cleaning_target_id))];
+        const maidIds = [...new Set(selected.map(row => row.maid_profile_id))];
+        const pack = async (table: string, key: string, values: unknown[]) => {
+          const result = await query(tables[table] ?? [], counts[table]).in(key, values).limit(1000);
+          return { rows: result.data, count: result.count };
+        };
+        const attempts = await pack('cleaning_attempts', 'assignment_id', ids);
+        attempts.rows.sort((a,b) => (b.attempt_number as number) - (a.attempt_number as number));
+        const latest = new Map();
+        for (const row of attempts.rows) if (!latest.has(row.assignment_id)) latest.set(row.assignment_id, row.id);
+        return { data: {
+          assignments: selected.map(({id, cleaning_target_id, maid_profile_id}) => ({id, cleaning_target_id, maid_profile_id})),
+          targets: await pack('cleaning_targets', 'id', targetIds), profiles: await pack('profiles', 'id', maidIds), attempts,
+          submissions: latest.size ? await pack('cleaning_submissions', 'cleaning_attempt_id', [...latest.values()]) : { rows: [], count: 0 },
+          schedules: await pack('cleaning_target_schedule_revisions', 'cleaning_target_id', targetIds)
+        }, error: null };
+      }
+      expect(name).toBe('get_assignment_schedule_read_for_plan');
       expect(['admin', 'maid']).toContain(args.p_expected_actor_role);
       return read?.(args) ?? { data: (args.p_assignment_ids as string[]).map((assignmentId) =>
         ({ assignmentId, scheduleSnapshot: null, currentDeparture: null })), error: null };
@@ -153,27 +176,23 @@ function service(overrides: Partial<Record<string, Row[]>> = {}, clock: () => Da
 }
 
 describe('assignment hydration dependency pipeline', () => {
-  it.each(['cleaning_targets', 'profiles', 'cleaning_target_schedule_revisions'])(
-    'reads submissions before slow %s finishes, but revalidates authority last', async (slowTable) => {
-      let release = () => {};
-      const gate = new Promise<void>((resolve) => { release = resolve; });
-      const events: string[] = [];
-      const read = vi.fn(() => { events.push('authority'); return { data: [], error: { message: 'SESSION_REVOKED' } }; });
-      const pending = service({}, undefined, {}, undefined, read, async (table) => {
-        events.push(`start:${table}`);
-        if (table === slowTable) await gate;
-        events.push(`end:${table}`);
-      }).list(admin, { serviceDate: '2026-09-20' });
-      const rejection = expect(pending).rejects.toMatchObject({ code: 'SESSION_REVOKED' });
-      try {
-        await vi.waitFor(() => expect(events).toContain('end:cleaning_submissions'));
-        expect(events).not.toContain(`end:${slowTable}`);
-        expect(read).not.toHaveBeenCalled();
-      } finally { release(); }
-      await rejection;
-      expect(events.at(-1)).toBe('authority');
-    }
-  );
+  it('waits for complete bounded hydration and then revalidates authority last', async () => {
+    let release = () => {};
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const events: string[] = [];
+    const read = vi.fn(() => { events.push('authority'); return { data: [], error: { message: 'SESSION_REVOKED' } }; });
+    const pending = service({}, undefined, {}, undefined, read, async name => {
+      if (name !== 'get_assignment_card_hydration') return;
+      events.push('hydration'); await gate; events.push('hydrated');
+    }).list(admin, { serviceDate: '2026-09-20' });
+    const rejection = expect(pending).rejects.toMatchObject({ code: 'SESSION_REVOKED' });
+    try {
+      await vi.waitFor(() => expect(events).toEqual(['hydration']));
+      expect(read).not.toHaveBeenCalled();
+    } finally { release(); }
+    await rejection;
+    expect(events).toEqual(['hydration', 'hydrated', 'authority']);
+  });
 
   it.each([null, 1001, 2])('rejects incomplete submissions (%s), without returning partial cards', async (count) => {
     const read = vi.fn();
@@ -188,21 +207,25 @@ describe('assignment hydration dependency pipeline', () => {
     const attempts = rows.map((row, i) => ({ id: `attempt-${i}`, assignment_id: row.id, attempt_number: 1, status: 'in_progress' }));
     const submissions = attempts.map((row) => ({ cleaning_attempt_id: row.id, version: 1, status: 'submitted' }));
     const calls: string[] = [];
+    const rpcCalls: string[] = [];
     const batches: number[] = [];
     const authorityBatches: number[] = [];
     const result = await service({ cleaning_assignments: rows, cleaning_targets: targetRows, cleaning_attempts: attempts,
-      cleaning_submissions: submissions, cleaning_target_schedule_revisions: [] }, () => new Date('2026-09-19T00:00:00Z'), {},
+      cleaning_submissions: submissions, cleaning_target_schedule_revisions: [] }, () => new Date('2026-09-18T00:00:00Z'), {},
       (ids) => batches.push(ids.length), (args) => {
         const ids = args.p_assignment_ids as string[];
         authorityBatches.push(ids.length);
         return { data: ids.map((assignmentId) => ({ assignmentId, scheduleSnapshot: null, currentDeparture: null })), error: null };
-      }, async (table) => { calls.push(table); })
+      }, async (table) => { calls.push(table); }, name => rpcCalls.push(name))
       .list(admin, { serviceDate: '2026-09-20' });
     expect(result).toHaveLength(size);
     expect(batches.every((size) => size <= 100)).toBe(true);
-    // Assignment read + one profile read + four batched relation reads; final RPC is unchanged.
-    // Tomorrow planning adds one bounded backlog query, not one query per card.
-    expect(calls).toHaveLength(3 + 4 * Math.ceil(size / 100));
+    // Exact-date list: one list read plus one hydration and one final guard per batch.
+    expect(calls.filter(name => name === 'cleaning_assignments')).toHaveLength(1);
+    expect(1 + rpcCalls.length).toBe(size === 1000 ? 21 : 3);
+    expect(rpcCalls).toHaveLength(2 * Math.ceil(size / 100));
+    expect(rpcCalls.slice(0, Math.ceil(size / 100))).toEqual(Array(Math.ceil(size / 100)).fill('get_assignment_card_hydration'));
+    expect(rpcCalls.slice(Math.ceil(size / 100))).toEqual(Array(Math.ceil(size / 100)).fill('get_assignment_schedule_read_for_plan'));
     expect(authorityBatches).toHaveLength(Math.ceil(size / 100));
     expect(authorityBatches.every((size) => size <= 100)).toBe(true);
     for (let i = 0; i < size; i++) {
@@ -279,7 +302,7 @@ describe('today current assignment backlog', () => {
       .list(admin, { serviceDate: '2026-09-21' });
     expect(result).toHaveLength(1000);
     expect(Math.max(...batches)).toBe(100);
-    expect(batches.filter((size) => size === 100).length).toBeGreaterThanOrEqual(30);
+    expect(batches.filter((size) => size === 100)).toHaveLength(10);
   });
 
   it('rejects a combined currentday and past board above 1000 even when each DB read is complete', async () => {

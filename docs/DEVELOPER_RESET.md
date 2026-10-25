@@ -1,5 +1,25 @@
 # #396 운영 인계 전 초기화
 
+## 2026-10-25 v1 준비: 실행 없는 공통 진단 확장
+
+PR402의 관계별 독립 행 수 검사를 보존하고 dev `96ec94b`와 통합한 소스를 기준으로
+아래 catalog-v2·일관 snapshot·템플릿 inventory 검사와 읽기 전용 개발자 preview API를 추가했다.
+삭제 권한은 추가하지 않았다. `executionEnabled=false`이며 정상 진단 결과도 실행 승인·백업
+증거가 아니다. 122개 migration 기준 위에 신규 `20261025021139_developer_reset_preview.sql`을
+준비했으며 이번 작업에서 DB를 연결하거나 SQL을 실행하지 않았다. 병렬 변경과 최종 통합 시
+manifest 순번을 다시 계산한다.
+아래 2026-10-07의 로컬111 수치·지문·SQL 결과는 당시 기록이며 최신 DB 검증으로 재사용하지 않는다.
+
+현재 백업은 예약과 연결 일정·투숙·객실이동/점유만 보호한다. Auth/PIN/사진/청소/주급 및
+템플릿 전체 이력 보호를 증명하지 않으므로 전체 초기화의 복구 근거로 사용할 수 없다.
+초기화 보호 범위를 별도 마련할지 또는 초기화를 보류할지는 통합 결정 문서의 D01에 남긴다.
+`RESET_RECOVERY_SCOPE_UNDECIDED`로 실행을 차단하며 기존 백업 범위를 임의 확대하지 않는다.
+사진 삭제 개발은 HOLD이며 `PHOTO_DELETION_ON_HOLD`를 유지한다.
+
+이와 별개로 안전하게 가능한 메모리 내 계약·합성 검사는 구현한다. 실제 유지보수/worker drain,
+최신 개발자/세션/재인증·운영 시작 전 상태·행별 삭제 정책이 검증되지 않은 상태는 각각 별도
+blocker이며 미확인을 통과로 간주하지 않는다. CLI 요약에는 고정 blocker 코드와 건수만 출력한다.
+
 ## 2026-10-07 #336 dev 통합 후 재대조
 
 #336/PR401은 source0cc368c → dev f1d1f6d로 보호 squash됐다. required CI37579027245
@@ -57,7 +77,8 @@ manifest111 PASS다. 별도 독립 QA가 기존 진단 source 보존·두 정책
 이는 전달된 목록에 대한 일관성 검사이지 실제 DB의 완전성 증명이 아니다.
 sourceComplete/referencesComplete는 향후 서버 catalog 수집기의 사실이어야 하며 클라이언트가
 자기 신고하는 값으로 사용하지 않는다. 빈 목록 통과도 DB가 비었다는 증명이 아니다.
-버전 번호 할당·게시 자격·전체 DB ID 충돌·원 작성자 이력 백업·FK 누락은 아직 검증하지 않는다.
+이 기본 검사만으로 버전 번호 할당·게시 자격·전체 DB ID 충돌·원 작성자 이력 백업·FK 누락은
+검증하지 않는다. 독립 수집 목록과의 ID 충돌·누락 검사는 아래 10단계에서 추가한다.
 legacy의 새 게시 지원을 열거나 v7/v8/v9 계약을 재해석하지 않는다.
 진단 fingerprint는 서명 token/최근 재인증/백업/TTL/CAS 증명이 아니며 실행은 항상 비활성이다.
 
@@ -74,7 +95,8 @@ ROLLBACK한다. public/private base table·partitioned/foreign table의 종류�
 statement/lock/process timeout과 출력 크기 상한을 둔다. 업무 행·사진·PIN·Auth 사용자는 읽지 않는다.
 원문 catalog와 subprocess stderr는 출력하지 않고 건수·진단 hash만 반환한다.
 
-이 catalogFingerprint는 전체 schema fingerprint가 아니다. 전체 column/default/index/policy/ACL,
+이 catalogFingerprint는 전체 schema fingerprint가 아니다. column default/type modifier/check,
+전체 index/policy/ACL,
 함수의 전이 의존성·view/rule/외부 provider 자원은 아직 포함하지 않는다.
 실행용 manifest를 만들기 위한 조사 도구다. 4단계 후보 목록을 대조하지만 실행을 허용하지 않는다.
 partitioned/foreign table은 unsupported로 표시하며 어떤 경우에도 실행을 허용하지 않는다.
@@ -101,9 +123,9 @@ executionEnabled는 항상 false다. preserve에도 FK/기준정보 승인 검�
 nonce 원장은 저장 PIN이 아니며 같은 암호키의 nonce 재사용 방지 근거이므로
 저장 PIN 초기화를 이유로 함께 삭제하지 않는다.
 
-이 목록에는 아직 dev에 병합되지 않은 #336 테이블이 포함되어 있다.
-따라서 dev110에 없는 후보 관계는 missing으로 차단하는 것이 정상이다.
-최종 통합본에서 전체 catalog/분류 정책을 재검토해야 한다. 실제 DB 행 수 수집/삭제 SQL에
+이 목록을 처음 만들 때는 dev110에 없는 #336 후보 관계를 missing으로 차단했다.
+#336은 이후 dev에 통합됐지만 최신 실제 DB catalog/분류 정책의 재검토는 여전히 필요하다.
+실제 DB 행 수 수집/삭제 SQL에
 이 목록을 곧바로 연결하지 않는다. 기존 원장 보호 trigger는 그대로 유지한다.
 
 ## 5단계: 개발자 계정 보존의 필요조건 진단
@@ -185,6 +207,27 @@ nullable FK도 명시적인 null edge가 필요하며, SQL MATCH 규칙에 따�
 누락, 순환 경로를 검증했으며 실제 업무 스키마의 데이터 fixture·전체 수집 검증은 후속이다.
 항상 executionEnabled=false이며 API·DB mutation·삭제 SQL 생성에 연결하지 않는다.
 
+### #396 후속: 관계별 행 누락 검출
+
+내부 입력 `relationRowCounts`는 모든 관계(빈 관계는 0 포함)의 독립 `COUNT(*)`를
+요구한다. 수집된 행의 길이에서 역산하지 않고 행 그래프와 같은 trusted transaction
+snapshot에서 수집해야 한다. 관계별 고유 행 수가 다르면 `ROW_COUNT_MISMATCH`,
+집계 누락·중복·미등록 관계이면 각각 `MISSING_RELATION_COUNT`,
+`DUPLICATE_RELATION_COUNT`, `UNKNOWN_RELATION_COUNT`로 차단한다.
+음수·소수·문자열·안전 정수 범위 밖 값과 집계 없는 과거 내부 입력도 거부한다.
+따라서 다른 행에서 참조하지 않는 keep/remove 행의 누락도 검출한다.
+
+이는 행 내용 지문이나 완전한 수집기 구현이 아니다. 같은 수의 다른 행으로 바꾸거나
+행과 집계를 동시에 조작한 입력을 증명할 수 없으며, trusted 수집기의 snapshot·내용
+검증을 대체하지 않는다. 공개 API 계약·실행 권한·삭제 정책은 변경하지 않는다.
+
+2026-10-07 후속 검증: `npm run ci:quality` PASS(105파일/2,680 tests,
+typecheck/build/secret scan/OpenAPI 150 paths·162 operations 포함; lint는 기존 info 18건,
+오류 없음), 독립 QA reset 6파일/156 tests PASS 및 검토 범위 P0/P1/P2 없음.
+`npx tsx scripts/test-reset-reference-fixture.ts`의 충돌·보존·독립 집계 누락 검사 PASS.
+DB migration/RLS 변경 없음. fresh DB reset·전체 SQL 회귀·원격 CI는 이 기록 시점 NOT RUN이며
+임시 fixture 결과를 실제 초기화·백업/복구 검증으로 승격하지 않는다.
+
 ## 8단계: PostgreSQL 임시 fixture 연동 검증
 
 `npx tsx scripts/test-reset-reference-fixture.ts`는 기존 로컬 대상 안전 검사를 재사용하고
@@ -201,8 +244,74 @@ CLI 인자와 Docker 대상 override를 거부하고 시간·출력 상한을 �
 로컬 PostgreSQL에서 충돌 차단 PASS를 확인했다. 같은 합성 입력의 모든 행을 보존하는
 메모리 내 계획 변형도 PASS지만 SQL의 보존 실행이나 실제 삭제 시험은 아니다.
 fixture hash는 합성 FK 정의에 대한 진단 hash일 뿐 전체 실제 schema proof가 아니다.
+후속 fixture는 같은 SQL statement에서 TEMP 관계별 독립 COUNT(*)를 함께 수집한다.
+참조받지 않는 optional 행만 메모리에서 제거한 변형이 ROW_COUNT_MISMATCH로 차단되는지도
+검증한다. 실제 업무 행 누락 재현이나 DB 삭제 검증으로 표현하지 않는다.
 이 결과를 실제 업무 DB 전체 행 수집기 완성으로 간주하지 않는다. 복합 FK/MATCH FULL,
 최종 분류 predicate, 운영 스키마 전체 적용, 유지보수 잠금과 실제 초기화는 여전히 후속이다.
+
+## 9단계: 구조화 catalog와 일관 snapshot 계약
+
+`reset-catalog.sql`과 `reset-catalog-contract.mjs`의 내부 형식은 `reset-catalog-v2`다.
+컬럼명·위치·PostgreSQL 타입명(배열 타입 포함)·nullability, PK/참조 대상 unique index의
+컬럼 순서·유효성, FK source/target 컬럼 쌍·대상 key·MATCH/삭제/갱신 규칙·검증/지연 상태를
+수집하도록 확장했다. 정의문을 파싱해 컬럼을 추측하지 않고 `conkey/confkey`와 catalog를 사용한다.
+참조 대상 index의 순서가 FK 대상 컬럼 순서와 다를 수 있으므로 집합은 비교하되 FK 쌍의 순서는
+보존한다. public/private와 직접 연결된 외부 관계의 key/column metadata도 별도 경계로 받는다.
+이는 외부 schema 전체의 FK 폐쇄나 Auth 데이터 수집을 뜻하지 않는다.
+
+v1/메타데이터 누락/중복/미등록 컬럼·key/잘못된 경계를 거부한다. 미검증 FK·MATCH PARTIAL,
+unsupported key·PK 부재는 별도 건수로 드러낸다. 기존 고정 로컬 연결·READ ONLY·출력 제한은
+유지했다. 신규 SQL은 소스·합성 계약 검사만 수행했으며 실제 PostgreSQL 실행은 NOT RUN이다.
+정의 기준: [PostgreSQL pg_constraint](https://www.postgresql.org/docs/17/catalog-pg-constraint.html),
+[pg_index](https://www.postgresql.org/docs/17/catalog-pg-index.html).
+
+`reset-snapshot.ts`는 기존 PR402 그래프 검사를 감싸는 내부 순수 함수다. 서버 수집기에서
+서로 독립적으로 얻은 행 목록·관계별 census·행 내용 token·FK NULL 증거가 같은 snapshot에
+속하고 정확히 일치하는지 검사한다. project/source/catalog/classification binding 차이,
+동일 건수의 다른 행 내용, 빈 관계의 잘못된 census, 누락/중복/알 수 없는 행·FK·증거를 차단한다.
+복합 FK는 MATCH SIMPLE의 일부 NULL과 MATCH FULL의 전부 NULL/일부 NULL을 구별하고,
+NOT NULL 위반 및 실제 edge와 NULL 증거의 모순을 차단한다. 그래프 FK 대상도 지문에 포함한다.
+
+이 함수는 trusted collector가 아니다. self-reported snapshot ID/count/hash는 진실을 증명하지
+않으며 신뢰되지 않은 요청 본문을 그대로 연결하면 안 된다. 실제 collector는 하나의 READ ONLY
+REPEATABLE READ snapshot에서 independent census를 구하고 SQL의 equality/collation으로
+대상 행을 해결해야 한다. contentToken에는 실데이터나 저엔트로피 비밀의 재사용 hash를 넣지 않고
+해당 snapshot 전용 keyed digest를 사용해야 한다. 이 token 생성기와 실제 행 수집은 미구현이다.
+진단 fingerprint는 TTL/서명/권한/CAS/백업 증명이 아니며 실제 전체 DB 완전성으로 보고하지 않는다.
+
+`reset-review-requirements.mjs`는 기존 mixed10/review125의 **135개 모두**를 명시적으로
+다음 조사 그룹에 연결하고 누락·중복이면 실패한다. 행의 최종 keep/remove 정책은 아니다.
+
+| 조사 그룹 | 관계 수 | 주요 미충족 근거 |
+|---|---:|---|
+| ACCOUNT_SECURITY | 14 | 개발자 보존, Auth 작업 종료, 전이 FK, 보호 범위 |
+| ROOM_AND_RESERVATION | 11 | 기준정보 보존, 파생값 분리, 전이 FK, worker 종료 |
+| WORK_AUTHORIZATION | 10 | 세션/권한 철회, 전이 FK, worker 종료 |
+| NOTIFICATION_DELIVERY | 21 | 외부 발송 차단, worker 종료, 전이 FK |
+| PAYROLL_HISTORY | 3 | 불변 이력 보호, 전이 FK, 보호 범위 |
+| PIN_AND_SHEET | 11 | nonce 보존, Sheet 재유입 경계, worker 종료 |
+| PHOTO_AND_EVIDENCE | 65 | 사진 삭제 HOLD, provider identity 보존, 전이 FK |
+
+이 분류는 현재 source inventory에 대한 검토 의존성 목록이다. 개발자/기준정보 보존과 테스트
+업무 초기화의 제품 방향은 확정이며, 이 135개 항목은 주로 행 predicate·참조·보호 조건의
+엔지니어링 검토 대상이다. 135개 모두가 인간 정책 결정을 기다린다는 뜻이 아니다.
+새 테이블을 prefix로 자동
+포함하지 않으며 classificationComplete=false다. 테이블마다 행 predicate·보존 edge·실행
+순서가 확정됐거나 보호 trigger를 우회할 수 있다는 뜻이 아니다.
+
+## 10단계: 템플릿 독립 inventory 대조
+
+`template-reseed-inventory.ts`는 기존 2단계의 내용·표시 순서·새 provenance 검사를 재사용하고,
+같은 snapshot/catalog에 묶인 독립 source ID 목록·참조 ID/원본 연결 목록·모든 기존 template ID
+목록과 독립 count를 대조한다. 후보에서 source/참조가 빠지거나 잘못 연결되면 실패하고,
+보존 선택 밖의 퇴역 template을 포함해 기존 template ID를 새 ID로 재사용하면 차단한다.
+정렬 차이와 UUID 대소문자는 의미 없는 차이로 처리한다. 결과는 건수·지문·고정 코드만 반환한다.
+
+inventory는 승인된 보존 source 선택과 실제 모든 기존 ID를 trusted collector가 따로 수집해야
+한다. 후보에서 역산한 목록이나 빈 fixture 성공은 DB 완전성을 증명하지 않는다. source 버전 선택,
+새 version 할당·게시 가능성·원 작성자 이력 백업·실제 재등록은 미구현이며 임의로 결정하지 않는다.
+legacy 템플릿을 새 게시 가능 상태로 바꾸거나 관리자 전용 게시 권한을 확장하지 않는다.
 
 ## 미구현 gate
 
@@ -211,16 +320,67 @@ fixture hash는 합성 FK 정의에 대한 진단 hash일 뿐 전체 실제 sche
 - 실제 DB에서 템플릿/보존 참조 완전 수집, 버전/게시 검증 및 새 provenance 재등록
 - 최신 singleton developer/session/최근 재인증, provisioning/go-live 영구 잠금
 - actor/project/schema/내용 revision에 묶인 짧은 TTL preview와 멱등 실행 receipt
-- Supabase B 백업·복원 근거 및 외부 사진 복구 범위 검증
+- D01 초기화 보호 범위 결정과 그 범위의 실제 백업·복원 근거(예약 전용 백업으로 대체 불가)
+- 사진 삭제 HOLD 해제 및 외부 사진 복구 범위 결정·검증(현재 삭제 개발/실행 금지)
 - 유지보수 잠금, API/RLS/worker 경합 차단, Auth 세션·계정·Drive·Sheet 단계별 처리
-- 실제 삭제 RPC, Fastify/Edge/OpenAPI, 독립 보안 QA, CI, 배포
+- 실제 삭제 RPC/실행 API, 독립 보안 QA, CI, 배포
 
-1·2단계 순수 모듈에는 DB/SQL/provider 호출이나 public route가 없다.
+1·2·7·9·10단계 순수 모듈에는 DB/SQL/provider 호출이나 public route가 없다.
 3·5단계 개발용 CLI만 위 고정 로컬 SQL을 읽으며 공개 API에 연결되지 않는다.
 기존 관리자 전용 템플릿 게시 권한·append-only trigger·RLS는 변경하지 않는다.
-DB reset/복구 검증은 아직 수행하지 않았으며 #336 후보 schema는 최종 통합 뒤 재대조한다.
+DB reset/복구 검증은 아직 수행하지 않았으며 최신 통합 schema는 승인된 최종 DB 검증에서 재대조한다.
+
+## 11단계: 읽기 전용 developer preview 연결
+
+`GET /v1/developer/reset/preview`를 Fastify/Edge/OpenAPI에 동일한 계약으로 연결했다.
+기존 사용자 인증·developer role·비밀번호 변경 조건을 재사용하며 client가 actor/project/table을
+선택할 수 없다. service-only `get_developer_reset_preview`는 기존 `get_active_auth_context`로
+최신 profile과 session을 수집 전후 순서대로 검증한다. revoked/변경된 역할이면 결과를 반환하지
+않는다. 관리자가 일반 계정 관리 권한으로 이 API에 접근할 수 없다.
+
+private STABLE collector는 하나의 calling SELECT snapshot에서 pg_catalog의 public/private
+base table 목록과 각 관계의 독립 count를 읽는다. 일반 heap만 ONLY 조회하고 foreign table 및
+partition은 query하지 않는다. 테이블당 10,001행에서 중단해 10,000 초과는 exact=false인
+하한으로 표시한다. 관계 1,000개 초과는 거부하고 lock timeout은 2초다. 루프 전체 5초 deadline을
+각 조회 전후 확인하며 초과 시 부분 결과를 반환하지 않는다. 공개 RPC의 function-level
+statement timeout 7초는 PostgREST 호출의 현재 query를 제한하고, 양쪽 HTTP adapter는 8초에
+abort 및 응답 실패를 보장한다. 제한 값/효력은 최종 승인 DB 검증 대상이다.
+[Supabase function timeout 계약](https://supabase.com/docs/guides/database/postgres/timeouts)을 따른다.
+실제 업무 값/ID/원장
+본문은 수집하지 않는다. 고정 schema와 catalog가 반환한 식별자를 `%I`로 quoting하며 caller SQL,
+URL, table override나 외부 호출을 받지 않는다. 함수의 readOnly는 모든 작업이 조회라는 계약이지
+volatile 권한 wrapper transaction의 PostgreSQL read_only 설정을 의미하지 않는다.
+
+응답은 후보 그룹별 관계 수·observedRows·exact, snapshot 시각/ID와 coverage·blocker만 포함한다.
+관찰된 누락/새 관계/상한/미지원 타입이 없으면 diagnosticComplete=true를 반환할 수 있다.
+따라서 D01 미결정이어도 수집 결과를 확인할 수 있다. mixed/review/clear의 숫자를 확정 삭제
+건수로 사용하면 안 된다. 개별 테이블명이나 계정 ID는 응답/에러에 넣지 않으며 no-store다.
+오류·SQL 미적용·불완전 server payload는 고정 코드로 실패하고 원문 provider 오류를 출력하지 않는다.
+
+이 census 수집기는 위 9단계의 전체 행/내용 token/FK graph collector와 다르다. 전체 행별 보존
+규칙·템플릿 version/게시 검증·운영 시작 잠금·유지보수 전환은 아직 남아 있다. 실제 실행 승인,
+최근 재인증, 백업/복구 및 사진 HOLD는 자동 충족되지 않는다. 실행 경로는 없고 false를 유지한다.
+신규 SQL의 권한·snapshot 구조 및 합성 client 경로를 검사했으며 pgTAP 보안 회귀 소스도 준비했다.
+DB/pgTAP/운영 API 실행은 NOT RUN이다.
 
 ## 검증 기록 정정
+
+2026-10-25 preview 단위: `ci:quality` PASS(138파일/3,395 tests, typecheck/build,
+OpenAPI155 paths/167 operations 포함), migration manifest 정적 검사 PASS(이 독립 worktree123개,
+병렬123/124 통합 뒤 순번 재생성 필요). pinned native Deno2.1.4의 실제 api/index.ts 타입 검사와
+OpenAPI/developer 기존 회귀41건 PASS. 새 Edge adapter의 권한·session·입력·오류는 Node 합성
+fixture5건으로 실행했다. Docker 전체 Edge bundle/통합 검증, 실제 SQL/pgTAP/DB reset/복구,
+운영 배포·실제 사용자 검증은 NOT RUN이다. 독립 QA는 소스/권한/계약을 검토해 차단 결함 없음,
+별도6파일/109 tests PASS를 확인했다. 원격 보호 CI·병합은 이 기록 시점 후속이다.
+
+2026-10-25 dev a355ba0 통합 후: `ci:quality` PASS(141파일/3,462 tests, lint/typecheck/build,
+OpenAPI156 paths/168 operations), manifest 정적 검사 PASS(125개, head developer_reset_preview).
+`edge:check` 전체 PASS: pinned Deno format/typecheck/합성 회귀 및 실제 배포 entrypoint
+bundle 19,105,177 bytes, report source+artifact 진단 bundle 19,940,970 bytes,
+backup monitor bundle 91,678 bytes. 진단 bundle은 20,000,000-byte 상한에 가깝기 때문에
+후속 API 추가도 같은 상한 검사를 통과해야 한다. 실제 SQL/pgTAP/DB reset/복구/운영 배포는
+계속 NOT RUN이다. preview 기본 단위에 대한 독립 QA 결과를 유지하며 dev 충돌은 양쪽
+기능과 migration123/124/125 정확한 source hash 검증을 보존해 해결했다.
 
 기존 GitHub 기록에서 secrets checker가 추적 파일만 검사한다고 설명했지만,
 실제 `scripts/check-secrets.mjs`는 git ls-files --cached --others --exclude-standard로

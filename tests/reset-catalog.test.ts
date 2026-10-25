@@ -1,21 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
+import { resetCatalog as catalog, resetTable } from './helpers/reset-catalog.js';
 const modulePath = '../scripts/read-reset-catalog.mjs';
 const { summarizeResetCatalog, readLocalResetCatalog, readLocalResetAccounts, readLocalResetReferenceFixture } = await import(modulePath);
 
-function catalog() {
-  return {
-    format: 'reset-catalog-v1', readOnly: true,
-    relations: [
-      { name: 'public.profiles', kind: 'r', rls: true, forceRls: false },
-      { name: 'public.rooms', kind: 'r', rls: true, forceRls: false },
-    ],
-    foreignKeys: [{ source: 'public.profiles', target: 'auth.users', name: 'profiles_auth_fkey',
-      definition: 'FOREIGN KEY (auth_user_id) REFERENCES auth.users(id) ON DELETE RESTRICT' }],
-    triggers: [{ relation: 'public.profiles', name: 'guard', enabled: 'O',
-      definitionHash: 'a'.repeat(32), functionHash: 'b'.repeat(32) }],
-  };
-}
 function runner() {
   const spawn = vi.fn()
     .mockReturnValueOnce({ status: 0, stderr: '', stdout: JSON.stringify('npipe:////./pipe/docker_engine') })
@@ -85,7 +73,11 @@ describe('local-only reset catalog diagnostic', () => {
     expect(result).toMatchObject({
       executionEnabled: false, classificationComplete: false, relationCount: 2,
       unclassifiedRelationCount: 0, missingRelationCount: 181, crossSchemaForeignKeyCount: 1,
+      reviewRequirements: { relationCount: 135, classificationComplete: false, executionEnabled: false },
     });
+    expect(result.executionBlockers).toEqual(expect.arrayContaining([
+      'RESET_RECOVERY_SCOPE_UNDECIDED', 'PHOTO_DELETION_ON_HOLD', 'TRUSTED_ROW_COLLECTOR_NOT_IMPLEMENTED',
+    ]));
     expect(JSON.stringify(result)).not.toContain('profiles');
     const call = deps.spawn.mock.calls[2];
     expect(call?.[1]).toEqual(expect.arrayContaining([
@@ -173,7 +165,7 @@ describe('local-only reset catalog diagnostic', () => {
     expect(() => summarizeResetCatalog(c)).toThrow('RESET_CATALOG_REJECTED');
   });
   it('marks foreign tables unsupported rather than querying their data', () => {
-    const c = catalog(); c.relations.push({ name: 'private.remote', kind: 'f', rls: false, forceRls: false });
+    const c = catalog(); c.relations.push({ ...resetTable('private.remote'), kind: 'f', rls: false });
     expect(summarizeResetCatalog(c)).toMatchObject({ unsupportedRelationCount: 1, executionEnabled: false });
   });
 });

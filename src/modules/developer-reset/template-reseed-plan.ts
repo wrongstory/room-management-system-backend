@@ -24,7 +24,7 @@ const content = z.object({
     ctx.addIssue({ code: 'custom', message: 'invalid template shape' });
   }
 });
-const planSchema = z.object({
+export const templateReseedPlanSchema = z.object({
   developerId: uuid,
   registrationTime: z.iso.datetime(),
   sourceComplete: z.boolean(),
@@ -51,7 +51,7 @@ export function inspectTemplateReseedPlan(input: unknown) {
     planValid: false as const, executionEnabled: false as const,
     blockers, templateCount: null, referenceCount: null, fingerprint: null,
   });
-  const parsed = planSchema.safeParse(input);
+  const parsed = templateReseedPlanSchema.safeParse(input);
   if (!parsed.success) return fail(['INVALID_INPUT']);
   const p = parsed.data;
   const blockers = new Set<Blocker>();

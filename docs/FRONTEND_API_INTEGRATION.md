@@ -1,5 +1,28 @@
 # 프론트엔드·Codex API 연동 가이드
 
+## 2026-10-25 #396 읽기 전용 초기화 영향 조회 — 운영 미배포
+
+`GET /v1/developer/reset/preview`는 조건/body 없이 개발자 access token만 받는다. 기존 인증과
+비밀번호 변경 조건을 통과한 뒤 DB가 수집 전후 최신 개발자 role/status/session을 확인한다.
+응답 `preview`에는 snapshot 시각/진단 ID와 preserve/mixed/reseed/clear/review 후보 그룹의
+관계 수·관찰 행 수·exact 여부, 누락/미분류/미지원/상한 초과 건수, 고정 blocker 코드만 있다.
+개별 업무 값·계정 ID·PIN·사진 식별자·테이블명은 반환하지 않는다. 응답은 no-store다.
+
+`diagnosticComplete=true`여도 `executionEnabled=false`다. 후보 그룹의 건수는 확정 삭제
+건수가 아니며, `exact=false`의 observedRows는 누락 또는 상한 때문에 전체 합계가 아니다.
+snapshotId는 실행 token·CAS·백업/복구 증명이 아니다. 실제 초기화 경로는 없으며 신규 SQL을
+실행하거나 프런트 화면을 수정하지 않았다. 개발자 콘솔 UI 연결은 별도 범위다.
+source OpenAPI 156 paths / 168 operations. [전체 계약](./DEVELOPER_RESET.md).
+
+## 2026-10-25 #415 합성 기준선 통합
+
+#453/#455 계산 개선은 v0.9.5 이후 운영에 포함됐다. PR456의
+[합성 CPU 기준선](./ASSIGNMENT_HYDRATION_COST_BASELINE.md)을 최신 dev와 통합한다.
+CPU 비교는 실제 API·DB·네트워크·사용자 대기 시간의 개선율이 아니다.
+신규 bounded hydration RPC의 source 후보를 준비했다. 실제 DB 실행·운영 적용·속도 계측은 NOT RUN이며 #415는 OPEN이다.
+기존 endpoint/Swagger/프런트 호출을 유지한다. Full DB는 NOT RUN이며
+최종 릴리스 1회 실행 전에 별도 승인을 받는다.
+
 ## 2026-10-25 #487 보안 패치 후보
 
 Zod·fast-uri 및 Edge 생성물 보안을 보완한다. 정상 API 계약과 프런트 연결은 동일하며 운영 미배포다.
