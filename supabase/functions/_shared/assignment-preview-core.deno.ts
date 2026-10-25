@@ -113,10 +113,11 @@ Deno.test("overdue planning preserves original date slots and uses today's avail
     serviceDate: "2037-01-06",
   }, "tomorrow");
   if (
-    tomorrow.proposedAssignments.length !== 0 ||
-    tomorrow.blockedTargets[0]?.reason !== "SERVICE_DATE_MISMATCH"
+    tomorrow.proposedAssignments.length !== 1 ||
+    tomorrow.proposedAssignments[0]?.serviceDate !== "2037-01-03" ||
+    tomorrow.proposedAssignments[0]?.cleaningTargetId !== "unassigned-old"
   ) {
-    throw new Error("Past candidate moved to tomorrow");
+    throw new Error("Tomorrow backlog lost candidate or changed original date");
   }
   const unavailable = await optimizeAssignmentPreview({
     ...snapshot,

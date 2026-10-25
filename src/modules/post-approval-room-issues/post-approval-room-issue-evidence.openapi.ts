@@ -31,7 +31,8 @@ const key = { name: 'Idempotency-Key', in: 'header', required: true, 'x-single-h
 const binary = { type: 'string', format: 'binary', maxLength: PHOTO_INPUT_MAX_BYTES, 'x-max-bytes': PHOTO_INPUT_MAX_BYTES } as const;
 const uploadContent = Object.fromEntries(['image/jpeg', 'image/webp', 'image/heic', 'image/heif'].map(mime => [mime, { schema: binary }]));
 const common = { tags: ['Post-approval Room Issues'], security: [{ bearerAuth: [] }], 'x-required-roles': ['admin', 'maid'],
-  'x-implementation-status': 'source-registered-not-deployed',
+  'x-implementation-status': 'deployed',
+  'x-deployed-release': 'v0.9.0',
   'x-query-allowed': false,
   description: '활성·비밀번호 변경 완료 상태와 실제 통보 배정 이력 또는 관리자 권한이 필요하다. 메이드의 초안 소유권과 업로드 실행자 권한은 별도로 검증하며 다른 메이드의 업로드 실행 권한을 주지 않는다. 모든 DB 경계에서 최신 session/source ownership을 검증하며 query와 caller authority 입력은 금지한다.' } as const;
 const openApiPath = (value: string) => value.replace(/:([A-Za-z]+)/g, '{$1}');

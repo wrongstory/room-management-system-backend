@@ -76,14 +76,17 @@ export function createPhotoRoutes(services: PhotoHttpServices): FastifyPluginAsy
       handler: async (request, reply) => {
         const web = webRequest(request, method === 'POST'), route = photoRoute(method, new URL(web.url).pathname), identity = identities.get(request);
         if (!route || !identity) throw new PhotoError(404, 'ROUTE_NOT_FOUND');
+        const service = services.service.withTiming();
         if (route.kind === 'content') {
-          const result = await services.service.content(web, identity, route.photoId);
+          const result = await service.content(web, identity, route.photoId);
           result.headers.forEach((value, name) => { reply.header(name, value); });
+          reply.header('server-timing', service.timingHeader() ?? '').header('access-control-expose-headers', 'Content-Disposition, Server-Timing');
           return reply.code(result.status).send(Buffer.from(await result.arrayBuffer()));
         }
-        const result = route.kind === 'upload' ? await services.service.upload(web, identity, route.attemptId, route.slotId, route.photoItemId)
-          : route.kind === 'delete-item' ? await services.service.deleteItem(web, identity, route.attemptId, route.slotId, route.photoItemId)
-          : route.kind === 'slots' ? await services.service.slots(web, identity, route.attemptId) : await services.service.status(web, identity, route.operationId);
+        const result = route.kind === 'upload' ? await service.upload(web, identity, route.attemptId, route.slotId, route.photoItemId)
+          : route.kind === 'delete-item' ? await service.deleteItem(web, identity, route.attemptId, route.slotId, route.photoItemId)
+          : route.kind === 'slots' ? await service.slots(web, identity, route.attemptId) : await service.status(web, identity, route.operationId);
+        reply.header('server-timing', service.timingHeader() ?? '').header('access-control-expose-headers', 'Server-Timing');
         return reply.header('cache-control', 'no-store').send(result);
       }
     });

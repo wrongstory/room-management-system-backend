@@ -13,6 +13,27 @@ import { flatTemplateRequest, flatTemplateSlotPermutations, historicalTemplateRe
 
 import type { PostApprovalRoomIssueModuleServices } from '../src/modules/post-approval-room-issues/post-approval-room-issue.module.js';
 
+describe('common business handler timing', () => {
+  it('measures successful authenticated responses and never trusts supplied timing headers', async () => {
+    const app = await buildApp({ env, services: services(), logger: false });
+    try {
+      const result = await app.inject({ method: 'GET', url: '/v1/rooms', headers: {
+        authorization: 'Bearer synthetic-token', 'server-timing': 'private-secret', origin: env.corsOrigins[0]!,
+      } });
+      expect(result.statusCode).toBe(200);
+      expect(result.headers['server-timing']).toMatch(/^api_total;dur=\d+\.\d$/);
+      expect(result.headers['access-control-expose-headers']).toContain('Server-Timing');
+      expect(result.headers['server-timing']).not.toContain('private-secret');
+      const denied = await app.inject({ method: 'GET', url: '/v1/rooms' });
+      expect(denied.statusCode).toBe(401);
+      expect(denied.headers).not.toHaveProperty('server-timing');
+      const unknown = await app.inject({ method: 'GET', url: '/v1/rooms/not/a/route' });
+      expect(unknown.statusCode).toBe(404);
+      expect(unknown.headers).not.toHaveProperty('server-timing');
+    } finally { await app.close(); }
+  });
+});
+
 describe('supplemental default app runtime', () => {
   const operationId = '10000000-0000-4000-8000-000000000001';
   const path = `/v1/post-approval-room-issue-evidence-uploads/${operationId}/handover`;
@@ -157,6 +178,49 @@ describe('supplemental default app runtime', () => {
       vi.mocked(appServices.auth.authenticate).mockRejectedValueOnce(new AppError(401, 'SESSION_REVOKED', 'private-canary'));
       const denied = await send('Bearer synthetic-access'); expect(denied.statusCode).toBe(401);
       expect(denied.body).not.toContain('private-canary'); expect(candidate.handover.recover).toHaveBeenCalledOnce();
+    } finally { await app.close(); }
+  });
+});
+
+describe('#317 PIN failure correlation', () => {
+  const paths = ['pins/bootstrap', 'room/pin/reveal', 'room/pin/generated/confirm', 'room/pin-changes/prepare', 'room/pin-changes/lease/confirm', 'room/pin-changes/lease/rollback'];
+  it.each(paths)('uses server UUID and closed diagnostic for %s', async (path) => {
+    const service = services();
+    const error = new AppError(503, 'ROOM_PIN_KEY_UNAVAILABLE', 'safe message');
+    vi.mocked(service.auth.authenticate).mockRejectedValue(error);
+    const app = await buildApp({ env, services: service, logger: false });
+    const log = vi.spyOn(app.log, 'error');
+    try {
+      const ids = new Set<string>();
+      for (const supplied of ['spoofed-secret', '10000000-0000-4000-8000-000000000001']) {
+        const response = await app.inject({ method: 'POST', url: `/v1/rooms/${path}?pin=synthetic-secret`, headers: { authorization: 'Bearer synthetic', 'x-request-id': supplied }, payload: {} });
+        expect(response.statusCode).toBe(503);
+        expect(response.headers['cache-control']).toBe('no-store');
+        const id = response.json().requestId;
+        expect(id).toMatch(/^[0-9a-f-]{14}4[0-9a-f-]{21}$/);
+        expect(id).not.toBe(supplied);
+        ids.add(id);
+        const record = log.mock.calls.at(-1)?.[0];
+        expect(record).toMatchObject({ requestId: id, status: 503, code: 'ROOM_PIN_KEY_UNAVAILABLE' });
+        expect(Object.keys(record as object).sort()).toEqual(['code', 'operation', 'requestId', 'status']);
+      }
+      expect(ids.size).toBe(2);
+      expect(log).toHaveBeenCalledTimes(2);
+    } finally { await app.close(); }
+  });
+  it('logs unknown exceptions once without raw message and does not log expected 4xx', async () => {
+    const service = services();
+    vi.mocked(service.auth.authenticate).mockRejectedValueOnce(new Error('synthetic-secret-raw')).mockRejectedValueOnce(new AppError(401, 'INVALID_ACCESS_TOKEN', 'denied'));
+    const app = await buildApp({ env, services: service, logger: false });
+    const log = vi.spyOn(app.log, 'error');
+    try {
+      for (const status of [500, 401]) {
+        const response = await app.inject({ method: 'POST', url: '/v1/rooms/room/pin/reveal', headers: { authorization: 'Bearer synthetic' }, payload: {} });
+        expect(response.statusCode).toBe(status);
+        expect(response.body).not.toContain('synthetic-secret-raw');
+      }
+      expect(log).toHaveBeenCalledTimes(1);
+      expect(JSON.stringify(log.mock.calls)).not.toContain('synthetic-secret-raw');
     } finally { await app.close(); }
   });
 });
@@ -472,7 +536,8 @@ describe('application', () => {
         role: 'admin', status: 'active', must_change_password: false, locked_until: null
       }, error: null })
     };
-    const rpc = vi.fn(async () => ({ data: active, error: null }));
+    const rpc = vi.fn(async () => ({ data: active ? { code: 'OK', profile: (await query.single()).data }
+      : { code: 'SESSION_REVOKED' }, error: null }));
     const clients = {
       publicClient: { auth: { getUser: vi.fn(async () => ({ data: { user: { id: authUserId } }, error: null })) } },
       admin: { from: () => query, rpc }
@@ -482,7 +547,7 @@ describe('application', () => {
     const app = await buildApp({ env, services: appServices, logger: false });
     try {
       const response = await app.inject({ method: 'GET', url: '/v1/rooms', headers: { authorization: `Bearer ${token}` } });
-      expect(rpc).toHaveBeenCalledExactlyOnceWith('is_active_auth_session', { p_auth_user_id: authUserId, p_session_id: sessionId });
+      expect(rpc).toHaveBeenCalledExactlyOnceWith('get_active_auth_context', { p_auth_user_id: authUserId, p_session_id: sessionId });
       expect(response.statusCode).toBe(active ? 200 : 401);
       if (active) {
         expect(appServices.rooms.list).toHaveBeenCalledOnce();

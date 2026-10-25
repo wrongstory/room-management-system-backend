@@ -2,17 +2,17 @@
   "schemaVersion": 1,
   "release": "dev",
   "hashAlgorithm": "sha256-lf-utf8",
-  "totalCount": 111,
+  "totalCount": 122,
   "baseline": {
     "count": 78,
     "head": "reservation_bookability_optional_guest_count"
   },
   "pending": {
-    "count": 33,
+    "count": 44,
     "first": "assignment_unavailability_reassignment",
-    "head": "post_approval_room_issue_ledger"
+    "head": "post_approval_memo_only"
   },
-  "head": "post_approval_room_issue_ledger",
+  "head": "post_approval_memo_only",
   "migrations": [
     {
       "order": 1,
@@ -522,7 +522,7 @@
     {
       "order": 102,
       "name": "db_static_warning_remediation",
-      "sha256": "9f6eab7b1389b5c552ace273726533a69a1b0aebc6813090771b068d28f16dc8"
+      "sha256": "3a1e8ac07b23b04e5f4745f5a079d5bb9493e4bc6d07b0033d14905385c3338b"
     },
     {
       "order": 103,
@@ -568,6 +568,61 @@
       "order": 111,
       "name": "post_approval_room_issue_ledger",
       "sha256": "d5c9933a91f8841b3f31404eccd14bd34725c458ed471bf10c0deac50fc42ee1"
+    },
+    {
+      "order": 112,
+      "name": "room_event_effective_lookup_indexes",
+      "sha256": "dc9ee95371faa2b0daae9cd3b279c0b0d38c243581ca73bdc5e5260375aae41c"
+    },
+    {
+      "order": 113,
+      "name": "common_auth_context_read",
+      "sha256": "522b9c0c146243a0c78013f756a4711ac491569361faae24cbd8749969784ffd"
+    },
+    {
+      "order": 114,
+      "name": "room_board_issue_counts_single_scan",
+      "sha256": "609b0846902173b91ca7f081d8e38329c1c0d3cd94ec2f5e194912819b59992c"
+    },
+    {
+      "order": 115,
+      "name": "assignment_tomorrow_backlog",
+      "sha256": "3e1b9c6829ee4b7869c09471ccee289d49818633ff72c3b956550f1a82a33e2b"
+    },
+    {
+      "order": 116,
+      "name": "payroll_remittance_basis_materialized",
+      "sha256": "3f6f47b6969a12ffe61b9a2ef56a5cef87dbd9b124a6ab5630889e1763248462"
+    },
+    {
+      "order": 117,
+      "name": "payroll_projection_materialization",
+      "sha256": "02dd365a9e9356595b903becd7f07513c27c640d35118bee460f24589fd2094a"
+    },
+    {
+      "order": 118,
+      "name": "assignment_midnight_rollover",
+      "sha256": "dc7fee28c3049c870072ff53f93427af14b11179c5e208321924d72c49613da8"
+    },
+    {
+      "order": 119,
+      "name": "room_pin_transfer",
+      "sha256": "77a5de1fcb89d355bb59a2247c6b36414defb4ec911e1e8afcc30aaaa8e64725"
+    },
+    {
+      "order": 120,
+      "name": "photo_upload_pre_provider_retry",
+      "sha256": "a2e2e5383ad8c280b38fcbb4df3d5c9fa02b1b5c750c78dced935b845446c814"
+    },
+    {
+      "order": 121,
+      "name": "photo_finalize_snapshot",
+      "sha256": "739c075894943666b8a546a10d838fc406a4bacfd7ddcfc550383468b7bee415"
+    },
+    {
+      "order": 122,
+      "name": "post_approval_memo_only",
+      "sha256": "72402db775a83d683061eda1192765c8b1e9f27920ad987dfc5ab7511b3e1fa7"
     }
   ]
 }

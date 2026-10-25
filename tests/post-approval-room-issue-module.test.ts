@@ -46,7 +46,7 @@ describe('supplemental registered source module composition', () => {
       await f.app.ready();
       const paths = postApprovalRoomIssueModuleOpenApiFragment.paths;
       const operations: { path: string; method: string; operation: {
-        operationId: string; security: unknown; 'x-implementation-status': string;
+        operationId: string; security: unknown; 'x-implementation-status': string; 'x-deployed-release': string;
         parameters: readonly { in: string; name: string }[];
       } }[] = Object.entries(paths).flatMap(([path, item]) => Object.entries(item).map(([method, operation]) => ({
         path, method, operation
@@ -62,7 +62,8 @@ describe('supplemental registered source module composition', () => {
         expect(openApiDocument.paths).toHaveProperty(path);
         expect(registeredIds.filter(id => id === operation.operationId)).toHaveLength(1);
         expect(operation.security).toEqual([{ bearerAuth: [] }]);
-        expect(operation['x-implementation-status']).toBe('source-registered-not-deployed');
+        expect(operation['x-implementation-status']).toBe('deployed');
+        expect(operation['x-deployed-release']).toBe('v0.9.0');
         const parameters = operation.parameters.filter(parameter => parameter.in === 'path').map(parameter => parameter.name).sort();
         expect(parameters).toEqual([...path.matchAll(/\{([^}]+)\}/g)].map(match => match[1]).sort());
       }

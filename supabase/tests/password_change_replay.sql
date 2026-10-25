@@ -331,11 +331,63 @@ select ok(not exists(
   select 1 from private.password_reset_auth_markers markers
   where to_jsonb(markers)::text ~ '(1234|654321|tmp:|eyJ|Bearer|refresh)'
 ),'reset recovery ledger contains only nonsecret command and effect provenance');
+-- #404: UUIDs and timestamp fractions can legitimately contain "1234".
+-- Compare every other field with the exact synthetic command contract instead
+-- of searching short digit strings inside generated identity/time metadata.
+create temporary table expected_password_audit (value jsonb not null) on commit drop;
+insert into expected_password_audit
+select jsonb_build_object(
+  'actor_profile_id',pg_temp.pid(1),
+  'actor_display_name_snapshot','password admin',
+  'event_type',event_type,'entity_type','profile','entity_id',pg_temp.pid(target),
+  'reason_code',null,'before_state',null,'after_state',state,
+  'request_id',null,'request_hash',repeat(hash_char,64),'idempotency_key',audit_key
+)
+from (values
+  ('account.password_changed',1,'{"mustChangePassword":false}'::jsonb,'a',
+    private.password_change_audit_key(pg_temp.pid(1),'password-first-0001')),
+  ('account.password_reset_requested',2,'{"mustChangePassword":true,"lockCleared":true}'::jsonb,'9',
+    private.audit_command_key(pg_temp.pid(1),'account.password.reset','password-admin-reset-01')),
+  ('account.password_reset_requested',3,'{"mustChangePassword":true,"lockCleared":true}'::jsonb,'1',
+    private.audit_command_key(pg_temp.pid(1),'account.password.reset','password-reset-plain-01')),
+  ('account.password_reset_requested',3,'{"mustChangePassword":true,"lockCleared":true}'::jsonb,'2',
+    private.audit_command_key(pg_temp.pid(1),'account.password.reset','password-reset-plain-02'))
+) as expected(event_type,target,state,hash_char,audit_key);
+create function pg_temp.password_audit_is_expected(candidate jsonb)
+returns boolean language sql stable as $$
+  select exists (
+    select 1 from expected_password_audit expected
+    where candidate - array['id','effective_at','recorded_at','created_at'] = expected.value
+  )
+$$;
+select is((select count(*) from public.audit_events
+  where actor_profile_id in (pg_temp.pid(1),pg_temp.pid(2))),4::bigint,
+  'password audit contains exactly the four expected command events');
 select ok(not exists(
   select 1 from public.audit_events a
   where a.actor_profile_id in (pg_temp.pid(1),pg_temp.pid(2))
-    and to_jsonb(a)::text ~ '(1234|654321|tmp:|eyJ|Bearer|refresh)'
-),'password audit contains no password or token material');
+    and not pg_temp.password_audit_is_expected(to_jsonb(a))
+),'password audit contains only exact safe command fields, no password or token material');
+select ok(bool_and(pg_temp.password_audit_is_expected(value || jsonb_build_object(
+  'id','12340000-0000-4000-8000-000000654321'::uuid,
+  'effective_at','2026-10-07T12:00:00.123456Z'::timestamptz,
+  'recorded_at','2026-10-07T12:00:00.654321Z'::timestamptz,
+  'created_at','2026-10-07T12:00:00.123456Z'::timestamptz
+))), 'valid generated UUID and timestamp digit collisions are not secret payloads')
+from expected_password_audit;
+select ok(bool_and(not pg_temp.password_audit_is_expected(
+  value || jsonb_build_object(field,sentinel)
+)), 'every non-metadata field rejects password and token sentinel mutations')
+from expected_password_audit
+cross join lateral jsonb_object_keys(value) as fields(field)
+cross join (values ('1234'),('654321'),('tmp:secret'),('eyJtoken'),('Bearer token'),('refresh')) as secrets(sentinel);
+select ok(bool_and(not pg_temp.password_audit_is_expected(
+  value || jsonb_build_object('after_state',(value->'after_state') || jsonb_build_object('password',sentinel))
+)), 'nested payload secrets are rejected even alongside valid audit state')
+from expected_password_audit
+cross join (values ('1234'),('654321'),('tmp:secret'),('eyJtoken'),('Bearer token'),('refresh')) as secrets(sentinel);
+select ok(bool_and(not pg_temp.password_audit_is_expected(value || '{"unexpected":"1234"}'::jsonb)),
+  'new unapproved audit fields fail closed') from expected_password_audit;
 select ok(not exists(
   select 1 from public.audit_events a
   where a.actor_profile_id in (pg_temp.pid(1),pg_temp.pid(2))

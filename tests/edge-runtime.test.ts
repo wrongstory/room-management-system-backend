@@ -269,7 +269,7 @@ describe('Supabase Edge runtime PoC contract', () => {
     expect(api).toContain('path === "/v1/developer/diagnostics"');
     expect(api).toContain('requireDeveloper(actor)');
     expect(developerApi).toMatch(
-      /expectedMigrationName\s*=\s*["']post_approval_room_issue_ledger["']/
+      /expectedMigrationName\s*=\s*["']post_approval_memo_only["']/
     );
     expect(developerApi).toContain('secretConfigurationAllowlist');
     expect(developerApi).not.toMatch(/Object\.(?:keys|entries)\(Deno\.env/);
@@ -307,6 +307,16 @@ describe('Supabase Edge runtime PoC contract', () => {
     expect(manifest.head).toBe(sourceNames.at(-1));
     const expected = developerApi.match(/export const expectedMigrationName\s*=\s*["']([^"']+)["']/)?.[1];
     expect(expected).toBe(manifest.head);
+    // SQL diagnostics must test the source head, not derive its expectation
+    // from the installed DB (which would hide missing/ahead migrations).
+    const sqlFixture = (await readFile(new URL('../supabase/tests/developer_operations.sql', import.meta.url), 'utf8')).replaceAll('\r\n', '\n');
+    const headSection = sqlFixture.slice(sqlFixture.indexOf('select is(\n  public.get_developer_database_status('),
+      sqlFixture.indexOf('insert into supabase_migrations.schema_migrations'));
+    expect(headSection.split(`'${manifest.head}'`).length - 1).toBe(7);
+    expect(headSection).toContain("'equal'");
+    expect(headSection).toContain("'ahead'");
+    expect(headSection).toContain("'behind'");
+    expect(headSection).toContain('select name from developer_previous_migration_head');
   });
 
   it('ports payroll through exact actor-bound RPCs and a bounded denial source', async () => {

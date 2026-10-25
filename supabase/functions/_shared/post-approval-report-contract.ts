@@ -1,5 +1,5 @@
 // Generated from src/modules/post-approval-room-issues/post-approval-room-issue-contract.ts. DO NOT EDIT.
-import { z } from "npm:zod@4.4.3";
+import { z } from "npm:zod@4.6.6";
 import type { AppRole } from "./post-approval-report-actor.ts";
 import { AppError } from "./post-approval-report-error.ts";
 import { requestHash } from "./post-approval-report-command.ts";
@@ -46,9 +46,11 @@ function orderedEvidence<
 }
 const finalizeSchema = draftSchema.extend({
   expectedDraftRevision: positiveRevision,
-  expectedEvidenceRevision: positiveRevision,
-  evidence: orderedEvidence(exactEvidenceSchema),
-}).strict();
+  expectedEvidenceRevision: revision,
+  evidence: orderedEvidence(exactEvidenceSchema, 0),
+}).strict().refine((value) =>
+  (value.evidence.length === 0) === (value.expectedEvidenceRevision === 0)
+);
 const keySchema = z.string().min(8).max(128).regex(/^[A-Za-z0-9._:-]+$/);
 const closeSchema = z.object({
   sourceSubmissionId: id,
@@ -96,7 +98,7 @@ const reportProjectionSchema = z.object({
   reportedByProfileId: id,
   reportedAt: z.iso.datetime({ offset: true }),
   memo,
-  evidence: orderedEvidence(z.object(evidenceShape)),
+  evidence: orderedEvidence(z.object(evidenceShape), 0),
 });
 // Immutable finalize receipts retain their original projection. GET/list read
 // the current closure separately and fail closed on inconsistent metadata.

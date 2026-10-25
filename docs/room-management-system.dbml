@@ -343,6 +343,8 @@ Table public.checkout_cleaning_obligations {
   reservation_id uuid [not null, unique]
   room_id uuid [not null]
   status text [not null]
+  // #446: 오늘/내일 계획과 자정 이월에서도 원 날짜를 재작성하지 않는다.
+  // 이월 계획일은 assignment.rolled_over 감사에 기록한다. 실제 schema는 migration 정본.
   original_service_date date [not null]
   effective_service_date date [not null]
   available_from timestamptz [not null]
@@ -2827,7 +2829,7 @@ Table private.post_approval_room_issue_reports {
     (reported_by_profile_id,reported_at,id) [name: 'post_approval_issue_reports_actor_idx']
     (original_performer_profile_id) [name: 'post_approval_issue_reports_performer_idx']
   }
-  Note: 'Immutable memo/report/evidence snapshot; exact typed seal count is deferred-checked. #336 source candidate only. FORCE RLS/private raw deny. Exact CHECK/default/partial-index/trigger and immutability authority is 20261005023103_post_approval_room_issue_ledger.sql; no installed DB validation asserted.'
+  Note: 'Immutable memo/report/evidence snapshot; exact typed seal count is deferred-checked. #474 candidate allows evidence_count 0..10 with evidence_revision=0 iff count=0; memo remains required. Original authority: 20261005023103_post_approval_room_issue_ledger.sql; pending amendment: 20261022135443_post_approval_memo_only.sql. FORCE RLS/private raw deny unchanged; no installed DB validation asserted.'
 }
 
 Table private.post_approval_issue_collections {
@@ -3131,3 +3133,5 @@ Ref: private.post_approval_issue_quota_pending.admission_id > private.post_appro
 Ref: private.post_approval_issue_quota_pending.operation_id > private.post_approval_issue_upload_operations.id
 Ref: private.post_approval_issue_delete_barriers.object_id > private.post_approval_issue_provider_objects.id
 Ref: private.post_approval_issue_purge_jobs.object_id > private.post_approval_issue_provider_objects.id
+
+// #452: room_pin_revisions.source adds sheet_import; service-role import uses immutable revision/current CAS. See docs/ROOM_PIN_TRANSFER.md.

@@ -903,7 +903,7 @@ function roomError(error: { message?: string } | null): AppError {
 function pinCryptoError(error: unknown): AppError {
   if (error instanceof RoomPinCryptoError) {
     if (error.code === 'INVALID_ROOM_PIN') {
-      return new AppError(400, 'INVALID_ROOM_PIN', 'PIN은 4~8자리 숫자 문자열이어야 합니다.');
+      return new AppError(400, 'INVALID_ROOM_PIN', 'PIN은 비어 있지 않은 128바이트 이하 문자열이어야 합니다.');
     }
     if (error.code === 'ROOM_PIN_KEY_UNAVAILABLE') {
       return new AppError(503, 'ROOM_PIN_KEY_UNAVAILABLE', '해당 PIN 암호화 키를 사용할 수 없습니다.');

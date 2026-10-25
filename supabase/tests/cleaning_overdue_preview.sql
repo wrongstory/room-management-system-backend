@@ -117,10 +117,10 @@ select is(pg_temp.preview_item('today',11),null::jsonb,'future scheduled is not 
 select is(pg_temp.preview_item('today',12)->>'blockedReason','ASSIGNMENT_PREVIEW_ACTIVE_WORKFLOW_UNRESOLVED','future actual busy workflow remains conservative');
 select is(pg_temp.preview_item('today',13)->>'blockedReason','ASSIGNMENT_DRAFT_STALE_SCHEDULE','past draft schedule staleness still blocks');
 select is(pg_temp.preview_item('today',14)->>'blockedReason','PREVIOUS_ROOM_WORKFLOW_ACTIVE','actual previous room workflow still blocks');
-select is(pg_temp.preview_item('tomorrow',1),null::jsonb,'tomorrow does not duplicate old unassigned candidate');
-select is(pg_temp.preview_item('tomorrow',2),null::jsonb,'tomorrow does not silently adopt old draft');
-select is(pg_temp.preview_item('tomorrow',3),null::jsonb,'tomorrow does not silently adopt past notified attempt-zero');
-select is(pg_temp.preview_item('tomorrow',4)->>'blockedReason','ASSIGNMENT_PREVIEW_ACTIVE_WORKFLOW_UNRESOLVED','past busy stays conservative in tomorrow context');
+select is(pg_temp.preview_item('tomorrow',1)->>'serviceDate','2038-06-06','tomorrow includes unfinished backlog without rewriting date');
+select is(pg_temp.preview_item('tomorrow',2)->>'serviceDate','2038-06-06','tomorrow includes existing old draft');
+select is(pg_temp.preview_item('tomorrow',3)->>'serviceDate','2038-06-06','tomorrow includes old notified attempt-zero');
+select is(pg_temp.preview_item('tomorrow',4)->>'blockedReason',null::text,'past busy is fixed workload rather than an age-only blocker');
 select is(pg_temp.preview_item('tomorrow',6)->>'serviceDate','2038-06-08','tomorrow exact-date candidate retained');
 select is((select (maid->>'available')::boolean from overdue_preview_snapshots s,jsonb_array_elements(s.value->'maids') maid
   where s.label='today' and maid->>'maidProfileId'=pg_temp.pvid(3)::text),true,'today uses current planning-day availability, not unavailable yesterday');

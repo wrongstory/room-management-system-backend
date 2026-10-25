@@ -3,6 +3,7 @@ import {
   canonicalRoomPin,
   decryptRoomPin,
   encryptRoomPin,
+  isValidRoomPin,
   type RoomPinCryptoConfig,
   RoomPinCryptoError,
   type RoomPinEnvelope,
@@ -104,7 +105,7 @@ function runtimeProjectRef(environment: string): string {
   throw new Error("canonical runtime project URL required");
 }
 
-function config(): RoomPinCryptoConfig {
+export function config(): RoomPinCryptoConfig {
   try {
     const objectKeyring = (name: string): Record<string, unknown> => {
       const value = JSON.parse(requiredEnv(name)) as unknown;
@@ -199,7 +200,7 @@ function cryptoError(error: unknown): EdgeError {
       return new EdgeError(
         400,
         "INVALID_ROOM_PIN",
-        "PIN은 4~8자리 숫자 문자열이어야 합니다.",
+        "PIN은 비어 있지 않은 128바이트 이하 문자열이어야 합니다.",
       );
     }
     if (error.code === "ROOM_PIN_KEY_UNAVAILABLE") {
@@ -281,12 +282,12 @@ export async function prepareRoomPinChange(
     "accessLeaseId",
   ]);
   if (
-    typeof body.pinDigits !== "string" || !/^[0-9]{4,8}$/.test(body.pinDigits)
+    !isValidRoomPin(body.pinDigits)
   ) {
     throw new EdgeError(
       400,
       "INVALID_ROOM_PIN",
-      "PIN은 4~8자리 숫자 문자열이어야 합니다.",
+      "PIN은 비어 있지 않은 128바이트 이하 문자열이어야 합니다.",
     );
   }
   if (typeof body.reasonCode !== "string" || !reasons.has(body.reasonCode)) {

@@ -1,6 +1,7 @@
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { PayrollService } from './payroll.service.js';
+import { readRemittanceBatch } from './payroll-remittance-batch.js';
 import { payrollAdjustmentBookQuery } from './payroll-adjustment-book.js';
 import { payrollWorkQuery, PayrollWorkDetailsError, payrollWorkErrorStatus } from './payroll-work-details.js';
 import { AppError } from '../../lib/app-error.js';
@@ -111,6 +112,10 @@ export function createPayrollRoutes(service: PayrollService): FastifyPluginAsync
         throw error;
       }
     }
+    app.get('/remittance-markers', { preHandler: authenticated, exposeHeadRoute: false }, async (request) =>
+      remittanceReply(() => readRemittanceBatch(request.actor,
+        new URL(request.url, 'http://backend.internal').searchParams,
+        (input) => service.getRemittanceMarker(request.actor, input))));
     app.get('/remittance-marker', { preHandler: authenticated, exposeHeadRoute: false }, async (request) =>
       remittanceReply(() => service.getRemittanceMarker(request.actor, remittanceQuery(new URL(request.url, 'http://backend.internal').searchParams) as RemittanceInput)));
     app.put('/remittance-marker', { preHandler: admin }, async (request) =>

@@ -306,7 +306,8 @@ describe('standalone supplemental evidence OpenAPI fragment', () => {
     expect(entries).toHaveLength(3);
     const uploadEntry = entries.find(value => 'post' in value); if (!uploadEntry || !('post' in uploadEntry)) throw new Error('missing upload');
     const specification = uploadEntry.post;
-    expect(specification['x-implementation-status']).toBe('source-registered-not-deployed');
+    expect(specification['x-implementation-status']).toBe('deployed');
+    expect(specification['x-deployed-release']).toBe('v0.9.0');
     expect(specification['x-required-roles']).toEqual(['admin', 'maid']);
     expect(Object.keys(specification.requestBody.content)).toEqual(['image/jpeg', 'image/webp', 'image/heic', 'image/heif']);
     expect(specification.requestBody.content['image/heic']?.schema['x-max-bytes']).toBe(PHOTO_INPUT_MAX_BYTES);

@@ -12,8 +12,12 @@ const catalogTable = 'private.notification_event_catalog';
 const literal = value => `'${value.replaceAll("'", "''")}'`;
 
 function checkExpectedCount(expectedCount) {
-  assert(Number.isSafeInteger(expectedCount) && expectedCount >= 95 && expectedCount <= 111,
-    'Only the audited95..111 upgrade range is supported; unknown additions fail closed');
+  // 112 indexes; 113 auth read; 114 room aggregate; 115/118 assignment planning;
+  // 116/117 payroll projection; 119 PIN transfer; 120/121 photo commands;
+  // 122 memo-only reports. These sources add no notification catalog rows.
+  // Runtime event dispatch is not permission to mutate historical catalog metadata.
+  assert(Number.isSafeInteger(expectedCount) && expectedCount >= 95 && expectedCount <= 122,
+    'Only the audited95..122 upgrade range is supported; 112..122 add no catalog rows');
 }
 function catalogRows(value) {
   assert(Array.isArray(value), 'An existing baseline notification catalog is required');
@@ -60,7 +64,7 @@ export function upgradeHistorySnapshotSql(shape, expectedCount, excludeApprovedA
   assert(Array.isArray(shape) && shape.length > 0, 'A nonempty original table/column shape is required');
   const tables = new Set();
   const catalog = shape.find(entry => entry.table === catalogTable);
-  const exclude = excludeApprovedAddition && expectedCount === 111;
+  const exclude = excludeApprovedAddition && expectedCount >= 111;
   if (exclude) {
     assert(catalog && Object.keys(APPROVED_UPGRADE_NOTIFICATION_CATALOG_ROW)
       .every(column => catalog.columns.includes(column)), 'The111 exception requires the complete baseline catalog schema');

@@ -4,6 +4,247 @@ import { EdgeError } from "../_shared/runtime.ts";
 import { PhotoError } from "../_shared/photo-binary.ts";
 import type { PhotoService } from "../_shared/photo-service.ts";
 
+Deno.test("#317 PIN 5xx logs correlate server UUID without secrets across all operations", async () => {
+  const paths = [
+    "pins/bootstrap",
+    "room/pin/reveal",
+    "room/pin/generated/confirm",
+    "room/pin-changes/prepare",
+    "room/pin-changes/lease/confirm",
+    "room/pin-changes/lease/rollback",
+  ];
+  const records: unknown[][] = [];
+  const original = console.error;
+  console.error = (...args: unknown[]) => {
+    records.push(args);
+  };
+  const supplied = "10000000-0000-4000-8000-000000000001";
+  try {
+    for (const path of paths) {
+      for (
+        const failure of [
+          new EdgeError(503, "ROOM_PIN_KEY_UNAVAILABLE", "safe"),
+          new Error("synthetic-secret-raw"),
+          new EdgeError(503, "synthetic-secret-code", "safe"),
+        ]
+      ) {
+        const deps: ApiHandlerDependencies = {
+          createClients: () => ({}) as EdgeClients,
+          authenticateRequest: () => Promise.reject(failure),
+        };
+        const before = records.length;
+        const response = await handleApiRequest(
+          new Request(
+            `https://api.example/api/v1/rooms/${path}?pin=synthetic-secret-query`,
+            {
+              method: "POST",
+              headers: {
+                "x-request-id": supplied,
+                authorization: "Bearer synthetic-secret-token",
+                "content-type": "application/json",
+              },
+              body: "{}",
+            },
+          ),
+          deps,
+        );
+        const body = await response.json();
+        assert(
+          response.status === (failure instanceof EdgeError ? 503 : 500),
+          "expected failure",
+        );
+        assert(
+          response.headers.get("cache-control") === "no-store",
+          "no cache",
+        );
+        assert(
+          body.requestId !== supplied &&
+            /^[0-9a-f-]{14}4[0-9a-f-]{21}$/.test(body.requestId),
+          "server UUID",
+        );
+        assert(records.length === before + 1, "exactly one diagnostic");
+        const record = JSON.parse(String(records.at(-1)?.[0]));
+        assert(
+          record.requestId === body.requestId &&
+            record.status === response.status,
+          "response correlation",
+        );
+        assert(
+          Object.keys(record).sort().join(",") ===
+            "code,operation,requestId,status",
+          "closed projection",
+        );
+        assert(
+          record.code ===
+            (failure instanceof EdgeError &&
+                failure.code === "ROOM_PIN_KEY_UNAVAILABLE"
+              ? failure.code
+              : "INTERNAL_SERVER_ERROR"),
+          "allowlist",
+        );
+      }
+    }
+    const before = records.length;
+    const denied = await handleApiRequest(
+      new Request("https://api.example/api/v1/rooms/room/pin/reveal", {
+        method: "POST",
+      }),
+      {
+        createClients: () => ({}) as EdgeClients,
+        authenticateRequest: () =>
+          Promise.reject(new EdgeError(401, "INVALID_ACCESS_TOKEN", "denied")),
+      },
+    );
+    assert(
+      denied.status === 401 && records.length === before,
+      "4xx not logged",
+    );
+    await denied.body?.cancel();
+    assert(
+      !JSON.stringify(records).includes("synthetic-secret"),
+      "no secret canaries in logs",
+    );
+  } finally {
+    console.error = original;
+  }
+});
+
+Deno.test("common timing exposes only fixed duration on successful business responses", async () => {
+  const deps: ApiHandlerDependencies = {
+    createClients: () =>
+      ({
+        admin: { rpc: () => Promise.resolve({ data: [], error: null }) },
+      }) as unknown as EdgeClients,
+    authenticateRequest: () =>
+      Promise.resolve({
+        authUserId: "synthetic",
+        profileId: "synthetic",
+        displayName: "synthetic",
+        role: "admin",
+        mustChangePassword: false,
+      }),
+  };
+  const token = `h.${
+    btoa(JSON.stringify({ session_id: "10000000-0000-4000-8000-000000000001" }))
+  }.synthetic`;
+  for (const prefix of ["/api", "/functions/v1/api"]) {
+    const response = await handleApiRequest(
+      new Request(`https://api.example${prefix}/v1/rooms`, {
+        headers: {
+          authorization: `Bearer ${token}`,
+          "server-timing": "private-secret",
+        },
+      }),
+      deps,
+    );
+    assert(response.status === 200, "success");
+    assert(
+      /^api_total;dur=\d+\.\d$/.test(
+        response.headers.get("server-timing") ?? "",
+      ),
+      "numeric only",
+    );
+    assert(
+      response.headers.get("access-control-expose-headers") === "Server-Timing",
+      "browser-readable",
+    );
+    assert(
+      JSON.stringify(await response.json()) === JSON.stringify({ rooms: [] }),
+      "same payload",
+    );
+  }
+  const denied = await handleApiRequest(
+    new Request("https://api.example/api/v1/rooms"),
+    {
+      ...deps,
+      authenticateRequest: () =>
+        Promise.reject(new EdgeError(401, "INVALID_ACCESS_TOKEN", "denied")),
+    },
+  );
+  assert(
+    denied.status === 401 && !denied.headers.has("server-timing"),
+    "no denial timing",
+  );
+  await denied.body?.cancel();
+});
+
+Deno.test("#406 PUT preflight preserves exact origins and all CAS headers without auth or DB", async () => {
+  const previous = Deno.env.get("CORS_ORIGINS");
+  const origins = [
+    "https://room-management-system-prod.vercel.app",
+    "https://synthetic-preview.example",
+  ];
+  Deno.env.set("CORS_ORIGINS", origins.join(","));
+  let calls = 0;
+  const dependencies: ApiHandlerDependencies = {
+    createClients: () => {
+      calls++;
+      throw new Error("preflight must not create clients");
+    },
+    authenticateRequest: () => {
+      calls++;
+      throw new Error("preflight must not authenticate");
+    },
+  };
+  const headers =
+    "authorization,content-type,idempotency-key,if-draft-revision,if-evidence-revision,if-item-revision";
+  try {
+    for (
+      const origin of [
+        ...origins,
+        "https://untrusted.example",
+        origins[0] + ".evil.example",
+      ]
+    ) {
+      const response = await handleApiRequest(
+        new Request("https://api.example/v1/payroll/remittance-marker", {
+          method: "OPTIONS",
+          headers: {
+            origin,
+            "access-control-request-method": "PUT",
+            "access-control-request-headers": headers,
+          },
+        }),
+        dependencies,
+      );
+      if (origins.includes(origin)) {
+        assert(response.status === 204, "allowed preflight");
+        assert(
+          response.headers.get("access-control-allow-origin") === origin,
+          "exact origin",
+        );
+        assert(
+          response.headers.get("access-control-allow-methods")?.split(",")
+            .includes("PUT"),
+          "PUT advertised",
+        );
+        for (const header of headers.split(",")) {
+          assert(
+            response.headers.get("access-control-allow-headers")?.split(",")
+              .includes(header),
+            header,
+          );
+        }
+        assert(
+          response.headers.get("vary") === "Origin",
+          "cache origin separation",
+        );
+      } else {
+        assert(response.status === 403, "unlisted origin rejected");
+        assert(
+          !response.headers.has("access-control-allow-origin"),
+          "no reflected untrusted origin",
+        );
+      }
+      await response.body?.cancel();
+    }
+    assert(calls === 0, "no auth or DB effects");
+  } finally {
+    if (previous === undefined) Deno.env.delete("CORS_ORIGINS");
+    else Deno.env.set("CORS_ORIGINS", previous);
+  }
+});
+
 Deno.test("candle HTTP routes allow maid minimal reads and writes without opening general room access", async () => {
   const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
   const clients = {
@@ -436,7 +677,9 @@ Deno.test("photo failure logs only bounded status/code/request ID and preserves 
         }) as unknown as EdgeClients,
       authenticateRequest: () => Promise.resolve(actor),
       photoService: () =>
-        ({ upload: () => Promise.reject(error) }) as unknown as PhotoService,
+        ({
+          withTiming: () => ({ upload: () => Promise.reject(error) }),
+        }) as unknown as PhotoService,
     });
     const body = await response.json();
     assert(
@@ -1084,7 +1327,7 @@ Deno.test("assignment GET routes expose only own notified revisions and preserve
             : [{ id: maid.profileId, display_name: "메이드" }],
         ),
       rpc: (name: string, args: Record<string, unknown>) => {
-        if (name !== "get_assignment_schedule_read") {
+        if (name !== "get_assignment_schedule_read_for_plan") {
           return Promise.resolve({ data: null, error: null });
         }
         assert(
@@ -1114,6 +1357,7 @@ Deno.test("assignment GET routes expose only own notified revisions and preserve
         return Promise.resolve({
           data: ids.map((assignmentId) => ({
             assignmentId,
+            planningDate: "2026-09-04",
             scheduleSnapshot: null,
             currentDeparture: null,
           })),

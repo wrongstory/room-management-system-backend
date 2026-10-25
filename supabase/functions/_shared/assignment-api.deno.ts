@@ -148,6 +148,37 @@ const prestartBody = {
   reasonCode: "OPERATIONAL_CHANGE",
 };
 
+Deno.test("selected prestart planning day reaches the command and idempotency hash", async () => {
+  const { clients, calls } = prestartClients();
+  for (const serviceDate of ["2026-09-05", "2026-09-06"]) {
+    await prestartCommand(
+      request("/test", "POST", {
+        ...prestartBody,
+        maidProfileId: maid.profileId,
+        sequenceNumber: 3,
+        serviceDate,
+      }),
+      clients,
+      admin,
+      targetId,
+      "change",
+    );
+  }
+  assert(
+    calls.every((call) => call.name === "change_cleaning_assignment_for_plan"),
+    "planning command",
+  );
+  assert(
+    calls[0]?.args.p_service_date === "2026-09-05" &&
+      calls[1]?.args.p_service_date === "2026-09-06",
+    "explicit day",
+  );
+  assert(
+    calls[0]?.args.p_request_hash !== calls[1]?.args.p_request_hash,
+    "different day is not a replay",
+  );
+});
+
 Deno.test("prestart commands preserve actor CAS canonical retry and safe projections", async () => {
   const { clients, calls } = prestartClients();
   for (
@@ -518,7 +549,11 @@ function request(
   });
 }
 
-function queryResult(data: unknown, countOverride?: number | null) {
+function queryResult(
+  data: unknown,
+  countOverride?: number | null,
+  beforeRead?: () => Promise<void>,
+) {
   const filters: Array<[string, unknown]> = [];
   type Query = Promise<{ data: unknown; error: null; count: number | null }> & {
     select: (columns: string) => Query;
@@ -531,13 +566,20 @@ function queryResult(data: unknown, countOverride?: number | null) {
   };
   let query: Query;
   query = Object.assign(
-    Promise.resolve({
-      data,
-      error: null,
-      count: countOverride === undefined
-        ? (Array.isArray(data) ? data.length : 0)
-        : countOverride,
-    }),
+    {
+      // biome-ignore lint/suspicious/noThenProperty: Supabase query builders are intentionally awaitable.
+      then: (
+        resolve: (result: unknown) => unknown,
+        reject: (reason: unknown) => unknown,
+      ) =>
+        Promise.resolve().then(beforeRead).then(() => ({
+          data,
+          error: null,
+          count: countOverride === undefined
+            ? (Array.isArray(data) ? data.length : 0)
+            : countOverride,
+        })).then(resolve, reject),
+    },
     {
       select: (columns: string) => {
         filters.push(["select", columns]);
@@ -598,6 +640,8 @@ function readClients(
     count?: number | null;
     attemptCount?: number | null;
     attempts?: Record<string, unknown>[];
+    submissionCount?: number | null;
+    beforeRead?: (table: string) => Promise<void>;
     scheduleRead?: (
       args: Record<string, unknown>,
     ) => { data: unknown; error: { message: string } | null };
@@ -606,31 +650,39 @@ function readClients(
   const access = queryResult(rows, options.count);
   const overdue = queryResult(options.overdue ?? []);
   let accessReads = 0;
-  const targets = queryResult([
-    {
-      id: targetId,
-      room_id: roomId,
-      cleaning_kind: "checkout",
-      source: "scheduled_checkout",
-      original_service_date: "2026-09-03",
-      effective_service_date: "2026-09-04",
-      carryover_count: 4,
-      status: "notified",
-      assignment_version: 999,
-      room_type_snapshot: {
-        code: "standard",
-        name: "스탠다드 더블 로프트",
-        elevatorZone: "A",
+  const targets = queryResult(
+    [
+      {
+        id: targetId,
+        room_id: roomId,
+        cleaning_kind: "checkout",
+        source: "scheduled_checkout",
+        original_service_date: "2026-09-03",
+        effective_service_date: "2026-09-04",
+        carryover_count: 4,
+        status: "notified",
+        assignment_version: 999,
+        room_type_snapshot: {
+          code: "standard",
+          name: "스탠다드 더블 로프트",
+          elevatorZone: "A",
+        },
+        fee_snapshot: 16000,
+        template_snapshot: { durationMinutes: null },
+        rooms: { room_number: "101" },
+        ...options.target,
       },
-      fee_snapshot: 16000,
-      template_snapshot: { durationMinutes: null },
-      rooms: { room_number: "101" },
-      ...options.target,
-    },
-  ]);
-  const maids = queryResult([
-    { id: maid.profileId, display_name: "메이드" },
-  ]);
+    ],
+    undefined,
+    () => options.beforeRead?.("cleaning_targets") ?? Promise.resolve(),
+  );
+  const maids = queryResult(
+    [
+      { id: maid.profileId, display_name: "메이드" },
+    ],
+    undefined,
+    () => options.beforeRead?.("profiles") ?? Promise.resolve(),
+  );
   const attempts = queryResult(
     options.attempts ?? [{
       id: "60000000-0000-4000-8000-000000000001",
@@ -639,12 +691,17 @@ function readClients(
       status: "field_completed",
     }],
     options.attemptCount,
+    () => options.beforeRead?.("cleaning_attempts") ?? Promise.resolve(),
   );
-  const submissions = queryResult([{
-    cleaning_attempt_id: "60000000-0000-4000-8000-000000000001",
-    version: 1,
-    status: "submitted",
-  }]);
+  const submissions = queryResult(
+    [{
+      cleaning_attempt_id: "60000000-0000-4000-8000-000000000001",
+      version: 1,
+      status: "submitted",
+    }],
+    options.submissionCount,
+    () => options.beforeRead?.("cleaning_submissions") ?? Promise.resolve(),
+  );
   const schedules = queryResult(
     options.schedules ?? [{
       cleaning_target_id: targetId,
@@ -652,6 +709,10 @@ function readClients(
       effective_service_date: "2026-09-04",
       reason_code: "ROLLED_OVER_NOT_STARTED",
     }],
+    undefined,
+    () =>
+      options.beforeRead?.("cleaning_target_schedule_revisions") ??
+        Promise.resolve(),
   );
   const clients = {
     forAccessToken: () => ({
@@ -662,7 +723,10 @@ function readClients(
     }),
     admin: {
       rpc: async (name: string, args: Record<string, unknown>) => {
-        assert(name === "get_assignment_schedule_read", "exact read-only RPC");
+        assert(
+          name === "get_assignment_schedule_read_for_plan",
+          "exact read-only RPC",
+        );
         assert(
           args.p_expected_actor_role === "admin" ||
             args.p_expected_actor_role === "maid",
@@ -703,6 +767,112 @@ function readClients(
     schedules,
   };
 }
+
+for (
+  const slowTable of [
+    "cleaning_targets",
+    "profiles",
+    "cleaning_target_schedule_revisions",
+  ]
+) {
+  Deno.test(`assignment submissions overlap slow ${slowTable}, final authority remains last`, async () => {
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let reached = () => {};
+    const submitted = new Promise<void>((resolve) => {
+      reached = resolve;
+    });
+    const events: string[] = [];
+    const { clients } = readClients([assignmentRow()], {
+      beforeRead: async (table) => {
+        events.push(`start:${table}`);
+        if (table === slowTable) await gate;
+        events.push(`end:${table}`);
+        if (table === "cleaning_submissions") reached();
+      },
+      scheduleRead: () => {
+        events.push("authority");
+        return { data: null, error: { message: "SESSION_REVOKED" } };
+      },
+    });
+    const pending = captureEdgeError(() =>
+      listAssignments(
+        request("/v1/assignments?serviceDate=2026-09-04"),
+        clients,
+        admin,
+      )
+    );
+    let timeout: number | undefined;
+    try {
+      await Promise.race([
+        submitted,
+        new Promise((_, reject) => {
+          timeout = setTimeout(
+            () => reject(new Error("submissions blocked by unrelated read")),
+            2000,
+          );
+        }),
+      ]);
+      assert(
+        !events.includes(`end:${slowTable}`),
+        "unrelated read still blocked",
+      );
+      assert(
+        !events.includes("authority"),
+        "authority must wait for all hydration",
+      );
+    } finally {
+      clearTimeout(timeout);
+      release();
+    }
+    const error = await pending;
+    assert(
+      error.status === 401 && error.code === "SESSION_REVOKED",
+      "late revocation rejects whole response",
+    );
+    assert(events.at(-1) === "authority", "final DB authority remains last");
+  });
+}
+
+Deno.test("pipelined submissions retain exact-count failure and empty-attempt behavior", async () => {
+  for (const submissionCount of [null, 1001, 2]) {
+    let authorityCalled = false;
+    const { clients } = readClients([assignmentRow()], {
+      submissionCount,
+      scheduleRead: () => {
+        authorityCalled = true;
+        return { data: [], error: null };
+      },
+    });
+    const error = await captureEdgeError(() =>
+      listAssignments(
+        request("/v1/assignments?serviceDate=2026-09-04"),
+        clients,
+        admin,
+      )
+    );
+    assert(error.status === 500, "incomplete submissions fail closed");
+    assert(!authorityCalled, "no partial response after submission failure");
+  }
+  const { clients, submissions } = readClients([assignmentRow()], {
+    attempts: [],
+  });
+  const result = await listAssignments(
+    request("/v1/assignments?serviceDate=2026-09-04"),
+    clients,
+    admin,
+  );
+  assert(
+    result.length === 1 && result[0].submissionStatus === null,
+    "no fabricated submission",
+  );
+  assert(
+    submissions.filters.length === 0,
+    "no submission query without latest attempt IDs",
+  );
+});
 
 Deno.test("today current list includes old unfinished with immutable snapshots and scoped bounded queries", async () => {
   const pastId = "70000000-0000-4000-8000-000000000010";
@@ -773,11 +943,96 @@ Deno.test("today current list includes old unfinished with immutable snapshots a
   }
 });
 
-Deno.test("tomorrow history and pre-KST-midnight reads never expand to past dates", async () => {
+Deno.test("admin tomorrow planning includes bounded unfinished backlog but maid tomorrow remains exact", async () => {
+  for (const actor of [admin, maid]) {
+    const { clients, overdue } = readClients([], {
+      overdue: [assignmentRow()],
+    });
+    const result = await listAssignments(
+      request("/v1/assignments?serviceDate=2026-09-06"),
+      clients,
+      actor,
+      () => new Date("2026-09-04T15:00:00Z"),
+    );
+    if (actor.role === "admin") {
+      assert(
+        result.length === 1 && result[0].serviceDate === "2026-09-04",
+        "original work day preserved",
+      );
+      assert(
+        overdue.filters.some(([key, value]) =>
+          key === "lt.service_date" && value === "2026-09-06"
+        ),
+        "selected planning day bound",
+      );
+      assert(
+        overdue.filters.some(([key, value]) =>
+          key === "not.cleaning_targets.status.in" &&
+          value ===
+            "(approved,cancelled,inspection_pending,upload_pending,rejected)"
+        ),
+        "completed and submitted stages excluded before cap",
+      );
+    } else {
+      assert(
+        result.length === 0 && overdue.filters.length > 0,
+        "maid tomorrow does not relabel past work",
+      );
+    }
+  }
+});
+
+for (const actor of [admin, maid]) {
+  Deno.test(`${actor.role} tomorrow backlog becomes today at KST midnight with identical card`, async () => {
+    const makeClients = () =>
+      readClients([], {
+        overdue: [assignmentRow()],
+        scheduleRead: (args) => ({
+          data: (args.p_assignment_ids as string[]).map((assignmentId) => ({
+            assignmentId,
+            scheduleSnapshot: null,
+            currentDeparture: null,
+            planningDate: "2026-09-06",
+          })),
+          error: null,
+        }),
+      });
+    const tomorrow = await listAssignments(
+      request("/v1/assignments?serviceDate=2026-09-06"),
+      makeClients().clients,
+      actor,
+      () => new Date("2026-09-05T14:59:59.999Z"),
+    );
+    assert(
+      tomorrow.length === 1 && tomorrow[0].serviceDate === "2026-09-04" &&
+        tomorrow[0].planningDate === "2026-09-06",
+      "planned tomorrow",
+    );
+    const today = await listAssignments(
+      request("/v1/assignments?serviceDate=2026-09-05"),
+      makeClients().clients,
+      actor,
+      () => new Date("2026-09-05T14:59:59.999Z"),
+    );
+    assert(today.length === 0, "not today");
+    const afterMidnight = await listAssignments(
+      request("/v1/assignments?serviceDate=2026-09-06"),
+      makeClients().clients,
+      actor,
+      () => new Date("2026-09-05T15:00:00Z"),
+    );
+    assert(
+      JSON.stringify(afterMidnight) === JSON.stringify(tomorrow),
+      "same target, owner, and immutable snapshot after midnight",
+    );
+  });
+}
+
+Deno.test("outside planning days and history reads never expand to past dates", async () => {
   for (
     const [path, instant] of [
-      ["/v1/assignments?serviceDate=2026-09-05", "2026-09-04T14:59:59.999Z"],
-      ["/v1/assignments?serviceDate=2026-09-06", "2026-09-04T15:00:00Z"],
+      ["/v1/assignments?serviceDate=2026-09-06", "2026-09-04T14:59:59.999Z"],
+      ["/v1/assignments?serviceDate=2026-09-07", "2026-09-04T15:00:00Z"],
       [
         "/v1/assignments?serviceDate=2026-09-05&includeHistory=true",
         "2026-09-04T15:00:00Z",
