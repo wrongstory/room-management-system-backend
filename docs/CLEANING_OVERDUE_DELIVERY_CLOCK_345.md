@@ -25,7 +25,21 @@ NO_ACTIVE_SUBSCRIPTION 도달/기존 inbox·outbox 보존/중복 방지/ACL 회�
 
 **migration 적용·pgTAP·Full DB NOT RUN.** 신규 migration 파일과 manifest만 생성했다.
 최종 사용자 승인 후 격리 DB에서 fresh/기존-history upgrade/worker 회귀를 실행해야 한다.
-그 전까지 Draft이며 #345를 완료 처리하지 않는다. 운영·프런트 API 변경은 없다.
+최신 최종 1회 정책에 따라 일반 dev PR은 application/manifest/독립 QA 후 source로 통합한다.
+#345는 실제 SQL·upgrade·worker 증거 전 OPEN이며 운영·프런트 API 변경은 없다.
+
+2026-10-25 dev96ec94b 통합에서 PR486이 복원한 진단 SQL head 검사를 대조했다.
+`developer_operations.sql`의 current head 기대값 7곳을 신규 manifest head로 맞추고,
+실제 직전 history를 보존하는 equal/ahead/behind 검사는 유지했다. DBML의 전달 시각
+설명도 신규 outbox/과거 이력 보존 경계와 일치시켰다. SQL 자체는 실행하지 않았다.
+
+첫 통합 application 실행은 3,265 PASS/1 FAIL이었다. 복원된 upgrade catalog 검사의
+허용 범위가 122에서 끝나 신규123을 거부했다. 새 migration이 catalog row를 추가하거나
+변경하지 않는 것을 검토한 뒤 정확한123까지 확장하고 124 이상 거부 및 기존 전체 row·
+metadata 변조/누락/추가 거부를 유지했다. 이는 실제 SQL 실행 증거가 아니다.
+
+보완 후 `npm run ci:quality`는 132 files / 3,268 tests, typecheck/build 포함 PASS,
+manifest123 정적 검사는 PASS다. 최초 실패는 위에 보존하며 Full DB/SQL은 여전히 NOT RUN이다.
 
 2026-10-24 application `ci:quality` PASS: 126 files / 3,133 tests,
 typecheck/build 포함. manifest 123건 정적 검사 PASS.
@@ -37,6 +51,5 @@ typecheck/build 포함. manifest 123건 정적 검사 PASS.
 
 ## 다음 필수 항목
 
-#273 안전한 복사·복원 실행기 → #12 Supabase Free 정기 자동 백업을 계속한다.
-Free 자동 백업은 source foundation만으로 완료 처리하지 않고 실제 주기 실행,
-실패/중복 처리, 이전 성공본 보호, 복원 검증 근거까지 필요하다.
+#300과 함께 최종 릴리스의 승인된 격리 DB 검증에서 실제 SQL·worker·upgrade를 확인한다.
+#12/#273은 최신 예약 전용 백업 계약과 인계 근거를 따르며 정기 활성화·첫 예약 실행은 별도다.

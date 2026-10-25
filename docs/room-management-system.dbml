@@ -2716,7 +2716,7 @@ Table private.cleaning_overdue_recipients {
     recipient_profile_id
     actor_profile_id
   }
-  Note: 'Immutable admin enrollment. Deferred event/enrollment/typed-notice/outbox commit identity; actor self inbox retained, self push absent. Repeated runs/actor changes/group boundary never re-emit; new eligible admin keeps original event clock and 24h delivery TTL; possible immediate late-admin push expiry remains OPEN #345 (not changed by #343).'
+  Note: 'Immutable admin enrollment. Deferred event/enrollment/typed-notice/outbox commit identity; actor self inbox retained, self push absent. Repeated runs/actor changes/group boundary never re-emit. #345 source candidate preserves event/inbox/group clocks and uses enrolled_at only for a new recipient outbox, retaining 24h TTL without rewriting old deliveries. Actual SQL validation and operating rollout remain pending.'
 }
 
 Table private.cleaning_overdue_scan_cursor {
