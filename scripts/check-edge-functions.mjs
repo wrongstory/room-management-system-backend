@@ -68,6 +68,7 @@ const sourcePaths = [
   'supabase/functions/_shared/notification-delivery-worker.ts',
   'supabase/functions/_shared/worker-admission.ts',
   'supabase/functions/_shared/scheduler-admission.ts',
+  'supabase/functions/_shared/pin-worker-admission.ts',
   'supabase/functions/_shared/web-push-provider.ts',
   'supabase/functions/_shared/developer-api.ts',
   'supabase/functions/_shared/developer-reset-api.ts',
@@ -98,6 +99,7 @@ const sourcePaths = [
   'supabase/functions/room-pin-sheet-sync/index.ts'
 ];
 const testPaths = [
+  'supabase/functions/_shared/pin-worker-admission.deno.ts',
   'supabase/functions/reservation-scheduler/index.deno.ts',
   'supabase/functions/reservation-backup-monitor/index.deno.ts',
   'supabase/functions/_shared/room-pin-transfer-api.deno.ts',
