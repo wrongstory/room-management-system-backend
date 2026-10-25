@@ -1326,8 +1326,11 @@ Deno.test("assignment GET routes expose only own notified revisions and preserve
             ? []
             : [{ id: maid.profileId, display_name: "메이드" }],
         ),
-      rpc: (name: string, args: Record<string, unknown>) => {
-        if (name !== "get_assignment_schedule_read_for_plan") {
+      rpc: async (name: string, args: Record<string, unknown>) => {
+        if (
+          name !== "get_assignment_schedule_read_for_plan" &&
+          name !== "get_assignment_card_hydration"
+        ) {
           return Promise.resolve({ data: null, error: null });
         }
         assert(
@@ -1353,6 +1356,33 @@ Deno.test("assignment GET routes expose only own notified revisions and preserve
           ids.every((id) => rows.some((row) => row.id === id)),
           "no cross-ID hydration",
         );
+        if (name === "get_assignment_card_hydration") {
+          const target = await clients.admin.from("cleaning_targets").select(
+            "*",
+          );
+          const selected = rows.filter((row) => ids.includes(row.id));
+          const pack = (data: unknown[]) => ({
+            rows: data,
+            count: data.length,
+          });
+          return {
+            data: {
+              assignments: selected.map((
+                { id, cleaning_target_id, maid_profile_id },
+              ) => ({ id, cleaning_target_id, maid_profile_id })),
+              targets: pack(target.data ?? []),
+              profiles: pack(
+                [...new Set(selected.map((row) => row.maid_profile_id))].map(
+                  (id) => ({ id, display_name: "메이드" }),
+                ),
+              ),
+              attempts: pack([]),
+              submissions: pack([]),
+              schedules: pack([]),
+            },
+            error: null,
+          };
+        }
         scheduleModes.push(args.p_include_current);
         return Promise.resolve({
           data: ids.map((assignmentId) => ({

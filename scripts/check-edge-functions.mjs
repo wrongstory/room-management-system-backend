@@ -23,6 +23,7 @@ const sourcePaths = [
   'supabase/functions/_shared/availability-api.ts',
   'supabase/functions/_shared/assignment-api.ts',
   'supabase/functions/_shared/assignment-schedule-core.ts',
+  'supabase/functions/_shared/assignment-hydration.ts',
   'supabase/functions/_shared/attempt-api.ts',
   'supabase/functions/_shared/attempt-lifecycle-api.ts',
   'src/modules/limited-attempts/limited-attempt-contract.ts',

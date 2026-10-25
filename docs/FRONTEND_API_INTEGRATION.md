@@ -5,7 +5,7 @@
 #453/#455 계산 개선은 v0.9.5 이후 운영에 포함됐다. PR456의
 [합성 CPU 기준선](./ASSIGNMENT_HYDRATION_COST_BASELINE.md)을 최신 dev와 통합한다.
 CPU 비교는 실제 API·DB·네트워크·사용자 대기 시간의 개선율이 아니다.
-신규 bounded hydration RPC와 실제 계측은 후속이며 #415는 OPEN이다.
+신규 bounded hydration RPC의 source 후보를 준비했다. 실제 DB 실행·운영 적용·속도 계측은 NOT RUN이며 #415는 OPEN이다.
 기존 endpoint/Swagger/프런트 호출을 유지한다. Full DB는 NOT RUN이며
 최종 릴리스 1회 실행 전에 별도 승인을 받는다.
 

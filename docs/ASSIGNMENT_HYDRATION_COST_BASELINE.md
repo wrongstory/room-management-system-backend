@@ -29,35 +29,55 @@ module-level Set.has로 일치시킨 후 위 수치로 전부 재측정했다. �
 전체 API·화면 속도 개선률로 일반화하지 않는다. DB·인증·통신·전체 DTO 투영은 제외됐다.
 동일 대상 다중 revision의 반복 순회는 남지만 먼저 실제 DB 시간을 확인한다.
 
-## 다음 최적화: 조회 왕복 통합
+## #415 bounded hydration source 후보 — 2026-10-25
 
-현재 실제 adapter 합성 검사 기준, 동일 메이드·target/attempt 각1개·exact-date 목록에서
-카드1/100/1000의 DB 요청 수는 여전히7/7/52다. 오늘/내일 overdue·여러 메이드·다중 이력은
-추가 비용이다. source상 relatedRows는 target/profile/attempt/submission/schedule 이력을
-가져오고 마지막100-ID RPC에서 최신 actor/session/소유권 및 시간 정보를 재확인한다.
+`get_assignment_card_hydration`이 target/profile/모든 attempt/latest attempt의 submission/
+rollover 이력 다섯 조회를 assignment ID 최대100개당 한 RPC로 묶는다. 신규 migration124
+`20261025020616_assignment_card_hydration.sql`은 함수와 좁은 EXECUTE만 추가한다.
+기존 테이블·RLS·원장·notification catalog·migration1..123을 수정하지 않는다.
 
-따라서 다음 구현 후보는 **페이지 범위의 카드 hydration을 묶는 read RPC**다.
-단순히100-ID 상한을 늘리거나 최종 권한검사를 앞당기지는 않는다.
+| exact-date 합성 카드 수 | 이전 DB HTTP 요청 | source 후보 요청 |
+| --- | --- | --- |
+| 1 | 7 | 3 |
+| 100 | 7 | 3 |
+| 1000 | 52 | 21 |
 
-- 기존 목록/RLS 필터, 실제 통보된 메이드 이력, 오늘/내일 계획일 정책을 보존한다.
-- 새 RPC에 actor/session/expected role과 정확한 assignment IDs를 전달하고 DB에서
-  최신 권한·scope를 확인한다. 클라이언트가 보낸 target/maid ID를 권한 근거로 삼지 않는다.
-- target/profile/latest attempt/submission/rollover와 schedule 표시를 같은 bounded 결과에
-  묶되 count·누락·초과·중복 검사는 유지한다. 잘린 데이터를 정상 카드로 반환하지 않는다.
-- 공개 DTO는 유지하고 명령용 capability/CAS/멱등성 정책은 변경하지 않는다.
-- 새 snapshot 시점과 오류 우선순위가 달라지는 영향을 실제 역할/경합 회귀에서 검증한다.
-  52→특정 숫자 감소를 아직 구현/측정된 결과로 발표하지 않는다.
+같은 메이드, target/attempt 각1개, submission1개 fixture에서 실제 Node adapter가
+호출한 interface 수를 검사한 값이다. 인증 공통 경로·네트워크·DB 내부 SQL 시간·프런트
+렌더링은 제외한다. 오늘/내일 backlog는 목록 요청1개를 더 사용한다. RPC 내부 SQL문 수가
+이만큼 줄거나 전체 API가 이 비율로 빨라졌다는 뜻이 아니다. 실제 p50/p95는 미측정이다.
 
-이는 설계 후보이며 새 RPC/SQL을 아직 작성하거나 적용하지 않았다. DB 변경 없이 가능한
-계산 최적화를 더 쪼개는 대신 이 경계의 구현·검증을 다음 단계로 둔다.
-최종 SQL 입력이 확정되면 사용자 승인 후 최종 릴리스에서 전체 DB 검증1회를 수행한다.
-승인 전 로컬·CI·운영 migration/reset/rebuild 및 자동 DB를 유발하는 release PR은 금지한다.
+- initial RPC는 기존 `get_assignment_schedule_read_for_plan(..., false, expectedRole)`를
+  재사용하여 최신 actor/status/password/session, exact IDs 및 실제 통보된 maid ownership을 확인한다.
+  intermediate hydration에는 현재 퇴실 사실이나 raw 예약 schedule snapshot을 포함하지 않는다.
+- 모든 hydration이 끝난 다음 기존 final schedule RPC를 마지막에 별도로 실행한다.
+  그 시점의 live actor/session/ownership 검사, history의 currentDeparture=null,
+  계획일·불변 통보 snapshot·최신 권한 실패의 전체 응답 거부를 그대로 유지한다.
+- 읽기 RPC는 STABLE/empty search_path/security definer이며 service_role만 EXECUTE한다.
+  새 browser 접근권·command capability는 없다. 미리 조회한 값으로 최종 검사를 대체하지 않는다.
+- 각 관계의1000행 cap과 exact count를 유지한다. SQL LIMIT1001은 초과 탐지 sentinel이며
+  초과 결과는 예외로 거부한다. 모든 attempt의 started_at을 보존하여 취소 가능 표시를 계산한다.
+- 정확한 assignment→target/maid binding, 누락·중복·다른 ID·알 수 없는 count를 거부한다.
+  여러 batch에 걸친 shared target/profile/history는 같은 내용만 중복 제거하고 내용이 바뀌면
+  전체 실패한다. 원래 distinct target100개당 이력1000행 cap도 합친 결과에서 재확인한다.
+- 공개 DTO/endpoint/Swagger,1000카드 목록 완전성,실제 통보 이력과 제한 계정 경계는 유지한다.
+  불완전한 새 RPC를 예전 조회로 자동 fallback하거나 일부 카드만 성공시키지 않는다.
+
+### 실행·배포 경계
+
+개발의 application·manifest·SQL source/합성 검증과 실제 SQL 실행은 별개다.
+전체 DB·pgTAP·실제 역할/세션 경합·upgrade·운영 적용·실사용 성능은 NOT RUN이다.
+신규 RPC가 존재하는 DB를 먼저 승인 범위에서 적용한 뒤 API를 배포해야 한다. 이전 API는
+새 DB에서도 그대로 작동하며 rollback은 이전 API로 가능하다. 새 API를 구 DB에 먼저
+배포하면 RPC 부재로 실패하므로 금지한다. 기존 RPC는 제거하지 않는다.
+최종 release의 실제 DB 실행·migration/reset/rebuild 전에 별도 승인을 받는다.
+#415는 최종 DB/운영 계측이 끝나기 전 OPEN으로 유지한다.
 
 ## 프런트 인계
 
 #453/#455는 운영 반영됐다. 이 벤치 통합은 endpoint/Swagger/호출 방식을 변경하지 않는다.
 현재 화면 지연이 해소됐다고 안내하지 않는다. 운영 반영 이후 동일화면·동일데이터·동일망에서
-Server-Timing/API전체/브라우저 렌더링 시간을 분리 비교한다. 추가 RPC는 아직 연결 대상이 아니다.
+Server-Timing/API전체/브라우저 렌더링 시간을 분리 비교한다. 새 RPC는 내부 service-only 후보이며 프런트가 직접 호출하지 않는다.
 
 ## 2026-10-25 최신 dev 통합 재검증
 
@@ -65,3 +85,12 @@ PR456 원본을 dev f107c2e와 통합한 source에서 Node22.20.0, warmup5/21회
 1000카드/10000이력 CPU p50/p95는 이전41.268/41.791ms, 현재0.150/0.272ms였다.
 전체 애플리케이션 테스트133파일3270개 PASS. 제품 RPC/SQL 변경·실제 DB·운영 계측은 NOT RUN이다.
 동일 대상 과거카드1000은 이전9.113/9.553ms, 현재2.397/2.486ms이며 운영 지연을 뜻하지 않는다.
+
+## 신규 RPC 후보 검증 — 2026-10-25
+
+- `npm run ci:quality`: PASS, Node134파일3286개·typecheck/build·OpenAPI·비밀검사.
+- `npm run edge:check`: PASS, 전체 Deno/실행 번들·API source parity 검증. Report candidate bundle19,875,768bytes, backup monitor91,678bytes.
+- `npm run db:manifest:verify`: PASS, dev124이며1..123 hash 불변. 실제 DB를 실행한 결과가 아니다.
+- 독립 source QA와 관련 adapter/protocol 회귀 PASS. 오류 count·scope·역할/세션 변경은 전체 응답을 거부한다.
+- 초기 Edge HTTP fixture의 신규 RPC 미지원과 타입/lint 오류는 보완 후 전체 재검증했다. 실패한 중간 실행을 PASS로 집계하지 않는다.
+- 실제 SQL/pgTAP·업그레이드·역할/DB 경합·운영 적용·실사용 성능: NOT RUN.
