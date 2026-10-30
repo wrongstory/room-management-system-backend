@@ -5,7 +5,7 @@
 
 - 백엔드: https://github.com/wrongstory/room-management-system-backend/issues/534
 - 프런트: https://github.com/makee-ham/room-management-system/issues/270
-- 작업 브랜치: `codex/534-assignment-instruction-memo`, 기준 dev `0bfa04b8` (#535 통합)
+- 작업 브랜치: `codex/534-assignment-instruction-memo`, 기준 dev `f01efa3e` (#535 및 #532 보완 통합)
 - DB 소스: `20261030143048_assignment_instruction_memo.sql` (dev manifest 140번째 후보)
 
 ## 사용자 요구와 보존
@@ -88,22 +88,28 @@ DB/API 적용 전에 프런트에서 이 기능을 운영 활성화하지 않는
 
 ## 검증 기록
 
-2026-10-31 로컬 최종 입력: dev `0bfa04b8`의 #535 수정과 #534 후보를 통합했다.
+2026-10-31 로컬 최종 입력: dev `f01efa3e`의 #535 및 #532 보완과 #534 후보를 통합했다.
+PR #539의 첫 head `1f02676`에서 required CI run41077963617이 통과한 뒤,
+dev의 새 #532 보완을 충돌 없이 통합했다. 최종 통합 CI는 PR에서 별도로 확인한다.
 
 | 검증 | 실제 결과 |
 | --- | --- |
-| `npm run ci:quality` | PASS: 비밀 검사·OpenAPI·lint·typecheck·Node 208파일/5,559건·build |
+| `npm run ci:quality` | PASS: 비밀 검사·OpenAPI·lint·typecheck·Node 209파일/5,589건·build |
 | `npm run edge:check` | PASS: Deno 577건·사전 65건·생성 JS 68건·fmt 139파일·타입 검사 |
 | `npm run db:manifest:verify` | PASS: dev 140건, 139 password-effect와 140 memo의 서로 다른 고정 hash 보존 |
 | `npm run openapi:template-client:check` | PASS: 기존 템플릿 client/경계 회귀 |
-| Python 콘솔 `pytest` / 임시 전체 OpenAPI codegen | PASS: 139건 / 생성·roundtrip·compile; 통합 전후 입력 234파일·관련 의존 소스 동일 확인 |
-| 독립 QA | PASS: 최종 관련 147건·별도 Unicode 합성 2,641건; 미해결 P1/P2 없음 |
+| Python 콘솔 CI 6종 | PASS: Ruff·format 227파일·mypy 26파일·pytest 139건·임시 전체 OpenAPI 생성/roundtrip/compile·build source |
+| 독립 QA | PASS: 관련 147건·별도 Unicode 합성 2,641건 및 최신 dev 통합 134건 재확인; 미해결 P1/P2 없음 |
 | 실제 SQL·RLS·경합·전체 DB·운영 적용 | NOT RUN: 실행 전 사용자 승인 필요 |
 
 source grammar 검사는 PostgreSQL 15/17 파서와 정확한 함수 변경 지점을 검사하지만 DB 실행
 증거가 아니다. 새 `supabase/tests/assignment_instruction_memo.sql`은 승인된 최종 DB 실행에서
 실행해야 한다. migration140 LF SHA-256은
 `9bdadc1789d8971b920368af45f3483091e2bddc21af91f3fcb4d6a4d8fcf1e9`다.
+
+최신 통합 전체 검사에서 기존 합성 checkpoint-runner 1건이 5초 시간 초과했다.
+코드/검사 기준 변경 없이 단독 11건 및 전체 5,589건 재실행이 통과했다. 이 합성 검사는
+실제 DB가 아닌 가짜 입출력만 사용한다. 실패를 실제 DB 실패나 완료 증거로 해석하지 않는다.
 
 최종 실제 API 번들은 19,319,375 bytes, 보고 기능 포함 후보는 19,985,124 bytes다.
 후자는 20,000,000 bytes 제한까지 14,876 bytes 여유이므로 v1.0.0 추가 통합 뒤 실제 번들
