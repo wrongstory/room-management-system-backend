@@ -326,6 +326,16 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   });
 
   app.setErrorHandler((error, request, reply) => {
+    const roomReadyCorrection = request.method === 'POST'
+      && ['/v1/rooms/:roomId/ready-correction', '/v1/rooms/:roomId/ready-correction/preview'].includes(request.routeOptions.url ?? '');
+    if (roomReadyCorrection) {
+      // Parsing and authorization can fail before the route sets its response headers.
+      reply.header('Cache-Control', 'no-store');
+      if (error instanceof Error && 'code' in error
+        && (error.code === 'FST_ERR_CTP_INVALID_JSON_BODY' || error.code === 'FST_ERR_CTP_EMPTY_JSON_BODY')) {
+        error = new AppError(400, 'ROOM_READY_CORRECTION_INVALID_INPUT', '객실 상태 변경 입력이 올바르지 않습니다.');
+      }
+    }
     const pinOperation = roomPinOperation(request.method, request.raw.url ?? '');
     if (pinOperation) {
       reply.header('Cache-Control', 'no-store');
