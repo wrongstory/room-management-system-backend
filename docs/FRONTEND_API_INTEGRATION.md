@@ -1,5 +1,16 @@
 # 프론트엔드·Codex API 연동 가이드
 
+## 2026-10-31 #534 배정 메모 v1.0.0 인계 — dev 병합·운영 미배포
+
+백엔드 PR #539는 dev `46e47ed`에 병합됐다. draft/change의 선택 `instructionMemo`와
+배정/업무 읽기를 추가했으며 생략은 유지, null/빈 입력은 초기화다. 프런트 구현·연결은
+[#270](https://github.com/makee-ham/room-management-system/issues/270)에서 진행한다.
+CI41079932523의 application/migration(source-only)는 PASS지만 실제 전체 DB 검증과 운영
+적용은 NOT RUN이다. DB/API 배포 확인 후 활성화하고 메모로 사진·검수·수당 조건을 바꾸지 않는다.
+[전용 계약 및 다른 채팅용 진행 순서](./ASSIGNMENT_INSTRUCTION_MEMO_534.md)에 main hotfix
+포함 확인, 격리 CI 사전 승인, release/main 병합·proof 확인, 운영 migration 별도 승인,
+DB → API/Swagger → 프런트 연결·실사용 확인을 정리했다. 이 인계 자체는 DB 실행 승인이 아니다.
+
 ## 2026-10-25 #396 읽기 전용 초기화 영향 조회 — 운영 미배포
 
 `GET /v1/developer/reset/preview`는 조건/body 없이 개발자 access token만 받는다. 기존 인증과

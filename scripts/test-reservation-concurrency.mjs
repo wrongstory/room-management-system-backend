@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
 import { testAssignmentPreviewConcurrency } from './test-assignment-preview-concurrency.mjs';
+import { testAssignmentInstructionConcurrency } from './test-assignment-instruction-concurrency.mjs';
 import { testAttemptActivationConcurrency } from './test-attempt-activation-concurrency.mjs';
 import { testAttemptExecutionConcurrency } from './test-attempt-execution-concurrency.mjs';
 import { testAttemptLifecycleConcurrency } from './test-attempt-lifecycle-concurrency.mjs';
@@ -1191,6 +1192,7 @@ console.log('Planning races passed: room-change/notify, cancel/notify, scheduled
 await testReservationLongStayConcurrency({ client, actorProfileId });
 await testNotifiedReplanConcurrency(client, { profileId: actorProfileId, email, password });
 await testPrestartConcurrency(client,actorProfileId,templateSessionId);
+await testAssignmentInstructionConcurrency(status.DB_URL,actorProfileId);
 await testCleaningOverdueConcurrency(client,actorProfileId);
 await testCleaningStartedConcurrency(client,actorProfileId);
 await testCleaningReportNotificationConcurrency(client);
