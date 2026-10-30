@@ -267,3 +267,179 @@ Deno.test("#396 notification read uses its atomic transaction without an opaque 
     "no opaque lease",
   );
 });
+
+const offlineResolutionReasons = {
+  record_only: "OFFLINE_RECORD_ONLY",
+  reject_effect: "OFFLINE_REJECT_EFFECT",
+  correction_link: "OFFLINE_CORRECTION_APPROVED",
+};
+async function offlineResolutionAdmissionScenario(
+  resolution: keyof typeof offlineResolutionReasons,
+  mode = "OPEN",
+  loseResponse = false,
+  terminalMissing = false,
+) {
+  const quarantineId = "10000000-0000-4000-8000-000000000003";
+  const body = {
+    resolution,
+    expectedExecutionVersion: resolution === "correction_link" ? 2 : null,
+    reasonCode: offlineResolutionReasons[resolution],
+  };
+  const hashBytes = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(JSON.stringify({
+      actorProfileId: actor.profileId,
+      action: "resolve_offline",
+      input: { quarantineId, ...body },
+    })),
+  );
+  const hash = [...new Uint8Array(hashBytes)].map((value) =>
+    value.toString(16).padStart(2, "0")
+  ).join("");
+  const calls: string[] = [];
+  let effects = 0;
+  let acquired = false;
+  const clients = {
+    admin: {
+      rpc: (name: string, args: Record<string, unknown>) => ({
+        // biome-ignore lint/suspicious/noThenProperty: Model the lazy Supabase builder used by the real Edge handler.
+        then(
+          resolve: (value: unknown) => unknown,
+          reject: (reason: unknown) => unknown,
+        ) {
+          assert(acquired, "no offline effect before admission acquisition");
+          assert(
+            name === "resolve_offline_event_quarantine",
+            "only the fixed business RPC",
+          );
+          assert(
+            args.p_actor_profile_id === actor.profileId &&
+              args.p_session_id === id &&
+              args.p_quarantine_id === quarantineId &&
+              args.p_resolution === resolution &&
+              args.p_request_hash === hash &&
+              args.p_idempotency_key === "synthetic-command-key" &&
+              args.p_expected_execution_version ===
+                body.expectedExecutionVersion &&
+              args.p_reason_code === body.reasonCode,
+            "real service hash and all eight actual arguments are preserved",
+          );
+          calls.push("effect");
+          effects++;
+          const result = {
+            data: {
+              quarantineId,
+              resolution,
+              attempt: resolution === "correction_link"
+                ? {
+                  attemptId: id,
+                  cleaningTargetId: id,
+                  assignmentId: id,
+                  maidProfileId: id,
+                  assignmentRevision: 1,
+                  executionVersion: 3,
+                  status: "field_completed",
+                  startedAt: "2026-10-25T00:00:00Z",
+                  fieldCompletedAt: "2026-10-25T00:30:00Z",
+                  endedAt: "2026-10-25T00:30:00Z",
+                  effectiveAt: "2026-10-25T00:30:00Z",
+                  recordedAt: "2026-10-25T00:35:00Z",
+                }
+                : null,
+              effectiveAt: "2026-10-25T00:30:00Z",
+              recordedAt: "2026-10-25T00:35:00Z",
+            },
+            error: null,
+          };
+          return (loseResponse
+            ? Promise.reject(new Error("synthetic offline response loss"))
+            : Promise.resolve(result)).then(resolve, reject);
+        },
+      }),
+    },
+  } as unknown as EdgeClients;
+  const initial = request(`/v1/offline-quarantines/${quarantineId}/resolve`);
+  const response = await handleApiRequest(
+    new Request(initial.url, {
+      method: initial.method,
+      headers: initial.headers,
+      body: JSON.stringify(body),
+    }),
+    {
+      createClients: () => clients,
+      authenticateRequest: async () => actor,
+      operationAdmissionConfig: {
+        target: "synthetic-project",
+        budgetMs: 10000,
+      },
+      operationAdmissionRpc: async (name, args) => {
+        calls.push(name);
+        if (name === "get_operation_admission_control") {
+          return {
+            data: { mode, controlVersion: "1", targetRef: "synthetic-project" },
+            error: null,
+          };
+        }
+        if (name === "acquire_operation_offline_resolution_admission") {
+          assert(
+            args.p_resolution === resolution && args.p_request_hash === hash &&
+              args.p_idempotency_key === "synthetic-command-key",
+            "acquisition binds the service canonical target/resolution hash",
+          );
+          acquired = true;
+          return {
+            data: {
+              admissionId: id,
+              controlVersion: "1",
+              completionMode: "OFFLINE_RESOLUTION",
+            },
+            error: null,
+          };
+        }
+        assert(
+          name === "complete_operation_offline_resolution_admission" &&
+            args.p_admission_id === id &&
+            args.p_quarantine_id === quarantineId &&
+            args.p_resolution === resolution &&
+            args.p_actor === actor.profileId &&
+            args.p_auth === actor.authUserId && args.p_session === id,
+          "only the captured exact terminal is observed",
+        );
+        return terminalMissing
+          ? { data: null, error: { code: "OPERATION_COMPLETION_UNVERIFIED" } }
+          : { data: { completed: true }, error: null };
+      },
+    },
+  );
+  assert(
+    response.status === (mode === "REQUESTED" ? 503 : loseResponse ? 500 : 200),
+    "original HTTP outcome",
+  );
+  await response.body?.cancel();
+  assert(effects === (mode === "REQUESTED" ? 0 : 1), "no effect retry");
+  assert(
+    calls.join(",") ===
+      (mode === "REQUESTED"
+        ? "get_operation_admission_control"
+        : "get_operation_admission_control,acquire_operation_offline_resolution_admission,effect,complete_operation_offline_resolution_admission"),
+    "fixed acquire/effect/observe sequence without generic or HTTP completion",
+  );
+}
+for (
+  const resolution of Object.keys(offlineResolutionReasons) as Array<
+    keyof typeof offlineResolutionReasons
+  >
+) {
+  Deno.test(`#396 real Edge offline ${resolution} binds its existing terminal`, async () => {
+    await offlineResolutionAdmissionScenario(resolution);
+  });
+}
+Deno.test("#396 real Edge offline REQUESTED never invokes the resolution", async () => {
+  await offlineResolutionAdmissionScenario("record_only", "REQUESTED");
+});
+Deno.test("#396 real Edge offline response loss observes the same terminal without retry", async () => {
+  await offlineResolutionAdmissionScenario("record_only", "OPEN", true);
+});
+Deno.test("#396 real Edge offline HTTP success cannot replace a missing terminal", async () => {
+  await offlineResolutionAdmissionScenario("record_only", "OPEN", false, true);
+});

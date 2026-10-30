@@ -39,10 +39,14 @@ export function admissionRouteRows(routes) {
     }
     // The append137 adapter reuses the fixed source130 opaque route in the same
     // transaction. This tag must never regenerate a different historical SQL.
-    if (route.completionAdapter !== undefined && (route.completionAdapter !== 'LIFECYCLE_V137'
-      || route.routeId !== 'manageAttemptLifecycle' || route.hashMode !== 'NONE'
+    const completionAdapters = { manageAttemptLifecycle: 'LIFECYCLE_V137',
+      resolveOfflineQuarantine: 'OFFLINE_RESOLUTION_V141' };
+    if (route.completionAdapter !== undefined && (route.completionAdapter !== completionAdapters[route.routeId]
+      || !Object.hasOwn(completionAdapters, route.routeId) || route.hashMode !== 'NONE'
       || route.rpc !== null || route.commandName !== null || route.kind !== 'BUSINESS_WRITE'
-      || route.authority !== 'ACTIVE_SESSION' || route.keyArgument !== 'p_idempotency_key')) {
+      || route.authority !== 'ACTIVE_SESSION' || route.keyArgument !== 'p_idempotency_key'
+      || route.rpcAliases.length !== 0 || Object.keys(route.bindings).length !== 0
+      || Object.keys(route.hashArgs).length !== 0)) {
       throw new Error('ADMISSION_MANIFEST_INVALID');
     }
     if (route.hashMode === 'ATOMIC_RPC') {
