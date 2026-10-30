@@ -1,7 +1,10 @@
 # #492 예약 호출의 장기 키 전달 제거
 
-상태: source 후보. 운영 SQL, Function Secrets, Cron 변경·발송은 실행하지 않았다.
-기존 배포의 기본 호출 방식은 유지하며 운영 전환은 구체 실행 승인 후 진행한다.
+상태: production scheduler·notification 전환은 source 후보이며 실제 실행은 미확인이다.
+recovery의 예약 백업 감시는2026-10-25 승인 후 캐슬디아트 전용 저장소에서 signed-v1로
+설치·활성화했고 실제 알림·정기 감시까지 확인했다. [날짜별 근거](RESERVATION_BACKUP_MONITORING.md)를 따른다.
+아래 공통 source 계약과 분리 전 설치 계획을 현재 세 worker 모두의 미실행 상태로 읽지 않는다.
+production 전환은 정확한 별도 실행 승인 후 진행하며 이미 설치된 recovery 감시는 반복 설치하지 않는다.
 
 ## 발견 근거와 범위
 
@@ -57,25 +60,26 @@ service-role·GitHub token은 서명이나 queue 헤더에 쓰지 않는다.
 | ops/notification-delivery/install.sql | production | private 서명 함수와 매분 Cron | 같은 transaction에서 Cron inactive. 기존 Vault 키가 정확히 1개 있어야 함 |
 | ops/reservation-backup-monitor/install.sql | recovery | backup_ops 서명 함수·전용 Vault 키·매시17분 Cron | inactive, 기존 설치명 존재 시 중단 |
 
-세 파일은 자동 migration 목록 밖의 운영 설치 후보다. 각 정확한 파일/hash·대상·영향을
+세 파일은 자동 migration 목록 밖의 source다. recovery 설치는 위 전용 운영에서 완료했으며
+이 표가 재설치 승인이나 v1 pending 목록은 아니다. 아직 필요한 production 실행의 정확한 파일/hash·대상·영향을
 승인받기 전 실행하지 않는다. 관리 도구의 project target을 고정하고 원격 상태·기존 이름을
 재확인한다. 키 생성·교체·전달은 SQL source에 원문을 넣지 않는 별도 보호된 입력 경로를
-검토해야 한다. production 읽기 확인에서 `notification_delivery_invoke` Vault 항목은 0개여서
-현재 installer는 의도대로 실패한다. 기존 Function Secret 존재/값 일치는 아직 확인하지 않았다.
+검토해야 한다. 2026-10-25 production 읽기 당시 `notification_delivery_invoke` Vault 항목은 0개였고,
+그 상태에서는 installer가 의도대로 실패한다. 현재 상태와 Function Secret 존재/값 일치는 다시 확인해야 한다.
 delivery/scheduler의 기존 Function Secret loader는 trim하므로 앞뒤 공백 없는 동일 키를
 등록해야 한다. SQL helper도 앞뒤 whitespace 키를 거부하며 원문을 오류에 포함하지 않는다.
 
-## 전환·중지 순서
+## production 전환·중지 순서와 기존 설치 경계
 
 1. 현재 main/worker 소스, 정확한 SQL, 키의 존재/일치와 알림 대상을 검토한다.
-2. 과거 raw header 사용 키를 그대로 재사용할지 **호출 전용 키만 교체**할지 결정한다.
-   교체는 기존 키의 과거 queue 가시성을 없애지 않지만 향후 인증 사용을 막는다.
+2. 사용자가 선택한 **호출 전용 키만 교체** 방향으로 정확한 대상·전달·검증 범위를 고정한다.
+   방향 선택은 실제 키 교체 승인이 아니다. 교체는 과거 queue 가시성을 없애지 않지만 향후 인증 사용을 막는다.
    DB 비밀번호 재설정과 관계없으며 이미 완료한 백업 보안 입력을 다시 받지 않는다.
 3. 승인된 SQL은 helper/비활성 job까지만 설치한다. 기존 scheduler 전환은 정확한 기존 job을
    잠시 정지한 뒤 signed-v1 설정·명령 변경·1회 검증·재개 순서로 별도 수행한다.
-   새 notification/backup job도 실제 검증 뒤 마지막에 활성화한다.
+   새 notification job도 실제 검증 뒤 마지막에 활성화한다. 이미 활성화된 전용 backup job은 유지한다.
 4. 알림은 실제 대상에게 발송될 수 있고 예약 scheduler는 업무 상태를 바꾸므로 실제 smoke의
-   범위·횟수·유효 시간을 고정한다. backup 감시는 실제 GitHub 알림 수신도 확인한다.
+   범위·횟수·유효 시간을 고정한다. backup의 기존 실제 GitHub 알림 수신 근거를 보존한다.
 5. 실패 시 해당 job을 멈추고 상태를 조사한다. legacy로 자동 복귀하거나 오래된 요청을
    재전송하지 않는다. 관련 없는 Cron·backup 객체·queue 기록·업무 데이터는 삭제하지 않는다.
 
@@ -89,6 +93,7 @@ SQL HMAC/WebCrypto parity·실제 clock/queue 지연·중복 claim·전환 중 �
 Node crypto 독립 HMAC oracle, 시간 경계/목적/키/nonce 변조, 잘못된 설정과 downgrade 거부,
 세 handler의 positive/negative·기존 모드 회귀를 합성 검사한다. Deno는 모의 worker/RPC만
 사용하고 실제 DB·Vault·provider에 연결하지 않는다. 전체 application·Edge·독립 QA와 required
-CI 결과는 PR의 exact source에 기록한다. 실제 SQL/운영/알림 수신은 별도 승인 대기다.
+CI 결과는 PR의 exact source에 기록한다. production의 실제 SQL/전환/업무 알림 수신은
+별도 승인·검증 경계이며, recovery 백업 감시의 별도 운영 완료와 구분한다.
 
 Refs #14, #112, #12, #492.

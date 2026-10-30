@@ -1,17 +1,19 @@
 # API 구현·Edge 배포·운영 사용 상태 정본
 
-## 2026-10-25 v1.0.0 준비 — 개발과 운영 상태 분리
+## 2026-10-31 v1.0.0 준비 — 개발과 운영 상태 분리
 
 현재 진행은 [v1.0.0 개발·배포 준비](RELEASE_V1.0.0_READINESS.md)를 따른다.
 아래 2026-10-07 이하 수치는 당시 검증 이력이며 현재 source나 운영 배포 현황을 뜻하지 않는다.
 
 | 구분 | 확인된 상태 |
 | --- | --- |
-| 개발 통합 | 정책값을 고정하지 않는 초기화 진단·작업 진입 제어·템플릿 후보·참조 검사·영속 저장·검토 결합·승인 소비·재관측까지 PR515/dev5b2d8ed에 통합. 전체187파일/5,104 tests 및 독립 QA PASS. 정책별 실행 구현은 별도이며 항목별 PR/CI는 위 준비 기록 참조 |
-| 실제 운영 | 2026-10-25 읽기 확인: migration122, API54, scheduler22, notification-delivery13 |
-| 공개 계약 | 운영 health200/ok, OpenAPI154 paths /166 operations. source는157/169. API54 원본 다운로드 실패로 source 일치 UNKNOWN |
-| 새 DB 검증 | dev의 manifest 검사만 PASS. 신규 SQL·최종 전체 DB·운영 migration NOT RUN |
-| 운영 후속 | 정기 백업·알림 활성화/첫 실행, source와 배포 산출물 일치, 역할별 실제 기기 확인 필요 |
+| 개발 통합 | PR539/dev46e47ed까지 READY 정정·비밀번호 준비 응답·배정 메모를 포함, source140개. PR539 전체209파일/5,589 tests·독립 QA·필수 CI PASS. 초기화 전체 실행 구현은 별도이며 항목별 근거는 위 준비 기록 참조 |
+| 운영 조회 이력 | 2026-10-25 읽기 당시 migration122, API54, scheduler22, notification-delivery13. 이번에는 운영 DB를 재조회하지 않았으므로 최신 배포 상태로 사용하지 않음 |
+| Git main과 DB 검증 | PR537/mainf1fbec94의 비밀번호 hotfix는 정확123개 입력의 전체 DB CI41074219126 PASS. 이 증거는 v1의140개 입력에 재사용하지 않음. 해당 PR의 운영 적용·계정 복구·UAT는 미실행 기록 |
+| 공개 계약 | 10월25일 운영 health200/ok·OpenAPI154/166, API54 원본 다운로드 실패는 과거 관측. 현재 source159/171과 운영 artifact 일치는 별도 확인 필요 |
+| v1 DB 검증 | dev의 source/manifest 검사만 PASS. 최신140개 최종 전체 DB·운영 적용 NOT RUN |
+| 예약 백업 | 캐슬디아트 전용 저장소의 정기 백업·독립 감시·실제 알림 완료로 #12/#273 종료. [날짜별 근거와 한계](RESERVATION_AUTO_BACKUP.md). 기존 wrongstory 백업은 비활성 유지 |
+| 운영 후속 | 업무 알림·예약 scheduler 전환, source와 배포 산출물 일치, 역할별 실제 기기 확인. 백업 현장 인계와 실제15일 만료 삭제는 정기 백업 완료와 구분 |
 
 개발 통합을 운영 활성화로 표시하지 않는다. 실행 승인과 미확정 정책은 자동개발 뒤
 현재 진행 채팅의 단일 `USER_DECISIONS.md`로 확인한다.

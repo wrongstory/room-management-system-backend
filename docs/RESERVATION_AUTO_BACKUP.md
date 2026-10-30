@@ -2,6 +2,32 @@
 
 ## 현재 상태
 
+2026-10-31 공개 GitHub 근거 재확인: 예약 전용 자동 백업과 실패·미실행 감시는
+[캐슬디아트 전용 저장소](https://github.com/yeosucastletheart-cyber/reservation-backup)에서 운영한다.
+2026-10-25 사용자 승인으로 저장소·App·보호 환경·recovery 감시를 분리했고,
+매일 03:00 KST 백업과 매시17분 signed-v1 감시를 활성화했다. 기존 백엔드 저장소의
+`RESERVATION_BACKUP_ENABLED=false`는 유지하며 이 저장소의 백업을 중복 활성화하지 않는다.
+
+- [10월26일 첫 schedule 실행](https://github.com/yeosucastletheart-cyber/reservation-backup/actions/runs/40220823907):
+  03:21 KST, 실제 백업 검증 step PASS. 새 사본 65,926 bytes, 예약28건, 삭제0건.
+- [10월27일 두 번째 schedule 실행](https://github.com/yeosucastletheart-cyber/reservation-backup/actions/runs/40378949741):
+  03:34~03:35 KST, 실제 백업 검증 step PASS. 새 사본 65,927 bytes, 예약28건, 삭제0건.
+- [완료 기록 #12](https://github.com/wrongstory/room-management-system-backend/issues/12)와
+  [#273](https://github.com/wrongstory/room-management-system-backend/issues/273)은 10월27일 종료됐다.
+  당시 recovery 감시 job1/run36의 HTTP200 HEALTHY와 실제 미실행·정상 복구 알림 수신도 기록돼 있다.
+
+이는 예약 자료의 암호화 저장·재조회·복호화·읽기 모델 검증·정기 실행·실패 감지의 완료다.
+실제 15일 만료 사본 삭제, 운영 DB 전체 복원, Auth/PIN/사진/청소/주급 복구는 완료 근거가 아니다.
+15일 보관·직전 성공본 보호는 구현/합성 검증과 관측된 기존 사본 보존을 구분한다.
+[현장 PC·안전한 키 인계 #6](https://github.com/yeosucastletheart-cyber/reservation-backup/issues/6)은 남아 있으며,
+클라우드 정기 실행은 현장 PC 상시 가동을 요구하지 않는다. 이번 확인은 공개 기록 읽기만 했고
+현재 DB·Storage·Cron을 다시 조회하거나 백업을 실행하지 않았다.
+
+## 2026-10-25 백엔드 소스 준비 기록
+
+아래 상태와 명령은 분리 전 백엔드 소스의 기록이다. 현재 운영 대상은 위 전용 저장소이며
+과거 미완료 항목을 이유로 비밀번호 입력·App 등록·설치·활성화 승인을 다시 요청하지 않는다.
+
 2026-10-24 사용자 결정에 따른 예약 자료 전용 백업이며 PR #484는 dev에 병합됐다(e199503).
 후속 실패·미실행 감시 후보는 [감시·활성화 절차](RESERVATION_BACKUP_MONITORING.md)를 따른다.
 2026-10-25에 실제 예약 **28건**과 연결 이력을 읽기 전용으로 추출하고 암호화해
@@ -79,7 +105,9 @@ active 예약은 stay, 모든 예약은 schedule, 존재하는 stay는 segment �
 [Actions 백업](https://supabase.com/docs/guides/deployment/ci/backups).
 실제 프로젝트 용량과 egress 잔량은 활성화 시 확인해야 한다.
 
-## 활성화 gate
+## 분리 전 활성화 gate 기록
+
+현재 전용 저장소의 완료 근거는 위 상태를 따른다. 아래 순서를 v1.0.0 배포에서 재실행하지 않는다.
 
 1. source CI/독립 QA와 사용자 승인에 따른 저장소/설정 준비는 완료했다.
    PR #484는 실제 결과·최신 CI·리뷰를 확인한 뒤 dev/main 승격한다.

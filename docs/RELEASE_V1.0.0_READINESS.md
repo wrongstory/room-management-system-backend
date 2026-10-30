@@ -1,5 +1,24 @@
 # v1.0.0 개발·배포 준비 상태
 
+## 2026-10-31 최신 소스·완료 근거 보정
+
+- [PR539](https://github.com/wrongstory/room-management-system-backend/pull/539)/dev `46e47ed`는
+  READY 정정과 비밀번호 응답 보완에 배정 메모를 더한140개 source다. 전체209파일/5,589 tests·
+  Edge·독립 QA·CI41079932523 PASS이며 최종 v1 Full DB·운영/UAT는 미완료다.
+- [PR537](https://github.com/wrongstory/room-management-system-backend/pull/537)/main `f1fbec94`의
+  비밀번호 hotfix는 별도123개 입력의 CI41074219126에서 Full DB PASS다. prepare SQL은
+  dev의139번째 파일과 동일하며 재구현하지 않는다. 이 proof를140개 후보에 재사용하지 않는다.
+  PR에 기록된 운영 migration·계정 복구·본인 비밀번호 UAT는 아직 NOT RUN이다.
+- 예약 백업은 [캐슬디아트 전용 저장소](https://github.com/yeosucastletheart-cyber/reservation-backup)에서
+  정기 실행·감시·실제 알림을 완료했고 #12/#273은10월27일 종료됐다.
+  [첫 실행·후속 실행 근거](RESERVATION_AUTO_BACKUP.md)와 현장 인계·실제 만료 삭제·전체 복원 한계를 구분한다.
+  기존 백엔드 백업이나 recovery 감시를 중복 설치·활성화하지 않는다.
+
+위 내용은 GitHub·소스 읽기로 대조했다. 운영 DB·Storage·Cron의 새 관측이나 실행은 없다.
+아래 날짜별 source/실행 기록은 당시 checkpoint이며 최신 완료 범위는 위 보정을 우선한다.
+
+## 2026-10-25 공통 개발 checkpoint
+
 2026-10-25 기준. 공통 구현 PR515 이후 **사용자가 선택한 방향의 준비 코드를 dev에 통합했다.**
 현장 사실은 PR517, 선택 정책은 PR518, 과거 이력의 검증 설계는 PR519,
 초기화 대상의 보호 계획은 PR520, 과거 DB 이력의 관측·검증 준비는 PR521,
@@ -122,7 +141,7 @@ SQLSTATE42601로 실패했다. IF 조건의 괄호 없는 CASE 내부 THEN이 �
 | #378 함수 선언 출력 설정 | PR522 / dev8f32a7d / CI40175403534, app5294/194·독립107 | 함수의 정확한 UTC/ISO 선언만 지원. 원문·본문 검토 및 실제 실행 차단 유지 |
 | #396 S1 템플릿 인계 효과·감사 보존 | PR523 / devc8d76e2 / CI40176373907, app5337/197·독립85+7 | source136의 실제 시각·초안 검증·게시·슬롯·감사 readback 준비. 공개 실행 비활성, 실제 DB/보호/복구/초기화 NOT RUN |
 | #396 청소 진행 변경의 완료 관측 | PR524 / deva17f97a / CI40177317552, app5379/199·Edge·독립172 | source137의 단일 경로·세 공개 action만 정확한 기존 원장과 결합. 나머지26 OPAQUE 및 실제 DB/운영 활성화 차단 유지 |
-| #12/#273 예약 전용 백업 | PR484/489 인계, 실제 예약28건 암호화 저장/readback/복호화 확인 | main·독립 감시 설치·정기 활성화·첫 정기 실행 |
+| #12/#273 예약 전용 백업 | 캐슬디아트 전용 main·App·signed 감시 운영,10월26일 첫 schedule40220823907 및27일40378949741 성공,27일 이슈 종료 | 현장 PC 인계 #6·지속 감시. 실제15일 만료 삭제와 전체 DB/Auth/PIN/사진 복원은 완료 주장 아님 |
 | #112 알림 운영 | 과거 실제 Push 수신 근거 보존 | 현재 heartbeat/Cron·대기 작업·실제 수신 재확인 |
 | #13 역할별 실제 사용 | 자동 검사와 프런트 계약 대조 | 실제 기기/UAT·현장 입력 |
 
@@ -247,7 +266,8 @@ DB history/manifest, API·worker의 실제 배포 artifact hash와 공개 계약
    APPLIED/NOT_APPLIED/UNKNOWN 판정과 중단은 [실행기 계약](MIGRATION_EXECUTION_RUNTIME.md)을 따른다.
 6. 호환 API/필요 worker·공개 OpenAPI/Swagger를 반영하고 안전 smoke를 확인한다.
    변경된 DB에 호환되지 않는 옛 API를 단독 복귀시키지 않는다.
-7. 승인된 백업·감시·알림·예약 작업의 실제 실행과 실패 처리, 역할별 UAT를 확인한다.
+7. 이미 운영 중인 전용 예약 백업·감시의 최신 증거를 확인하고 중복 활성화하지 않는다.
+   별도 승인된 업무 알림·예약 작업의 실행·실패 처리와 역할별 UAT를 확인한다.
    정확한 source/운영 일치와 인계가 끝난 뒤 v1.0.0 tag/Release를 기록한다.
 
 실제 데이터 초기화는 일반 배포 단계에 섞지 않는다. 별도 보호·복구 범위, 운영 시작 전

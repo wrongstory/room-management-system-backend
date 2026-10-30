@@ -42,7 +42,7 @@ legacy revision의 `vapid_key_version IS NULL`은 현재 key를 추측해 backfi
 ## release와 활성화 순서
 
 1. 승인된 release branch를 main에 병합한다. feature branch에서 production을 변경하지 않는다.
-2. 45번째 migration을 적용하고 migration history, RLS, service-only RPC grants를 확인한다.
+2. 최종 main의 실제 migration history와 대조한 **미적용 pending만** 별도 승인 후 적용하고 RLS와 service-only RPC grants를 확인한다. 이미 적용된 45번째 migration을 재실행하지 않는다.
 3. API/Edge 배포 전에 모든 Function Secrets를 먼저 주입한다. 특히 public config endpoint도
    `VAPID_CURRENT_KEY_VERSION`, `VAPID_PUBLIC_KEY`, `VAPID_PUBLIC_KEYRING_JSON`이 없거나 malformed curve이면 fail-closed이므로 secrets-before-API 순서를 지킨다.
 4. `api`와 `notification-delivery` Edge Function의 동일 승인 bundle을 배포한다.
