@@ -102,8 +102,8 @@ select is(
   'absent','new key is absent before preparation'
 );
 select is(
-  public.prepare_password_change(pg_temp.pid(1),pg_temp.pid(101),pg_temp.pid(901),'password-first-0001',repeat('a',64),repeat('b',64),repeat('e',64))->>'state',
-  'execute','first preparation owns the Auth mutation claim'
+  public.prepare_password_change(pg_temp.pid(1),pg_temp.pid(101),pg_temp.pid(901),'password-first-0001',repeat('a',64),repeat('b',64),repeat('e',64)),
+  jsonb_build_object('state','execute','attemptCount',1,'effectMarker',repeat('e',64)),'first preparation owns the Auth mutation claim'
 );
 select is(
   public.inspect_password_change(pg_temp.pid(1),pg_temp.pid(101),pg_temp.pid(901),'password-first-0001')->>'state',
@@ -167,8 +167,8 @@ select is(
 update private.password_change_commands set lease_expires_at=clock_timestamp()-interval '1 second'
 where actor_profile_id=pg_temp.pid(2);
 select is(
-  public.prepare_password_change(pg_temp.pid(2),pg_temp.pid(102),pg_temp.pid(903),'password-recover-01',repeat('1',64),repeat('3',64),repeat('5',64))->>'state',
-  'recover','expired claim is recoverable with a new nonsecret claim digest'
+  public.prepare_password_change(pg_temp.pid(2),pg_temp.pid(102),pg_temp.pid(903),'password-recover-01',repeat('1',64),repeat('3',64),repeat('5',64)),
+  jsonb_build_object('state','recover','attemptCount',2,'effectMarker',repeat('4',64)),'expired claim is recoverable with a new nonsecret claim digest'
 );
 select is((select attempt_count from private.password_change_commands where actor_profile_id=pg_temp.pid(2)),2,'recovery increments bounded attempt count');
 select lives_ok(
