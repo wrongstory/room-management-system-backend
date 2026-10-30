@@ -166,15 +166,175 @@ def check_post_approval_contract(document: dict[str, Any]) -> None:
         raise RuntimeError("#336 원본 바이너리 MIME/5MiB 계약이 잘못됐습니다.")
     codes = document["components"]["schemas"]["ErrorCode"]["enum"]
     if (
-        len(codes) != 352
-        or len(set(codes)) != 352
+        len(codes) != 353
+        or len(set(codes)) != 353
         or "POST_APPROVAL_ROOM_ISSUE_EVIDENCE_RETRY_REQUIRED" not in codes
         or "AUTH_CONTEXT_UNAVAILABLE" not in codes
+        or "ASSIGNMENT_INSTRUCTION_INVALID" not in codes
     ):
         raise RuntimeError(
-            "#442/#532 공통 safe error code union은 "
-            "신규 인증·객실 정정 오류를 포함한 정확352개여야 합니다."
+            "#442/#532/#534 공통 safe error code union은 "
+            "신규 인증·객실 정정·배정 메모 오류를 포함한 정확353개여야 합니다."
         )
+
+
+def check_assignment_instruction_contract(document: dict[str, Any]) -> None:
+    schemas = document["components"]["schemas"]
+    for path, operation_id, request_name in (
+        ("/v1/assignments/drafts", "saveAssignmentDraft", "AssignmentDraftRequest"),
+        (
+            "/v1/assignments/{cleaningTargetId}/change",
+            "changeCleaningAssignmentPrestart",
+            "AssignmentPrestartChangeRequest",
+        ),
+    ):
+        operation = document["paths"][path]["post"]
+        if (
+            operation.get("operationId") != operation_id
+            or operation.get("x-required-roles") != ["admin"]
+            or operation.get("security") != [{"bearerAuth": []}]
+            or operation["requestBody"]["content"]["application/json"]["schema"]
+            != {"$ref": "#/components/schemas/" + request_name}
+            or not any(
+                item.get("name") == "Idempotency-Key"
+                and item.get("in") == "header"
+                and item.get("required") is True
+                for item in operation.get("parameters", [])
+            )
+        ):
+            raise RuntimeError("#534 assignment instruction command authority drift")
+        request = schemas[request_name]
+        memo = request.get("properties", {}).get("instructionMemo", {})
+        if (
+            request.get("additionalProperties") is not False
+            or "instructionMemo" in request.get("required", [])
+            or memo.get("type") != ["string", "null"]
+            or memo.get("minLength") != 0
+            or memo.get("maxLength") != 500
+            or "default" in memo
+            or "#534 미배포 후보" not in memo.get("description", "")
+        ):
+            raise RuntimeError("#534 optional inherit/null-clear instruction contract drift")
+    for name in (
+        "Assignment",
+        "AssignmentCard",
+        "AssignmentCommitCandidate",
+        "AssignmentCommitBlockedCandidate",
+        "AttemptExecution",
+    ):
+        schema = schemas[name]
+        memo = schema.get("properties", {}).get("instructionMemo", {})
+        if (
+            "instructionMemo" not in schema.get("required", [])
+            or memo.get("type") != ["string", "null"]
+            or memo.get("minLength") != 1
+            or memo.get("maxLength") != 500
+            or "default" in memo
+            or "#534 미배포 후보" not in memo.get("description", "")
+        ):
+            raise RuntimeError("#534 exact revision nullable instruction contract drift: " + name)
+    if "ASSIGNMENT_INSTRUCTION_INVALID" not in schemas["ErrorCode"]["enum"]:
+        raise RuntimeError("#534 assignment instruction error code missing")
+
+
+def check_assignment_instruction_roundtrip(destination: Path, document: dict[str, Any]) -> None:
+    schemas = document["components"]["schemas"]
+
+    def example(schema: dict[str, Any]) -> Any:
+        if "$ref" in schema:
+            return example(schemas[schema["$ref"].split("/")[-1]])
+        if "anyOf" in schema:
+            options = schema["anyOf"]
+            return example(
+                next((item for item in options if item.get("type") == "null"), options[0])
+            )
+        kind = schema.get("type")
+        if kind == "null" or (isinstance(kind, list) and "null" in kind):
+            return None
+        if "const" in schema:
+            return schema["const"]
+        if "enum" in schema:
+            return schema["enum"][0]
+        if kind == "object":
+            return {key: example(schema["properties"][key]) for key in schema.get("required", [])}
+        if kind == "array":
+            return [example(schema["items"]) for _ in range(schema.get("minItems", 0))]
+        if kind == "boolean":
+            return False
+        if kind in ("integer", "number"):
+            return schema.get("minimum", 1)
+        if kind == "string":
+            return {
+                "uuid": "10000000-0000-4000-8000-000000000001",
+                "date": "2026-10-30",
+                "date-time": "2026-10-30T03:00:00+00:00",
+            }.get(str(schema.get("format", "")), "synthetic")
+        raise RuntimeError("#534 unsupported synthetic read fixture schema")
+
+    model_names = (
+        ("assignment", "Assignment"),
+        ("assignment_card", "AssignmentCard"),
+        ("assignment_commit_candidate", "AssignmentCommitCandidate"),
+        ("assignment_commit_blocked_candidate", "AssignmentCommitBlockedCandidate"),
+        ("attempt_execution", "AttemptExecution"),
+    )
+    fixtures = [
+        {"module": module, "name": name, "data": example(schemas[name])}
+        for module, name in model_names
+    ]
+    fixture_path = destination / "assignment-instruction-fixtures.json"
+    fixture_path.write_text(json.dumps(fixtures, ensure_ascii=False), encoding="utf-8")
+    source = """\
+import importlib
+import json
+import sys
+from pathlib import Path
+from uuid import UUID
+sys.path.insert(0, sys.argv[1])
+from generated.models.assignment_draft_request import AssignmentDraftRequest
+from generated.models.assignment_prestart_change_request import AssignmentPrestartChangeRequest
+from generated.api.assignments.save_assignment_draft import _get_kwargs as draft_kwargs
+from generated.api.assignments.change_cleaning_assignment_prestart import (
+    _get_kwargs as change_kwargs,
+)
+target = '10000000-0000-4000-8000-000000000001'
+draft = {'cleaningTargetId': target, 'maidProfileId': target,
+    'sequenceNumber': 1, 'expectedAssignmentVersion': 2}
+change = {'expectedCurrentAssignmentId': target, 'maidProfileId': target,
+    'sequenceNumber': 1, 'expectedAssignmentVersion': 2, 'reasonCode': 'OPERATIONAL_CHANGE'}
+for model, base, url in [(AssignmentDraftRequest, draft, '/v1/assignments/drafts'),
+    (AssignmentPrestartChangeRequest, change, f'/v1/assignments/{target}/change')]:
+    for update in [{}, {'instructionMemo': None}, {'instructionMemo': ''},
+        {'instructionMemo': '142호 수건 5개\\n물캡슐 2개'}]:
+        data = {**base, **update}
+        parsed = model.from_dict(data)
+        if parsed.to_dict() != data:
+            raise RuntimeError('#534 generated model collapsed omitted/null/text instruction')
+        args = {'body': parsed, 'idempotency_key': 'assignment-instruction-test'}
+        kwargs = (draft_kwargs(**args) if model is AssignmentDraftRequest
+            else change_kwargs(UUID(target), **args))
+        if (kwargs['json'] != data or kwargs['url'] != url or kwargs['method'] != 'post'
+            or kwargs['headers'].get('Idempotency-Key') != 'assignment-instruction-test'):
+            raise RuntimeError('#534 generated request lost instruction identity or HTTP binding')
+for fixture in json.loads(Path(sys.argv[2]).read_text(encoding='utf-8')):
+    module = importlib.import_module('generated.models.' + fixture['module'])
+    model = getattr(module, fixture['name'])
+    for memo in [None, '142호 수건 5개\\n물캡슐 2개']:
+        data = {**fixture['data'], 'instructionMemo': memo}
+        if model.from_dict(data).to_dict() != data:
+            raise RuntimeError('#534 generated read lost nullable memo: ' + fixture['name'])
+    missing = {key: value for key, value in data.items() if key != 'instructionMemo'}
+    try:
+        model.from_dict(missing)
+    except KeyError:
+        pass
+    else:
+        raise RuntimeError('#534 generated read invented required memo: ' + fixture['name'])
+print('Python assignment instruction codegen: omission/clear/text, revision reads and HTTP PASS')
+"""
+    subprocess.run(  # noqa: S603
+        [sys.executable, "-c", source, str(destination), str(fixture_path)], check=True
+    )
 
 
 def check_room_ready_contract(document: dict[str, Any]) -> None:
@@ -501,6 +661,7 @@ def main() -> None:
     schemas = document.get("components", {}).get("schemas", {})
     check_post_approval_contract(document)
     check_room_ready_contract(document)
+    check_assignment_instruction_contract(document)
     discovery_fields = [
         "attemptId",
         "assignmentId",
@@ -886,6 +1047,7 @@ def main() -> None:
         check_template_permutation_roundtrip(npm, repository_root, destination)
         check_reset_preview_roundtrip(repository_root, destination)
         check_room_ready_roundtrip(destination)
+        check_assignment_instruction_roundtrip(destination, document)
         batch_roundtrip = """
 import sys
 from datetime import date

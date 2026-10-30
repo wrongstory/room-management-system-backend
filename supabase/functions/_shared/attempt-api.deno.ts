@@ -327,3 +327,50 @@ Deno.test("attempt response and DB error allowlists reject unexpected identity a
     ]
   ) assert(attemptCommandPath(path) === null, "not an action alias");
 });
+
+Deno.test("attempt execution and current reads retain exact assignment memo with legacy receipt null", async () => {
+  for (const memo of [undefined, null, "수건 5개\n물캡슐 2개"]) {
+    const row = projection(memo === undefined ? {} : { instructionMemo: memo });
+    const { clients } = clientsFor(row);
+    const mutation = clientsFor(projection());
+    const current = await currentAttempt(
+      new Request(
+        `https://example.invalid/v1/attempts/current?assignmentId=${assignmentId}`,
+      ),
+      clients,
+      maid,
+    );
+    const executed = await executeAttempt(
+      request(),
+      mutation.clients,
+      maid,
+      attemptId,
+      "start",
+    );
+    const replay = await executeAttempt(
+      request(),
+      mutation.clients,
+      maid,
+      attemptId,
+      "start",
+    );
+    assert(
+      current?.instructionMemo === (memo ?? null) &&
+        executed.instructionMemo === null,
+      "read stored exact revision; audit-safe mutation receipt remains null",
+    );
+    assert(
+      JSON.stringify(executed) === JSON.stringify(replay) &&
+        mutation.calls.length === 2,
+      "no live hydration in replay",
+    );
+  }
+  const invalid = clientsFor(projection({ instructionMemo: " raw invalid " }));
+  const error = await failure(() =>
+    executeAttempt(request(), invalid.clients, maid, attemptId, "start")
+  );
+  assert(
+    error.code === "ATTEMPT_COMMAND_FAILED" && error.status === 500,
+    "malformed stored memo fails closed",
+  );
+});

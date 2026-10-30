@@ -1,5 +1,14 @@
 # 프런트엔드 계약 snapshot
 
+## 2026-10-30 #534 청소 배정 메모 후보
+
+프런트 [#270](https://github.com/makee-ham/room-management-system/issues/270) 인계 대상이다.
+배정 draft/change 선택 필드 `instructionMemo`와 exact assignment/card/commit-preview/attempt
+읽기 DTO의 nullable 필드를 추가한다. 생략=같은 청소의 직전 메모 유지, null/빈 입력=초기화,
+원본 입력 최대 500 UTF-16 단위다. 사진·수당 조건을 바꾸는 명령으로 해석하지 않는다.
+현재 운영 API에는 없는 v1.0.0 후보이며 적용 전 프런트 기능을 활성화하지 않는다.
+마이그레이션·운영 smoke는 별도 승인 대상이다. [상세 계약](./ASSIGNMENT_INSTRUCTION_MEMO_534.md).
+
 ## 2026-10-30 #532 예약 가능 상태 정정 후보
 
 source OpenAPI는 159 paths / 171 operations다. 관리자 preview/정정 POST 두 경로를 추가했다.

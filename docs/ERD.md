@@ -1,5 +1,15 @@
 # Room Management System ERD 초안
 
+## #534 청소 배정 메모 — 미배포 후보
+
+`public.cleaning_assignments.instruction_memo` nullable text를 추가한다. 기존 행은 null이며
+메모는 assignment ID/revision과 기존 `changed_by`/`created_at`을 통해 작성 이력을 식별한다.
+과거 revision은 불변이다. 동일 target의 후속 revision에서 생략 시 최신 메모를 계승하고,
+명시적 null/빈 입력으로 지운 이력도 계승한다. 다른 target으로 복사하지 않는다.
+기존 admin/실제 통보받은 maid RLS와 조회 인덱스를 재사용하며 검색 인덱스는 추가하지 않는다.
+감사·알림 payload에는 메모 원문을 추가하지 않는다. 적용·전체 DB 검증은 승인 전 NOT RUN이다.
+[#534 계약](./ASSIGNMENT_INSTRUCTION_MEMO_534.md).
+
 ## #532 예약 가능 상태 정정 — 미배포 후보
 
 새 업무 테이블 없이 기존 target/checkout obligation/assignment의 취소·종료와 immutable

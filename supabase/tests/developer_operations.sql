@@ -79,16 +79,16 @@ select is(
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'password_change_prepare_effect_marker'
+    'assignment_instruction_memo'
   ) ->> 'currentMigration',
-  'password_change_prepare_effect_marker',
+  'assignment_instruction_memo',
   'database status exposes the stable current migration name'
 );
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'password_change_prepare_effect_marker'
+    'assignment_instruction_memo'
   ) ->> 'migrationDrift',
   'equal',
   'database status matches the source migration name'
@@ -106,7 +106,7 @@ select is(
 create temporary table developer_expected_migration_head as
 select version, statements, name
 from supabase_migrations.schema_migrations
-where name = 'password_change_prepare_effect_marker';
+where name = 'assignment_instruction_memo';
 
 -- Preserve the exact preceding installed entry before removing the expected
 -- head. Integration may append dependencies before this feature migration.
@@ -116,12 +116,12 @@ where version < (select version from developer_expected_migration_head)
 order by version desc limit 1;
 
 delete from supabase_migrations.schema_migrations
-where name = 'password_change_prepare_effect_marker';
+where name = 'assignment_instruction_memo';
 
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'password_change_prepare_effect_marker'
+    'assignment_instruction_memo'
   ) ->> 'currentMigration',
   (select name from developer_previous_migration_head),
   'database status exposes the previous migration when the current head is absent'
@@ -130,7 +130,7 @@ select is(
 select is(
   public.get_developer_database_status(
     '26000000-0000-4000-8000-000000000001',
-    'password_change_prepare_effect_marker'
+    'assignment_instruction_memo'
   ) ->> 'migrationDrift',
   'behind',
   'database status reports the previous migration behind the source head'

@@ -529,7 +529,9 @@
     "rpc": "change_cleaning_assignment_prestart",
     "commandName": "assignment.prestart_change",
     "rpcAliases": [
-      "change_cleaning_assignment_for_plan"
+      "change_cleaning_assignment_for_plan",
+      "change_cleaning_assignment_prestart_with_instruction",
+      "change_cleaning_assignment_for_plan_with_instruction"
     ],
     "bindings": {},
     "hashMode": "CALLER",
@@ -727,7 +729,7 @@
     "authority": "ACTIVE_SESSION",
     "rpc": "save_cleaning_assignment_draft",
     "commandName": "assignment.save_draft",
-    "rpcAliases": [],
+    "rpcAliases": ["save_cleaning_assignment_draft_with_instruction"],
     "bindings": {},
     "hashMode": "CALLER",
     "hashArgs": {},
