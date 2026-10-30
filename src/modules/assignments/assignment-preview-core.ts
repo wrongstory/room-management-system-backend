@@ -324,6 +324,7 @@ interface Score {
   spread: number;
   deviation: bigint;
   zones: number;
+  floorDistance: number;
   distance: number;
 }
 type Board = PreviewTarget[][];
@@ -417,7 +418,11 @@ export interface AssignmentPreviewResult {
     completedTargetCount: number;
     feeSpread: number;
     feeDeviation: string;
-    routeScore: { zoneChanges: number; roomDistance: number };
+    routeScore: {
+      zoneChanges: number;
+      floorDistance: number;
+      roomDistance: number;
+    };
   };
 }
 
@@ -638,7 +643,8 @@ function compare(a: Score, b: Score): number {
   if (a.count !== b.count) return b.count - a.count;
   if (a.spread !== b.spread) return a.spread - b.spread;
   if (a.deviation !== b.deviation) return a.deviation < b.deviation ? -1 : 1;
-  return a.zones - b.zones || a.distance - b.distance;
+  return a.zones - b.zones || a.floorDistance - b.floorDistance ||
+    a.distance - b.distance;
 }
 function boardKey(board: Board): string {
   return JSON.stringify(
@@ -817,19 +823,28 @@ export async function optimizeAssignmentPreview(
     if (!Number.isSafeInteger(p) || !Number.isSafeInteger(n)) invalid();
     return {
       zones: prev.elevatorZone === t.elevatorZone ? 0 : 1,
+      // The catalog encodes the floor before the last two room-number digits.
+      // Legacy numbers below 100 have no encoded floor; keep their old fallback.
+      floorDistance: p >= 100 && n >= 100
+        ? Math.abs(Math.floor(n / 100) - Math.floor(p / 100))
+        : 0,
       distance: Math.abs(n - p),
     };
   };
   const fixedRoute = fixedByMaid.map((rows) =>
     rows.slice(1).reduce((r, t, j) => {
       const d = routeDelta(required(rows[j]), t);
-      return { zones: r.zones + d.zones, distance: r.distance + d.distance };
-    }, { zones: 0, distance: 0 })
+      return {
+        zones: r.zones + d.zones,
+        floorDistance: r.floorDistance + d.floorDistance,
+        distance: r.distance + d.distance,
+      };
+    }, { zones: 0, floorDistance: 0, distance: 0 })
   );
   function evaluate(board: Board): Score | null {
     if (++evaluations > PREVIEW_LIMITS.evaluations) limited();
     const fees: number[] = [];
-    let count = 0, zones = 0, distance = 0;
+    let count = 0, zones = 0, floorDistance = 0, distance = 0;
     for (let i = 0; i < maids.length; i++) {
       const newRows = required(board[i]);
       if (newRows.length && unavailable.has(i)) return null;
@@ -843,12 +858,14 @@ export async function optimizeAssignmentPreview(
       let fee = required(fixedFees[i]),
         prev = required(fixedByMaid[i]).at(-1);
       zones += required(fixedRoute[i]).zones;
+      floorDistance += required(fixedRoute[i]).floorDistance;
       distance += required(fixedRoute[i]).distance;
       for (const t of newRows) {
         fee += t.feeSnapshot;
         if (prev) {
           const delta = routeDelta(prev, t);
           zones += delta.zones;
+          floorDistance += delta.floorDistance;
           distance += delta.distance;
         }
         prev = t;
@@ -866,6 +883,7 @@ export async function optimizeAssignmentPreview(
         0n,
       ),
       zones,
+      floorDistance,
       distance,
     };
   }
@@ -1085,6 +1103,7 @@ export async function optimizeAssignmentPreview(
       feeDeviation: bestScore.deviation.toString(),
       routeScore: {
         zoneChanges: bestScore.zones,
+        floorDistance: bestScore.floorDistance,
         roomDistance: bestScore.distance,
       },
     },
