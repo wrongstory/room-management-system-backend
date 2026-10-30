@@ -2,12 +2,22 @@
 
 ## 2026-10-31 최신 소스·완료 근거 보정
 
+이번 후속 후보는 기존140개를 보존하고 [offline 해결 완료 관측](OFFLINE_RESOLUTION_OPERATION_ADMISSION.md)
+한 경로를 추가한 **141개 source**다. HTTP 성공만으로 완료 처리하지 않고 정확한 기존 원장을
+확인한다. 나머지25개 OPAQUE 경로와 전체 reset 실행 차단은 유지한다.
+[최종 catalog 검사](RESET_FINAL_CATALOG_VALIDATION.md)는 승인된 최종 DB job에서만 실제 schema를
+기존 read-plan·사진 HOLD 부모 보호 검사와 연결하며, 행은 메모리 합성값만 사용한다.
+Node212파일/5,662 tests·typecheck/build·manifest141·공개 계약·template-client와
+Edge583/65/68 검사 PASS다. 배포 후보 bundle19,997,042 bytes는 기존20,000,000 상한 안이다.
+실제 SQL/PLpgSQL·DB 경합·보호/복구·전체 초기화·운영 적용은 NOT RUN이다.
+정확한 최종 입력과 실행 승인 범위는 진행 채팅의 단일 USER_DECISIONS.md에서 동결한다.
+
 - [PR539](https://github.com/wrongstory/room-management-system-backend/pull/539)/dev `46e47ed`는
   READY 정정과 비밀번호 응답 보완에 배정 메모를 더한140개 source다. 전체209파일/5,589 tests·
   Edge·독립 QA·CI41079932523 PASS이며 최종 v1 Full DB·운영/UAT는 미완료다.
 - [PR537](https://github.com/wrongstory/room-management-system-backend/pull/537)/main `f1fbec94`의
   비밀번호 hotfix는 별도123개 입력의 CI41074219126에서 Full DB PASS다. prepare SQL은
-  dev의139번째 파일과 동일하며 재구현하지 않는다. 이 proof를140개 후보에 재사용하지 않는다.
+  dev의139번째 파일과 동일하며 재구현하지 않는다. 이 proof를141개 후보에 재사용하지 않는다.
   PR에 기록된 운영 migration·계정 복구·본인 비밀번호 UAT는 아직 NOT RUN이다.
 - 예약 백업은 [캐슬디아트 전용 저장소](https://github.com/yeosucastletheart-cyber/reservation-backup)에서
   정기 실행·감시·실제 알림을 완료했고 #12/#273은10월27일 종료됐다.
