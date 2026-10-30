@@ -251,6 +251,14 @@ describe('#336 isolated110->111 source/preflight only (no DB PASS claim)', () =>
     record.sha256 = createHash('sha256').update(tail.raw).digest('hex');
     expect(() => validatePostApprovalUpgradeSource(changedManifest, changed)).toThrow('Only the source-reviewed room-ready138 tail');
   });
+  it('pins password effect139 without accepting a self-rehashed replacement', () => {
+    const changed = clone(entries), changedManifest = clone(manifest);
+    const tail = changed[138], record = changedManifest.migrations[138];
+    if (!tail || !record) throw new Error('EXPECTED139_TAIL');
+    tail.raw = Buffer.from('select 1;\n');
+    record.sha256 = createHash('sha256').update(tail.raw).digest('hex');
+    expect(() => validatePostApprovalUpgradeSource(changedManifest, changed)).toThrow('Only the source-reviewed password-effect139 tail');
+  });
   it('pins inactive template handover136 without accepting a rehashed replacement', () => {
     const changed = clone(entries), changedManifest = clone(manifest);
     const tail = changed[135], record = changedManifest.migrations[135];
