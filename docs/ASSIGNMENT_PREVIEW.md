@@ -162,7 +162,7 @@ PostgreSQL integer 최댓값까지 점유된 메이드/날짜에는 새 제안�
 ## 비교와 재현성
 
 비교 순서는 배정 가능한 신규 target 수 최대 → 고정+신규 기본요금 spread 최소 → 전체 금액 편차와
-기존/reclean 제약 → 엘리베이터 구역 전환 최소 → 호수 차이 합 최소 → 안정적인 ID 최종 동률 선택이다.
+기존/reclean 제약 → 엘리베이터 구역 전환 최소 → 층수 차이 합 최소 → 호수 차이 합 최소 → 안정적인 ID 최종 동률 선택이다.
 편차는 `Σ(n × maidTotalFee − totalFee)^2` 정수로 계산하고 JSON에는 정수 문자열로 반환한다.
 
 Bounded multi-start greedy와 제한된 move/swap/reorder 개선을 사용한다. 전역 최적해 증명이나
@@ -206,3 +206,13 @@ SQL 회귀는 preview 전후 target/assignment/attempt/change request/availabili
 audit/command receipt/reservation/obligation/schedule revision과 과거 정책 원장을 비교한다. Optimizer
 테스트는 동일 입력 비변경, 정책 유무·값 무영향, 목적함수 반례, 고정 부하, reclean, 결정적 tie-break,
 fingerprint 및 자원 상한을 검사한다.
+
+## 2026-10-30 층수 동선 비교
+
+- 사용자 요청: 근거리 배정에 엘리베이터 구역과 층수를 함께 반영한다. `floorDistance`는 기존 고정 순서와 이어지는 신규 순서의 각 구간에서 층수 차이를 합산한다. 같은 층은 0으로 우선한다.
+- 층은 숫자 호수의 마지막 두 자리 앞부분이다(199→1, 201→2, 1001→10). 100 미만 번호는 층 비교에서 제외하고 기존 호수 거리로 비교한다. `roomDistance`의 기존 전체 호수 차이 의미는 보존한다. 실제 시간·경로 길이는 아니다.
+- 요금 spread/편차와 엘리베이터 전환 수가 같은 경우에만 층 점수를 비교한다. 기존 배정/순서·재청소 귀속·가능일·source 검사·탐색 상한·안정적 ID 최종 동률 선택은 유지한다.
+- Fastify와 Edge가 같은 순수 core를 사용한다. 응답에 `objectiveScore.routeScore.floorDistance`를 가산하며 OpenAPI에서는 구버전 응답 호환을 위해 선택 속성으로 정의한다. snapshot fingerprint와 기존 두 route 점수 필드는 유지한다.
+- DB schema/RPC/migration/RLS/저장·통보/CAS 변경 없음. Preview는 계속 읽기 계산이며 이 변경으로 기존 담당이 자동 재배정되지 않는다. 운영 반영은 최종 릴리스 검증/승격 뒤 별도 확인한다.
+
+검증(2026-10-30, 개발 후보): Node 22.23.4 전체 200파일/5,391테스트, 배정 계산기 72테스트, Deno 2.1.4 공유 core 7테스트 통과. typecheck/build/개발 migration manifest/OpenAPI 검사 통과. 로컬 기본 Node 24.4.1에서는 기존 photo-gzip의 고정 압축 크기 검사가 실패했으며 CI와 같은 Node 22에서 전체 통과했다. lint는 오류 없이 기존 경고를 보고한다. Docker가 실행되지 않아 전체 Edge bundle 검증은 로컬 미실행이며 required CI에서 확인한다. Full DB NOT RUN: 최종 릴리스의 별도 실행 승인 필요. 운영 배포·실제 업무 mutation은 미실행이다.
