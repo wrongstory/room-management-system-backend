@@ -15,7 +15,7 @@ insert into auth.sessions(id,user_id) values(pg_temp.ready_id(201),pg_temp.ready
 insert into public.rooms(id,room_number,room_type_id,elevator_zone,data_status)
 select pg_temp.ready_id(10),'9532',id,'A','verified' from public.room_types where active order by code limit 1;
 insert into public.cleaning_template_versions(room_type_id,cleaning_kind,version,status,duration_minutes,photo_slots,published_at,created_by)
-select room_type_id,k,532,'published',case when k='checkout' then null else 30 end,'[]'::jsonb,clock_timestamp(),pg_temp.ready_id(1)
+select room_type_id,k,532,'published',case when k='checkout' then null else 30 end,private.flat_cleaning_photo_slots(),clock_timestamp(),pg_temp.ready_id(1)
 from public.rooms cross join unnest(array['additional','checkout']::public.cleaning_kind[]) k where id=pg_temp.ready_id(10);
 select public.create_manual_cleaning_request(pg_temp.ready_id(1),pg_temp.ready_id(20),pg_temp.ready_id(10),null,'additional',
   (clock_timestamp() at time zone 'Asia/Seoul')::date,
@@ -144,5 +144,135 @@ select ok((select value->'blockingReasons'?'ASSIGNMENT_CHANGE_PENDING' and not (
   from ready_saved where key='preview'),'pending assignment change requires its own existing decision procedure');
 select throws_ok($$select pg_temp.ready_apply(true,true,'pending-change-blocked')$$,'55000','ROOM_READY_CORRECTION_BLOCKED',
   'correction does not silently decide a pending assignment request');
+
+-- Two isolated synthetic histories: one already approved/earned, one submitted
+-- and still awaiting inspection. Model/provider acknowledgements below contain
+-- no real media and make no Drive calls. All production constraints stay enabled.
+insert into public.rooms(id,room_number,room_type_id,elevator_zone,data_status)
+select pg_temp.ready_id(11),'9533',room_type_id,'A','verified' from public.rooms where id=pg_temp.ready_id(10);
+create temp table ready_submitted(n integer primary key,submission_id uuid not null,photo_id uuid not null);
+do $$
+declare n integer; room_row public.rooms; template public.cleaning_template_versions;
+  at_time timestamptz:=clock_timestamp(); day date; photo uuid; submission jsonb;
+begin
+  select * into strict room_row from public.rooms where id=pg_temp.ready_id(11);
+  select * into strict template from public.cleaning_template_versions
+    where room_type_id=room_row.room_type_id and cleaning_kind='additional' and version=532;
+  day:=(at_time at time zone 'Asia/Seoul')::date;
+  for n in 1..2 loop
+    insert into public.cleaning_targets(id,room_id,cleaning_kind,source,source_key,original_service_date,
+      effective_service_date,available_from,status,assignment_version,room_type_snapshot,fee_snapshot,template_snapshot,created_by)
+    select pg_temp.ready_id(1000+n),room_row.id,'additional','manual_room_request','ready-preservation-'||n,
+      day,day,at_time-interval '1 hour','notified',1,
+      jsonb_build_object('id',rt.id,'code',rt.code,'roomNumber',room_row.room_number),15000,
+      jsonb_build_object('id',template.id,'version',template.version,'durationMinutes',template.duration_minutes,'photoSlots',template.photo_slots),
+      pg_temp.ready_id(1) from public.room_types rt where rt.id=room_row.room_type_id;
+    insert into public.cleaning_assignments(id,cleaning_target_id,maid_profile_id,service_date,sequence_number,
+      revision,is_current,notified_at,changed_by)
+    values(pg_temp.ready_id(2000+n),pg_temp.ready_id(1000+n),pg_temp.ready_id(2),day,10+n,1,true,
+      at_time-interval '1 hour',pg_temp.ready_id(1));
+    insert into public.cleaning_attempts(id,cleaning_target_id,assignment_id,maid_profile_id,attempt_number,status,
+      assignment_revision,started_at,field_completed_at,ended_at,template_snapshot,room_snapshot)
+    select pg_temp.ready_id(3000+n),id,pg_temp.ready_id(2000+n),pg_temp.ready_id(2),1,'field_completed',1,
+      at_time-interval '30 minutes',at_time-interval '10 minutes',at_time-interval '10 minutes',template_snapshot,
+      room_type_snapshot||jsonb_build_object('roomId',room_id) from public.cleaning_targets where id=pg_temp.ready_id(1000+n);
+    photo:=private.record_validated_collection_photo(pg_temp.ready_id(2),pg_temp.ready_id(3000+n),
+      (select id from private.target_photo_slot_snapshots where cleaning_target_id=pg_temp.ready_id(1000+n) and slot_key='cleaning-proof'),
+      pg_temp.ready_id(4000+n),0,0,repeat(n::text,64),'image/jpeg',100,at_time-interval '5 minutes');
+    insert into private.photo_upload_operations(id,actor_profile_id,command_type,idempotency_key_digest,request_hash,
+      cleaning_attempt_id,cleaning_target_id,assignment_id,assignment_revision,target_photo_slot_id,
+      expected_photo_revision,sha256,mime_type,size_bytes,collection_item_id,expected_item_revision)
+    select pg_temp.ready_id(5000+n),pg_temp.ready_id(2),'photo.collection.upload',repeat(n::text,64),repeat(n::text,64),
+      cleaning_attempt_id,cleaning_target_id,pg_temp.ready_id(2000+n),1,target_photo_slot_id,0,sha256,mime_type,size_bytes,
+      collection_item_id,0 from private.attempt_photo_versions where id=photo;
+    insert into private.photo_provider_objects(id,operation_id,provider_locator,uploaded_at,purge_after)
+    select pg_temp.ready_id(6000+n),pg_temp.ready_id(5000+n),'ready_preservation_object_'||n,uploaded_at,purge_after
+      from private.attempt_photo_versions where id=photo;
+    insert into private.photo_upload_states(operation_id,cleaning_attempt_id,target_photo_slot_id,actor_profile_id,status,lease_version,revision)
+    select pg_temp.ready_id(5000+n),cleaning_attempt_id,target_photo_slot_id,pg_temp.ready_id(2),'provider_succeeded',0,1
+      from private.attempt_photo_versions where id=photo;
+    insert into private.photo_upload_acceptances(operation_id,object_id,photo_version_id)
+      values(pg_temp.ready_id(5000+n),pg_temp.ready_id(6000+n),photo);
+    update private.photo_upload_states set status='accepted',revision=revision+1 where operation_id=pg_temp.ready_id(5000+n);
+    submission:=public.create_cleaning_submission_with_session(pg_temp.ready_id(2),pg_temp.ready_id(202),
+      pg_temp.ready_id(3000+n),pg_temp.ready_id(7000+n),0,0,'ready-preservation-submit-'||n,repeat(n::text,64));
+    insert into ready_submitted values(n,(submission->>'id')::uuid,photo);
+    if n=1 then
+      perform public.approve_cleaning_submission(pg_temp.ready_id(1),(submission->>'id')::uuid,
+        'QUALITY_OK','ready-preservation-approve',repeat('3',64));
+    end if;
+  end loop;
+end $$;
+select is((select status::text from public.cleaning_targets where id=pg_temp.ready_id(1002)),
+  'inspection_pending','preservation fixture uses a real current submitted cleaning');
+select is((select count(*) from private.submission_photo_bindings where submission_id in(select submission_id from ready_submitted)),
+  2::bigint,'both preservation submissions seal one accepted synthetic photo');
+select is((select count(*) from private.photo_retention_records where object_id in(pg_temp.ready_id(6001),pg_temp.ready_id(6002))),
+  2::bigint,'both synthetic photos have authoritative retention records');
+select is((select count(*) from public.earnings where submission_id in(select submission_id from ready_submitted)),
+  1::bigint,'preservation fixture contains an existing confirmed earning');
+
+-- Compare complete row values, including immutable IDs, snapshots, revisions,
+-- timestamps and retention anchors. Only the pending target/assignment authority
+-- may change; the approved work, submission/media and financial rows must not.
+create function pg_temp.ready_preserved_rows() returns jsonb language sql stable as $$
+  select jsonb_build_object(
+    'approvedTarget',(select to_jsonb(t) from public.cleaning_targets t where id=pg_temp.ready_id(1001)),
+    'approvedAssignment',(select to_jsonb(a) from public.cleaning_assignments a where id=pg_temp.ready_id(2001)),
+    'attempts',(select jsonb_agg(to_jsonb(a) order by id) from public.cleaning_attempts a where id in(pg_temp.ready_id(3001),pg_temp.ready_id(3002))),
+    'submissions',(select jsonb_agg(to_jsonb(s) order by id) from public.cleaning_submissions s where id in(select submission_id from ready_submitted)),
+    'pointers',(select jsonb_agg(to_jsonb(p) order by cleaning_attempt_id) from private.submission_current_pointers p where submission_id in(select submission_id from ready_submitted)),
+    'seals',(select jsonb_agg(to_jsonb(s) order by submission_id) from private.submission_photo_binding_sets s where submission_id in(select submission_id from ready_submitted)),
+    'bindings',(select jsonb_agg(to_jsonb(b) order by submission_id,photo_version_id) from private.submission_photo_bindings b where submission_id in(select submission_id from ready_submitted)),
+    'photos',(select jsonb_agg(to_jsonb(p) order by id) from private.attempt_photo_versions p where id in(select photo_id from ready_submitted)),
+    'items',(select jsonb_agg(to_jsonb(i) order by id) from private.attempt_photo_collection_items i where id in(pg_temp.ready_id(4001),pg_temp.ready_id(4002))),
+    'collectionStates',(select jsonb_agg(to_jsonb(s) order by cleaning_attempt_id,target_photo_slot_id) from private.attempt_photo_collection_states s where cleaning_attempt_id in(pg_temp.ready_id(3001),pg_temp.ready_id(3002))),
+    'collectionChanges',(select jsonb_agg(to_jsonb(c) order by id) from private.attempt_photo_collection_changes c where cleaning_attempt_id in(pg_temp.ready_id(3001),pg_temp.ready_id(3002))),
+    'operations',(select jsonb_agg(to_jsonb(o) order by id) from private.photo_upload_operations o where id in(pg_temp.ready_id(5001),pg_temp.ready_id(5002))),
+    'uploadStates',(select jsonb_agg(to_jsonb(s) order by operation_id) from private.photo_upload_states s where operation_id in(pg_temp.ready_id(5001),pg_temp.ready_id(5002))),
+    'uploadEvents',(select jsonb_agg(to_jsonb(e) order by id) from private.photo_upload_events e where operation_id in(pg_temp.ready_id(5001),pg_temp.ready_id(5002))),
+    'objects',(select jsonb_agg(to_jsonb(o) order by id) from private.photo_provider_objects o where id in(pg_temp.ready_id(6001),pg_temp.ready_id(6002))),
+    'acceptances',(select jsonb_agg(to_jsonb(a) order by operation_id) from private.photo_upload_acceptances a where operation_id in(pg_temp.ready_id(5001),pg_temp.ready_id(5002))),
+    'retention',(select jsonb_agg(to_jsonb(r) order by object_id) from private.photo_retention_records r where object_id in(pg_temp.ready_id(6001),pg_temp.ready_id(6002))),
+    'retentionLinks',(select jsonb_agg(to_jsonb(l) order by id) from private.photo_retention_links l where object_id in(pg_temp.ready_id(6001),pg_temp.ready_id(6002))),
+    'inspections',(select jsonb_agg(to_jsonb(i) order by id) from public.inspection_decisions i where submission_id in(select submission_id from ready_submitted)),
+    'earnings',(select jsonb_agg(to_jsonb(e) order by id) from public.earnings e where submission_id in(select submission_id from ready_submitted)),
+    'audit',(select jsonb_agg(to_jsonb(e) order by id) from public.audit_events e where entity_id in(select submission_id from ready_submitted))
+  )
+$$;
+insert into ready_saved values('preserved-submitted',pg_temp.ready_preserved_rows()),
+  ('submitted-preview',public.preview_room_ready_correction(pg_temp.ready_id(1),pg_temp.ready_id(201),pg_temp.ready_id(11)));
+select is((select value->>'canApply' from ready_saved where key='submitted-preview'),'true','submitted cleaning can be corrected');
+select is((select value->>'requiresEarningAcknowledgement' from ready_saved where key='submitted-preview'),'true',
+  'submitted cleaning requires explicit no-new-earnings acknowledgement');
+select is((select value#>'{effects,cleaningTargets}' from ready_saved where key='submitted-preview'),
+  jsonb_build_array(jsonb_build_object('cleaningTargetId',pg_temp.ready_id(1002),'assignmentId',pg_temp.ready_id(2002),
+    'attemptId',pg_temp.ready_id(3002),'attemptStatus','submitted','hasSubmission',true,'fieldCompleted',true)),
+  'preview contains only pending submitted work and excludes approved earned work');
+select lives_ok($$insert into ready_saved
+  select 'submitted-result',public.apply_room_ready_correction(pg_temp.ready_id(1),pg_temp.ready_id(201),pg_temp.ready_id(11),
+    (value->>'roomStateVersion')::bigint,value->>'impactFingerprint',(value->>'evaluatedAt')::timestamptz,(value->>'expiresAt')::timestamptz,
+    true,true,false,'ADMIN_ROOM_READY_CORRECTION','ready-submitted-correct',repeat('4',64))
+  from ready_saved where key='submitted-preview'$$,'confirmed submitted correction applies');
+select is((select value->'cancelledCleaningTargetIds' from ready_saved where key='submitted-result'),
+  jsonb_build_array(pg_temp.ready_id(1002)),'correction cancels only the pending submitted target');
+select is((select status::text from public.cleaning_targets where id=pg_temp.ready_id(1002)),'cancelled','submitted target is softly cancelled');
+select is((select is_current from public.cleaning_assignments where id=pg_temp.ready_id(2002)),false,
+  'submitted assignment authority ends while history is retained');
+select is(private.room_current_cleaning_required_at(pg_temp.ready_id(11),clock_timestamp()),false,'submitted correction clears current cleaning readiness');
+select is(pg_temp.ready_preserved_rows(),(select value from ready_saved where key='preserved-submitted'),
+  'submitted photos, sealed submission, existing confirmed earning and inspection ledgers are unchanged');
+select is((select count(*) from public.earnings where submission_id=(select submission_id from ready_submitted where n=2)),
+  0::bigint,'submitted correction creates no new earning');
+select throws_ok($$select public.approve_cleaning_submission(pg_temp.ready_id(1),
+  (select submission_id from ready_submitted where n=2),'QUALITY_OK','ready-after-cancel-approve',repeat('5',64))$$,
+  '55000','INSPECTION_INVALID_TRANSITION','cancelled submitted cleaning cannot later be approved for earnings');
+select throws_ok($$select public.reject_cleaning_submission(pg_temp.ready_id(1),
+  (select submission_id from ready_submitted where n=2),'QUALITY_REWORK','ready-after-cancel-reject',repeat('6',64))$$,
+  '55000','INSPECTION_INVALID_TRANSITION','cancelled submitted cleaning cannot later create inspection rework');
+select is(pg_temp.ready_preserved_rows(),(select value from ready_saved where key='preserved-submitted'),
+  'rejected follow-up inspections leave all protected rows and existing earning unchanged');
+select is((select count(*) from public.inspection_decisions where submission_id=(select submission_id from ready_submitted where n=2)),
+  0::bigint,'cancelled submission receives no inspection decision');
 select * from finish();
 rollback;

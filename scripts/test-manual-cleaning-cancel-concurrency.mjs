@@ -53,10 +53,10 @@ function contender(input, name) {
     child.once('error', () => resolve({ exitCode: -1, code: null }));
     child.stdout.on('data', (chunk) => { output += chunk; });
     child.stderr.on('data', (chunk) => {
-      const matched = chunk.toString().match(/(?:STALE_VERSION|CLEANING_REQUEST_CANCEL_CONFLICT|ASSIGNMENT_VERSION_CONFLICT|PASSWORD_CHANGE_REQUIRED|SESSION_REVOKED|PIN_REVEAL_AUTHORIZATION_CHANGED)/);
+      const matched = chunk.toString().match(/(?:ROOM_READY_PREVIEW_STALE|ROOM_READY_CORRECTION_BLOCKED|IDEMPOTENCY_KEY_REUSED|INSPECTION_INVALID_TRANSITION|PHOTO_ACCESS_REQUIRED|STALE_VERSION|CLEANING_REQUEST_CANCEL_CONFLICT|ASSIGNMENT_VERSION_CONFLICT|PASSWORD_CHANGE_REQUIRED|SESSION_REVOKED|PIN_REVEAL_AUTHORIZATION_CHANGED)/);
       if (matched) code = matched[0];
     });
-    child.once('close', (exitCode) => resolve({ exitCode, code }));
+    child.once('close', (exitCode) => resolve({ exitCode, code, output: output.trim() }));
   });
   child.stdin.end(`set application_name='${name}'; set statement_timeout='30s'; ${input}`);
   return { child, done, output: () => output };
@@ -69,7 +69,8 @@ async function holder(input, name) {
   let output = '';
   const done = new Promise((resolve) => {
     child.once('error', () => resolve({ exitCode: -1 }));
-    child.once('close', (exitCode) => resolve({ exitCode }));
+    child.once('close', (exitCode) => resolve({ exitCode,
+      output: output.replace('MANUAL_CANCEL_LOCK_HELD', '').trim() }));
   });
   const readyPromise = new Promise((resolve, reject) => {
     const timeout = setTimeout(() => { child.kill(); reject(new Error('MANUAL_CANCEL_HOLDER_TIMEOUT')); }, 15000);
@@ -125,7 +126,7 @@ function successful(result, message) {
   return result.data;
 }
 
-export async function testManualCleaningCancelConcurrency(client) {
+export async function testManualCleaningCancelConcurrency(client, afterManual = null) {
   assert(['localhost', '127.0.0.1'].includes(new URL(client.supabaseUrl).hostname), 'Manual cancellation races are local only');
   assert.equal(localSql('select count(*) from public.profiles;'), '0', 'Standalone suite requires a fresh disposable database');
   localSql(`begin; ${manualCancelFixture()}
@@ -268,6 +269,9 @@ export async function testManualCleaningCancelConcurrency(client) {
       await expiryContender.done;
       localSql(`update auth.sessions set not_after=null where id='${manualCancelId(201)}';`);
     }
+    // The READY extension shares these owned children and this exact reset window.
+    // Its races use the same observed database lock barrier and failure cleanup.
+    if (afterManual) await afterManual({ sql: localSql, race });
     console.log('Manual cleaning cancellation concurrency: PASS; start/disclosure/session orderings and exact-once effects verified.');
   } finally {
     for (const item of pending) {
@@ -277,7 +281,7 @@ export async function testManualCleaningCancelConcurrency(client) {
   }
 }
 
-async function runStandalone() {
+export async function runManualCleaningCancelConcurrency(afterManual = null) {
   let resetStarted = false;
   let phase = 'local-identity';
   const reset = () => execFileSync(process.execPath, [cli, 'db', 'reset', '--local', '--no-seed'], { stdio: 'inherit' });
@@ -292,7 +296,10 @@ async function runStandalone() {
     await waitForLocalPostgrestReady({ apiUrl: status.API_URL, apiKey: status.SECRET_KEY });
     const client = createClient(status.API_URL, status.SECRET_KEY, { auth: { autoRefreshToken: false, persistSession: false } });
     phase = 'fixture-and-races';
-    await testManualCleaningCancelConcurrency(client);
+    await testManualCleaningCancelConcurrency(client, afterManual ? async (context) => {
+      phase = 'room-ready-correction-races';
+      await afterManual(context);
+    } : null);
   } catch (error) {
     const sourceLine = error instanceof Error ? error.stack?.match(/test-manual-cleaning-cancel-concurrency\.mjs:(\d+):\d+/)?.[1] : null;
     console.error(`Manual cancellation validation FAIL: ${JSON.stringify({ phase,
@@ -306,4 +313,4 @@ async function runStandalone() {
     }
   }
 }
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) await runStandalone();
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) await runManualCleaningCancelConcurrency();

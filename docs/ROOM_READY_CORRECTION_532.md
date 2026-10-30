@@ -112,6 +112,27 @@ SQL fixture는 합성 자료만 사용하며 준비와 실제 실행을 구분�
 
 ## 릴리스 순서와 복구 경계
 
+### v1.0.0 통합 검토 보완 — 2026-10-30
+
+PR533 병합본을 중복 반영하지 않고 v1.0.0 후보에 포함한다. 통합 검토에서 다음을 보완했다.
+
+- Fastify의 두 정정 경로는 handler 이전의 인증·권한 오류에도 `Cache-Control: no-store`를 보장한다.
+  잘못되거나 빈 JSON은 원문을 노출하지 않는 `ROOM_READY_CORRECTION_INVALID_INPUT` 400으로 응답한다.
+- 합성 SQL 사례에 검수 대기 제출과 이미 승인되어 수당이 확정된 청소를 함께 준비한다.
+  정정 전후 제출·사진 봉인·provider 식별자·보존 기록·기존 수당/검수/감사의 전체 행을 비교하며,
+  새 수당 0건과 취소된 제출의 후속 승인·반려 거부를 확인하도록 작성했다. 지급 완료 원장의 새 사례는 포함하지 않는다.
+  기존 빈 사진 템플릿 fixture는 현재 사진 계약에 맞는 `private.flat_cleaning_photo_slots()`를 사용한다.
+- `scripts/test-room-ready-correction-concurrency.mjs`는 기존 수동 취소 검사의 DB 준비·종료를 재사용한다.
+  동일 key 재생, 서로 다른 key의 객실 버전 충돌, 검수 승인과 정정의 양방향, 사진 입장과 정정의 양방향을
+  총 6개 다중 세션 사례로 준비했다. 고정 지연 추정 대신 실제 `pg_stat_activity`의 잠금 대기를 확인한다.
+  `db:test:concurrency`에 연결하되 기존 reset 횟수와 최종 workflow의 40분 상한은 늘리지 않는다.
+
+이 보완은 DB 없는 코드 검증과 **승인 후 실행할 검사 준비**를 구분한다. 실제 fixture·PL/pgSQL·경합은
+아직 NOT RUN이며 소스 파싱이나 검사 코드의 단위 검증을 DB 성공으로 취급하지 않는다.
+기존 138개 migration 자체와 프런트 소스·운영142호 데이터는 이 보완으로 변경하지 않는다.
+최종 통합 commit/tree/검증 입력 지문을 다시 계산하고, 옛 137개 R5/C1 승인이나 다른 입력의 Full DB
+증거를 재사용하지 않는다. 운영 적용 목록도 과거 관측이나 dev manifest의 pending 수만으로 확정하지 않는다.
+
 dev PR의 migration 검사는 manifest/source에 한정한다. v1.0.0 최종 통합 입력에서 사용자 승인 후
 격리 전체 DB·SQL·경합 검증을 수행하고, 운영 적용 전 다시 승인을 받는다. 승인된 migration을 적용한
 후 API/Swagger를 배포하고 프런트 #268의 확인 팝업을 연결한다. 기능 활성화 전 미배포 API를 호출하지 않는다.
