@@ -78,6 +78,12 @@ export function readLocalResetCatalog(dependencies) {
   return readFixedLocalDiagnostic('./reset-catalog.sql', summarizeResetCatalog, dependencies);
 }
 
+// Internal final-validation input: the same fixed read-only catalog query, never
+// caller SQL or business rows. Only the gated CI harness consumes this schema.
+export function readLocalResetValidationCatalog(dependencies) {
+  return readFixedLocalDiagnostic('./reset-catalog.sql', value => validateResetCatalog(value).catalog, dependencies);
+}
+
 export function readLocalResetAccounts(dependencies) {
   return readFixedLocalDiagnostic('./reset-accounts.sql', summarizeResetAccounts, dependencies);
 }

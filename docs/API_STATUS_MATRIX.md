@@ -7,11 +7,11 @@
 
 | 구분 | 확인된 상태 |
 | --- | --- |
-| 개발 통합 | PR539/dev46e47ed까지 READY 정정·비밀번호 준비 응답·배정 메모를 포함, source140개. PR539 전체209파일/5,589 tests·독립 QA·필수 CI PASS. 초기화 전체 실행 구현은 별도이며 항목별 근거는 위 준비 기록 참조 |
+| 개발 통합 | PR539/dev46e47ed의 기존140개를 보존한 후속 후보141개. offline 해결 한 경로의 완료 원장 연결과 최종 catalog 검사 준비, Node212파일/5,662 tests·typecheck/build·manifest PASS. 전체 초기화 실행은 차단 상태이며 정확한 PR/최종 입력은 준비 기록과 진행 채팅의 승인 문서 참조 |
 | 운영 조회 이력 | 2026-10-25 읽기 당시 migration122, API54, scheduler22, notification-delivery13. 이번에는 운영 DB를 재조회하지 않았으므로 최신 배포 상태로 사용하지 않음 |
-| Git main과 DB 검증 | PR537/mainf1fbec94의 비밀번호 hotfix는 정확123개 입력의 전체 DB CI41074219126 PASS. 이 증거는 v1의140개 입력에 재사용하지 않음. 해당 PR의 운영 적용·계정 복구·UAT는 미실행 기록 |
+| Git main과 DB 검증 | PR537/mainf1fbec94의 비밀번호 hotfix는 정확123개 입력의 전체 DB CI41074219126 PASS. 이 증거는 v1의141개 입력에 재사용하지 않음. 해당 PR의 운영 적용·계정 복구·UAT는 미실행 기록 |
 | 공개 계약 | 10월25일 운영 health200/ok·OpenAPI154/166, API54 원본 다운로드 실패는 과거 관측. 현재 source159/171과 운영 artifact 일치는 별도 확인 필요 |
-| v1 DB 검증 | dev의 source/manifest 검사만 PASS. 최신140개 최종 전체 DB·운영 적용 NOT RUN |
+| v1 DB 검증 | source/manifest 및 DB 없는 합성 검사만 PASS. 최신141개 최종 전체 DB·운영 적용 NOT RUN. 두 실행은 각각 사전 승인 필요 |
 | 예약 백업 | 캐슬디아트 전용 저장소의 정기 백업·독립 감시·실제 알림 완료로 #12/#273 종료. [날짜별 근거와 한계](RESERVATION_AUTO_BACKUP.md). 기존 wrongstory 백업은 비활성 유지 |
 | 운영 후속 | 업무 알림·예약 scheduler 전환, source와 배포 산출물 일치, 역할별 실제 기기 확인. 백업 현장 인계와 실제15일 만료 삭제는 정기 백업 완료와 구분 |
 

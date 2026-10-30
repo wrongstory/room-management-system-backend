@@ -18,8 +18,9 @@ function checkExpectedCount(expectedCount) {
   // 125 reset inventory read; 126 bounded photo batch admission;
   // 127 read-only reset row impact; 128 private operation gates; 129 template inventory; 130 HTTP admission; 131 atomic audit; 132 notification admission; 133 scheduler admission; 134 incremental PIN admission; 135 durable reset receipt store; 136 inactive template handover effect; 137 finite lifecycle admission; 138 room-ready correction reuses existing notification families. 139 repairs password receipt return values. 140 adds assignment instructions without new families. No catalog rows are added.
   // Runtime event dispatch is not permission to mutate historical catalog metadata.
-  assert(Number.isSafeInteger(expectedCount) && expectedCount >= 95 && expectedCount <= 140,
-    'Only the audited95..140 upgrade range is supported; 112..140 add no catalog rows');
+  // 141 only observes an existing offline resolution terminal; no family is added.
+  assert(Number.isSafeInteger(expectedCount) && expectedCount >= 95 && expectedCount <= 141,
+    'Only the audited95..141 upgrade range is supported; 112..141 add no catalog rows');
 }
 function catalogRows(value) {
   assert(Array.isArray(value), 'An existing baseline notification catalog is required');
