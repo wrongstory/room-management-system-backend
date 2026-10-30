@@ -1422,3 +1422,11 @@ actor/project/key 유일성, 불변 header, append-only event, 최신 version/he
 timeout과 잘린 prefix는 UNKNOWN이며 자동 쓰기 재시도가 없다. 두 신규 관계만 보존 후보로 추가하고
 127/128 source와 129 combined snapshot 계약은 유지한다. 실행 허가·정책·TTL 선택·공개 HTTP는 추가하지 않는다.
 [영속 원장 계약과 실제 SQL 미실행 경계](./RESET_RECEIPT_STORE.md)를 따른다.
+
+## #535 비밀번호 준비 응답 계약 보완 (2026-10-30 후보)
+
+prepare_password_change의 execute/recover 응답 모두 저장된 effectMarker를 반환한다.
+기존 권한·claim·lease·response-loss 규칙은 유지한다. 확인값 누락으로 Auth 미호출이
+확인된 초기 계정의 만료 요청만 승인된 운영 점검 후 failed로 보존하는 세션 한정
+복구 절차를 [별도 문서](PASSWORD_CHANGE_RECOVERY_535.md)에 둔다.
+일반 사용자/서비스 RPC 권한이나 자동 Auth 재실행을 추가하지 않는다. 운영 적용은 미실행이다.

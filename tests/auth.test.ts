@@ -82,13 +82,6 @@ function clientsFor(options: {
       };
     }
     const result = states.shift() ?? { data: null, error: null };
-    if (
-      result.data && typeof result.data === 'object' &&
-      'state' in result.data && (result.data as { state?: unknown }).state !== 'absent' &&
-      !('effectMarker' in result.data)
-    ) {
-      return { ...result, data: { ...result.data, effectMarker } };
-    }
     return result;
   });
   const updateUserById = vi.fn(async () => ({ error: options.updateError ?? null }));
@@ -110,13 +103,30 @@ function clientsFor(options: {
 }
 
 describe('password change replay receipt', () => {
+  it.each([undefined, null, '', 'invalid', 'E'.repeat(64)])(
+    'rejects an unmodified RPC response with missing/invalid effect identity (%s)', async (marker) => {
+      const mocked = clientsFor({
+        verifiedPasswords: ['tmp:1234'],
+        rpcStates: [
+          { data: { state: 'absent' }, error: null },
+          { data: { state: 'execute', ...(marker === undefined ? {} : { effectMarker: marker }) }, error: null }
+        ]
+      });
+      await expect(new SupabaseAuthService(mocked.clients, verificationPepper).changePassword(
+        actor, '1234', '654321', 'password-missing-marker', 'fastify-client-1'
+      )).rejects.toMatchObject({ code: 'PASSWORD_CHANGE_RECEIPT_FAILED' });
+      expect(mocked.updateUserById).not.toHaveBeenCalled();
+      expect(mocked.rpc.mock.calls.map(([name]) => name)).not.toContain('complete_password_change');
+    }
+  );
+
   it('changes Auth once and completes the scoped receipt', async () => {
     vi.mocked(randomUUID).mockReturnValueOnce(proposedMarkerNonce).mockReturnValueOnce(claimNonce);
     const mocked = clientsFor({
       verifiedPasswords: ['tmp:1234'],
       rpcStates: [
         { data: { state: 'absent' }, error: null },
-        { data: { state: 'execute' }, error: null },
+        { data: { state: 'execute', effectMarker }, error: null },
         { data: { completed: true }, error: null }
       ]
     });
@@ -157,7 +167,7 @@ describe('password change replay receipt', () => {
   );
 
   it('returns success after response loss by verifying the supplied new password', async () => {
-    const mocked = clientsFor({ verifiedPasswords: ['654321'], rpcStates: [{ data: { state: 'completed' }, error: null }] });
+    const mocked = clientsFor({ verifiedPasswords: ['654321'], rpcStates: [{ data: { state: 'completed', effectMarker }, error: null }] });
     await new SupabaseAuthService(mocked.clients, verificationPepper).changePassword(actor, '1234', '654321', 'password-change-0002', 'fastify-client-1');
     expect(mocked.updateUserById).not.toHaveBeenCalled();
     expect(mocked.rpc.mock.calls.map(([name]) => name)).toEqual([
@@ -170,7 +180,7 @@ describe('password change replay receipt', () => {
   });
 
   it('rejects a completed key when the intended new password is not current', async () => {
-    const mocked = clientsFor({ rpcStates: [{ data: { state: 'completed' }, error: null }] });
+    const mocked = clientsFor({ rpcStates: [{ data: { state: 'completed', effectMarker }, error: null }] });
     await expect(new SupabaseAuthService(mocked.clients, verificationPepper).changePassword(actor, '1234', '654321', 'password-change-0003', 'fastify-client-1'))
       .rejects.toMatchObject({ statusCode: 409, code: 'IDEMPOTENCY_KEY_REUSED' });
     expect(mocked.updateUserById).not.toHaveBeenCalled();
@@ -180,8 +190,8 @@ describe('password change replay receipt', () => {
     const mocked = clientsFor({
       verifiedPasswords: ['654321'],
       rpcStates: [
-        { data: { state: 'recover' }, error: null },
-        { data: { state: 'recover' }, error: null },
+        { data: { state: 'recover', effectMarker }, error: null },
+        { data: { state: 'recover', effectMarker }, error: null },
         { data: { completed: true }, error: null }
       ]
     });
@@ -192,8 +202,8 @@ describe('password change replay receipt', () => {
   it('fails closed after a crash-before-Auth ambiguity rather than losing a possible completed audit', async () => {
     const mocked = clientsFor({
       rpcStates: [
-        { data: { state: 'recover' }, error: null },
-        { data: { state: 'recover' }, error: null },
+        { data: { state: 'recover', effectMarker }, error: null },
+        { data: { state: 'recover', effectMarker }, error: null },
         { data: null, error: null }
       ]
     });
@@ -231,7 +241,7 @@ describe('password change replay receipt', () => {
       verifiedPasswords: ['tmp:1234'],
       rpcStates: [
         { data: { state: 'absent' }, error: null },
-        { data: { state: 'execute' }, error: null },
+        { data: { state: 'execute', effectMarker }, error: null },
         { data: null, error: { message: 'database unavailable' } }
       ]
     });
@@ -307,7 +317,7 @@ describe('password change replay receipt', () => {
   it('limits completed-receipt wrong-password probes before another Auth call', async () => {
     const mocked = clientsFor({
       rateLimitAllowed: [...Array.from({ length: 10 }, () => true), false],
-      rpcStates: Array.from({ length: 11 }, () => ({ data: { state: 'completed' }, error: null }))
+      rpcStates: Array.from({ length: 11 }, () => ({ data: { state: 'completed', effectMarker }, error: null }))
     });
     const service = new SupabaseAuthService(mocked.clients, verificationPepper);
 

@@ -799,3 +799,12 @@ slot projection, 명시된 역사 참조의 건수 진단이다. 실제 내용·
 선택한 결과가 아니다. `diagnosticComplete=true`도 백업·보호·게시·초기화 승인이나 운영 성공이
 아니며 `executionEnabled=false`를 유지한다. 이전 DB가 아직 수집하지 않으면 available=false와
 `TEMPLATE_INVENTORY_NOT_COLLECTED`를 반환한다. 프런트 구현은 별도 범위다.
+
+## 최초 비밀번호 변경 장애 후속 (#535, 2026-10-30)
+
+준비 RPC 확인값 누락 수정 후보와 기존 실패 계정 복구는
+[상세 인계](PASSWORD_CHANGE_RECOVERY_535.md)를 따른다.
+[프런트 #271](https://github.com/makee-ham/room-management-system/issues/271)에
+오류 안내·요청 키 수명·복구 후 새 요청 UAT를 인계했다.
+공개 API 계약 변경은 없으며 운영 migration/계정 복구는 아직 실행하지 않았다.
+일반 응답 유실 재시도는 동일 키를 유지하고, 이번 실패 요청의 종료가 확인된 뒤에만 새 키를 쓴다.
