@@ -117,7 +117,7 @@
     "node_modules/zod/v4/locales/zh-CN.js": "8fc02f2bd4d92f46b24b8d82da0ee95c962fc80c14dd7dd469500e14de08d320",
     "node_modules/zod/v4/locales/zh-TW.js": "01d9b119e318d8b9f1a8fa720d06424457429425a61d0730984b750e6a5edf7d",
     "package-lock.json": "d0e233c8a69b420c5b58f5fdf552832116ed954757eb6054d85f983a828767bc",
-    "package.json": "6b50595a8fa6da9f0652f011d8aca5e218977c37154de27f52dd9bcc659b80b8",
+    "package.json": "b319cd4b35e3d323b2b47ef5842e1cec8e82f6235ebbc51c3b7bd3a6cec5e835",
     "scripts/generate-post-approval-report-bundle.mjs": "0b3a656990be9b97e93d0d4224611dd896f89465e64400ee4b30cc623f183a07",
     "scripts/generate-post-approval-report-edge.mjs": "dd0613aa4dead87f4eb886334121e1b686dc4472b9dfd2eb0eea1316f063dffb",
     "src/domain/actor.ts": "1864484f23e5d42b45b602c3ad8682463f9e7294ab48aa60a34d178791cb7d19",

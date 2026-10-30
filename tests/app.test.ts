@@ -15,6 +15,55 @@ import type { PostApprovalRoomIssueModuleServices } from '../src/modules/post-ap
 import { SupabaseResetPreviewService } from '../src/modules/developer-reset/reset-preview.routes.js';
 import { resetRelationGroups } from '../src/modules/developer-reset/reset-preview-groups.js';
 
+describe('room READY correction error responses', () => {
+  const roomId = '11111111-1111-4111-8111-111111111111';
+  const paths = [`/v1/rooms/${roomId}/ready-correction`, `/v1/rooms/${roomId}/ready-correction/preview`];
+
+  it.each(paths)('keeps authentication and authorization failures no-store for %s', async url => {
+    const appServices = services();
+    const app = await buildApp({ env, services: appServices, logger: false });
+    try {
+      for (const scenario of [
+        { role: 'admin', mustChangePassword: false, authenticated: false, status: 401, code: 'MISSING_ACCESS_TOKEN' },
+        { role: 'maid', mustChangePassword: false, authenticated: true, status: 403, code: 'ADMIN_REQUIRED' },
+        { role: 'developer', mustChangePassword: false, authenticated: true, status: 403, code: 'ADMIN_REQUIRED' },
+        { role: 'admin', mustChangePassword: true, authenticated: true, status: 403, code: 'PASSWORD_CHANGE_REQUIRED' },
+      ] as const) {
+        vi.mocked(appServices.auth.authenticate).mockResolvedValue({ authUserId: roomId, profileId: roomId,
+          displayName: 'synthetic', accessToken: 'synthetic-token', role: scenario.role,
+          mustChangePassword: scenario.mustChangePassword });
+        const response = await app.inject({ method: 'POST', url,
+          headers: scenario.authenticated ? { authorization: 'Bearer synthetic-token' } : {},
+          payload: { targetStatus: 'READY', reasonCode: 'ADMIN_ROOM_READY_CORRECTION' } });
+        expect(response.statusCode).toBe(scenario.status);
+        expect(response.json().error.code).toBe(scenario.code);
+        expect(response.headers['cache-control']).toBe('no-store');
+      }
+      expect(appServices.rooms.previewReadyCorrection).not.toHaveBeenCalled();
+      expect(appServices.rooms.applyReadyCorrection).not.toHaveBeenCalled();
+    } finally { await app.close(); }
+  });
+
+  it.each(paths)('returns a safe no-store 400 for malformed or empty JSON on %s', async url => {
+    const appServices = services();
+    const app = await buildApp({ env, services: appServices, logger: false });
+    try {
+      for (const payload of ['{"privateRaw":"synthetic-body-canary",', '']) {
+        const response = await app.inject({ method: 'POST', url,
+          headers: { authorization: 'Bearer synthetic-token', 'content-type': 'application/json' }, payload });
+        expect(response.statusCode).toBe(400);
+        expect(response.headers['cache-control']).toBe('no-store');
+        expect(response.json().error).toEqual({ code: 'ROOM_READY_CORRECTION_INVALID_INPUT',
+          message: '객실 상태 변경 입력이 올바르지 않습니다.' });
+        expect(response.body).not.toContain('synthetic-body-canary');
+      }
+      expect(appServices.auth.authenticate).not.toHaveBeenCalled();
+      expect(appServices.rooms.previewReadyCorrection).not.toHaveBeenCalled();
+      expect(appServices.rooms.applyReadyCorrection).not.toHaveBeenCalled();
+    } finally { await app.close(); }
+  });
+});
+
 describe('developer read-only reset preview route', () => {
   it('reuses authentication, denies business roles, accepts no target override and exposes no execution route', async () => {
     const appServices = services(); const session = '00000000-0000-4000-8000-000000000001';
