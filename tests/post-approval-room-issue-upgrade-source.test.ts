@@ -195,6 +195,14 @@ const localInput = { args: [], env: {}, config, endpoint: JSON.stringify('unix:/
     project: 'room-management-system-backend', ports: { '5432/tcp': [{ HostIp: '127.0.0.1', HostPort: '54322' }] } }) };
 
 describe('#336 isolated110->111 source/preflight only (no DB PASS claim)', () => {
+  it('pins password effect123 without accepting a self-rehashed replacement', () => {
+    const changed = clone(entries), changedManifest = clone(manifest);
+    const tail = changed[122], record = changedManifest.migrations[122];
+    if (!tail || !record) throw new Error('EXPECTED123_TAIL');
+    tail.raw = Buffer.from('select 1;\n');
+    record.sha256 = createHash('sha256').update(tail.raw).digest('hex');
+    expect(() => validatePostApprovalUpgradeSource(changedManifest, changed)).toThrow('Only the source-reviewed password-effect123 tail');
+  });
   it('pins photo finalize121 without accepting a rehashed replacement', () => {
     const changed = clone(entries), last = changed[120];
     const changedManifest = clone(manifest), record = changedManifest.migrations[120];

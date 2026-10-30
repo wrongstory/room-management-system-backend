@@ -27,11 +27,11 @@ describe('historical upgrade notification catalog compatibility', () => {
       expect(() => assertUpgradeNotificationCatalog(old, after, 111)).toThrow();
     }
     expect(() => assertUpgradeNotificationCatalog(installed(), installed(), 111)).toThrow();
-    for (const count of [94, 123, 111.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+    for (const count of [94, 124, 111.5, Number.NaN, Number.POSITIVE_INFINITY]) {
       expect(() => assertUpgradeNotificationCatalog(old, installed(), count)).toThrow();
     }
   });
-  it.each([113, 114, 115, 116, 117, 118, 119, 120, 121, 122])('preserves the exact catalog and digest contract at reviewed migration %i', count => {
+  it.each([113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123])('preserves the exact catalog and digest contract at reviewed migration %i', count => {
     expect(() => assertUpgradeNotificationCatalog(old, installed(), count)).not.toThrow();
     for (const key of Object.keys(addition)) {
       const after = installed();

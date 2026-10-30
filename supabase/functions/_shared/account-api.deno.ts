@@ -1533,3 +1533,83 @@ Deno.test("in-progress account status fails before Auth, role preserves existing
     "metadata compensated to existing maid",
   );
 });
+
+for (const marker of [undefined, null, "", "invalid"]) {
+  Deno.test(`Edge rejects missing/invalid prepare effect marker: ${String(marker)}`, async () => {
+    const rpcCalls: Array<
+      { name: string; parameters: Record<string, string> }
+    > = [];
+    const states = [
+      { state: "absent" },
+      {
+        state: "execute",
+        ...(marker === undefined ? {} : { effectMarker: marker }),
+      },
+    ];
+    let updateCount = 0;
+    let authUpdate: unknown = null;
+    const clients = {
+      publicClient: {
+        auth: {
+          signInWithPassword: ({ password }: { password: string }) =>
+            Promise.resolve(
+              password === "123456"
+                ? {
+                  data: { session: { access_token: "verification-token" } },
+                  error: null,
+                }
+                : { data: { session: null }, error: { message: "invalid" } },
+            ),
+        },
+      },
+      admin: {
+        rpc: (name: string, parameters: Record<string, string>) => {
+          rpcCalls.push({ name, parameters });
+          if (name === "consume_password_verification_rate_limit") {
+            return Promise.resolve(allowedPasswordVerification);
+          }
+          if (name === "complete_password_change") {
+            return Promise.resolve({ data: { completed: true }, error: null });
+          }
+          if (name === "get_auth_password_version") {
+            return Promise.resolve({ data: passwordEffectMarker, error: null });
+          }
+          return Promise.resolve({ data: states.shift(), error: null });
+        },
+        auth: {
+          admin: {
+            updateUserById: (_id: string, attributes: unknown) => {
+              updateCount += 1;
+              authUpdate = attributes;
+              return Promise.resolve({ data: null, error: null });
+            },
+            signOut: () => Promise.resolve({ data: null, error: null }),
+          },
+        },
+      },
+    } as unknown as EdgeClients;
+
+    let caught: unknown;
+    try {
+      await changePassword(
+        passwordRequest({ currentPassword: "123456", newPassword: "654321" }),
+        clients,
+        developer,
+      );
+    } catch (error) {
+      caught = error;
+    }
+    assert(caught instanceof EdgeError, "malformed receipt fails closed");
+    assertEquals(
+      caught.code,
+      "PASSWORD_CHANGE_RECEIPT_FAILED",
+      "safe error code",
+    );
+    assertEquals(updateCount, 0, "Auth remains unchanged");
+    assertEquals(authUpdate, null, "no password mutation payload");
+    assert(
+      !rpcCalls.some((call) => call.name === "complete_password_change"),
+      "no false completion",
+    );
+  });
+}
