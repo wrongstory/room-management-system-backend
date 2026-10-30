@@ -1,12 +1,35 @@
 # #534 청소 배정 메모 · v1.0.0 인계
 
-현재 상태: 개발 후보. 운영 DB/API와 프런트에 적용하지 않았다. 실제 SQL·경합·전체 DB 검증은
-사용자 승인 전 NOT RUN이다. 이 문서는 해당 검증을 대체하지 않는다.
+2026-10-31 인계 상태: **백엔드 dev 병합·독립 QA·필수 CI 완료, #534 운영 미배포**.
+실제 SQL·RLS·경합·전체 DB 검증과 운영 적용은 NOT RUN이다. feature CI의 `migration PASS`는
+소스·manifest 검사이며 전체 DB 성공 증거가 아니다. 이 문서는 DB 실행 승인이 아니다.
 
 - 백엔드: https://github.com/wrongstory/room-management-system-backend/issues/534
 - 프런트: https://github.com/makee-ham/room-management-system/issues/270
-- 작업 브랜치: `codex/534-assignment-instruction-memo`, 기준 dev `f01efa3e` (#535 및 #532 보완 통합)
-- DB 소스: `20261030143048_assignment_instruction_memo.sql` (dev manifest 140번째 후보)
+- 병합 완료: [PR #539](https://github.com/wrongstory/room-management-system-backend/pull/539),
+  dev squash `46e47ed0ddb080c293fa5e02152d1683ee8b5eee`
+- 검증된 PR head: `ad532fa5696325583bd61036bf64ec0f3940cc04`;
+  [CI run41079932523](https://github.com/wrongstory/room-management-system-backend/actions/runs/41079932523)
+  application / migration(source-only) PASS, 실제 DB 단계와 Full DB proof는 skipped
+- 원 구현 브랜치: `codex/534-assignment-instruction-memo`; #535 및 #532 보완 통합 완료
+- DB 소스: `20261030143048_assignment_instruction_memo.sql` (확인 시 dev manifest 140번째)
+
+## 다른 채팅에서 바로 이어갈 지점
+
+1. 기존 v1.0.0 릴리스 작업공간과 미커밋 변경을 먼저 확인하고 보존한다. 최신 dev를 조회해
+   `46e47ed`가 포함됐는지 확인한다. 이미 병합된 #534를 중복 구현·cherry-pick하지 않는다.
+2. 확인 시 최신 main에는 별도 #535 hotfix
+   [PR #537](https://github.com/wrongstory/room-management-system-backend/pull/537),
+   `f1fbec94491ad9c360cdc4544c424cb9664719de`가 있다. 릴리스 후보에서 이 수정도 보존한다.
+   `20261030141647_password_change_prepare_effect_marker.sql`은 확인 시 main/dev에서 동일했다.
+   이는 Git 소스 확인이며 운영 DB 적용 여부 확인이 아니다.
+3. 최종 소스·명세·manifest·번들을 정리하는 작업부터 진행한다. 아래 실행 승인 없이
+   release PR 생성·push·재실행 또는 실제 DB 명령으로 넘어가지 않는다.
+
+**승인 경계:** 로컬·CI·운영 migration 적용 및 DB reset/재구축은 매 실행 전에 사용자 승인을
+받는다. 대상 환경·최종 입력·적용 범위를 먼저 제시한다. 전체 DB를 유발하는 release/hotfix PR
+생성·push·재실행도 사전 승인 대상이다. 과거 자동 진행 승인이나 #535 hotfix 승인을 #534의
+실행 허가로 사용하지 않는다. [최종 DB 검증 정책](./FINAL_DB_VALIDATION.md)을 따른다.
 
 ## 사용자 요구와 보존
 
@@ -73,13 +96,49 @@ CAS/동시 요청/동일 키 다른 내용 거절 및 유지보수 차단을 기
 
 ## v1.0.0 통합·배포 순서
 
-1. 이 feature PR의 source/application CI와 독립 QA 결과를 확인해 dev에 통합한다.
-2. 다른 채팅의 최신 v1.0.0 후보와 source/manifest/head·OpenAPI를 대조한다. 기존 1~139 migration을
-   수정하지 않는다. 후보 140의 exact-anchor 검사 실패를 우회하지 말고 통합 상대 변경을 검토한다.
-3. 사용자 승인 후 최종 통합 입력에서 전체 DB 검증 1회에 새 SQL 회귀 검사를 포함한다.
-4. 운영 이력·pending 목록을 제시하고 운영 migration 실행 전에 별도 승인받는다.
-5. 승인된 DB 변경 후 해당 입력의 API/Swagger를 배포하고 프런트 #270을 연결한다.
-6. admin 입력→통보→해당 maid 읽기, 재배정 계승/초기화, 타인 접근 거절과 기존 무메모 배정을 점검한다.
+1. **릴리스 입력 확정:** #539 dev 병합은 완료됐다. 최신 v1.0.0 후보의 포함 여부와 main hotfix를
+   대조한다. 기존 1~139 SQL 원문을 보존하고 새 통합 뒤 실제 순서·head·manifest·함수 변경 지점을
+   확인한다. exact-anchor 실패를 우회하지 않는다. 배포용 API/Swagger 설명·생성물·관련 검사까지
+   최종 입력에 포함한다. 로컬 합성 검사·독립 QA와 실제 번들 크기를 확인한다.
+2. **격리 CI 실행 승인:** 전체 DB 실행을 유발하기 전에 사용자에게 환경·최종 commit·범위를
+   제시하고 승인받는다. 새 릴리스는 최신 dev에서 `release/v1.0.0`을 준비해 main을 대상으로 한다.
+   이미 릴리스 PR이 있다면 그 PR과 입력을 먼저 확인하며 중복 생성하지 않는다. Draft release도
+   전체 DB를 유발할 수 있다. 승인 전에는 해당 PR 생성·push·재실행을 하지 않는다.
+3. **최종 전체 DB 1회 검증:** 승인된 최종 통합본에서 기존 fresh/upgrade/역할별 RLS·경합·cleanup
+   전체 검사를 유지하고 `supabase/tests/assignment_instruction_memo.sql`을 포함한다. 메모
+   저장·생략/초기화·담당 인계·과거 이력·통보 권한·CAS/멱등성을 실제 DB에서 확인한다.
+   같은 release PR·동일 입력의 성공 proof만 재사용한다. #539 feature CI, #537의 별도 hotfix
+   proof, 실패·취소·skipped 결과는 v1.0.0 전체 DB 성공 증거가 아니다. 재실행도 실행 전에 승인받는다.
+4. **릴리스 병합:** 필수 application/migration CI·독립 리뷰·미해결 스레드·보호 규칙을 확인한 뒤
+   `release/v1.0.0 → main`으로 병합한다. main의 동일 입력 proof 확인까지 통과해야 배포할 수 있다.
+   입력이 같다는 근거가 있으면 병합만을 이유로 전체 DB를 반복하지 않는다. 증거 누락/불일치는 중단한다.
+5. **운영 변경 범위 확인·별도 승인:** 운영 migration 이력을 읽기 전용으로 조회하고 소스와
+   version/name 및 확인 가능한 내용 hash를 대조한다. **운영 pending을 #534 한 건 또는 단순
+   migration 개수 차이로 추정하지 않는다.** 예상과 다르면 중단해 알린다. 정확한 전체 pending 목록과
+   적용 범위를 제시해 운영 적용 직전에 별도 승인받는다. 격리 CI 승인은 운영 적용 승인이 아니다.
+6. **DB → API/Swagger → 프런트:** 승인된 pending만 적용하고 상태를 확인한 뒤, 검증된 릴리스의
+   API/Swagger를 배포한다. 새 컬럼이 없는 운영 DB에 새 API부터 연결하지 않는다. 프런트 담당자가
+   #270의 계약으로 연결하며 DB/API 배포 확인 후 기능을 활성화한다. 프런트 소스는 별도 담당 범위다.
+7. **실사용 확인:** 관리자 입력→저장·통보→해당 메이드 조회, 메모만 변경, 담당 변경·인계 승계,
+   명시 초기화, 과거 이력, 다른 청소 분리, 타인·미통보 접근 차단과 기존 무메모 배정을 확인한다.
+   실행 결과를 근거로 #534/#270과 릴리스·프런트 문서를 갱신하고 완료 범위만 종료한다.
+   태그/Release 발행도 해당 배포 승인 범위와 운영 확인 결과를 따른다.
+
+운영 백업/복원은 기존 사용자 결정대로 후속이다. 이 인계에서 새 필수 배포 gate로 추가하지 않는다.
+CI의 합성 backup dry-run을 실제 운영 백업/복원 완료라고 표시하지 않는다.
+
+## 남은 작업 기록
+
+- [x] #534 구현·독립 QA·필수 feature CI·PR #539 dev 병합
+- [x] 프런트 #270에 계약과 미배포 상태 인계
+- [ ] v1.0.0 최종 후보의 #534/main hotfix 포함 및 소스·명세·번들 확인
+- [ ] 사용자 승인 → 해당 release PR의 최종 실제 전체 DB 검증
+- [ ] 필수 CI·리뷰 후 main 병합 및 동일 입력 proof 확인
+- [ ] 운영 이력·전체 pending 확인 → 별도 승인 → 운영 migration 적용
+- [ ] API/Swagger 배포 → 프런트 연결·실사용 확인 → 완료 범위 정리
+
+다음 담당자는 실행한 release PR/head/run/proof, 승인된 DB 대상·범위, 실제 적용 결과와
+프런트 확인 근거를 이 체크포인트에 추가한다. 승인 대기·미실행을 완료로 바꾸지 않는다.
 
 DB/API 적용 전에 프런트에서 이 기능을 운영 활성화하지 않는다. DB만 적용한 상태는
 완성된 기능이 아니다. 문제가 있으면 프런트 입력을 중지하고 검증된 이전 API로 되돌릴 수 있으나,
@@ -90,7 +149,8 @@ DB/API 적용 전에 프런트에서 이 기능을 운영 활성화하지 않는
 
 2026-10-31 로컬 최종 입력: dev `f01efa3e`의 #535 및 #532 보완과 #534 후보를 통합했다.
 PR #539의 첫 head `1f02676`에서 required CI run41077963617이 통과한 뒤,
-dev의 새 #532 보완을 충돌 없이 통합했다. 최종 통합 CI는 PR에서 별도로 확인한다.
+dev의 새 #532 보완을 충돌 없이 통합했다. 최종 head `ad532fa`의 run41079932523도
+application/migration(source-only) PASS 후 dev `46e47ed`로 병합됐다.
 
 | 검증 | 실제 결과 |
 | --- | --- |
@@ -100,6 +160,7 @@ dev의 새 #532 보완을 충돌 없이 통합했다. 최종 통합 CI는 PR에�
 | `npm run openapi:template-client:check` | PASS: 기존 템플릿 client/경계 회귀 |
 | Python 콘솔 CI 6종 | PASS: Ruff·format 227파일·mypy 26파일·pytest 139건·임시 전체 OpenAPI 생성/roundtrip/compile·build source |
 | 독립 QA | PASS: 관련 147건·별도 Unicode 합성 2,641건 및 최신 dev 통합 134건 재확인; 미해결 P1/P2 없음 |
+| PR #539 최종 CI run41079932523 | PASS: application 및 migration 소스 검사; 실제 DB 실행/Full DB proof 단계 skipped |
 | 실제 SQL·RLS·경합·전체 DB·운영 적용 | NOT RUN: 실행 전 사용자 승인 필요 |
 
 source grammar 검사는 PostgreSQL 15/17 파서와 정확한 함수 변경 지점을 검사하지만 DB 실행
@@ -115,4 +176,5 @@ source grammar 검사는 PostgreSQL 15/17 파서와 정확한 함수 변경 지�
 후자는 20,000,000 bytes 제한까지 14,876 bytes 여유이므로 v1.0.0 추가 통합 뒤 실제 번들
 검사를 다시 확인한다. 기존 Python 생성기의 사진/lifecycle 중복 모델 경고는 남아 있으며
 신규 메모 모델의 실제 생성·왕복 검사는 통과했다. 기존 lint 경고는 실패로 처리되지 않았다.
-이 검증은 GitHub CI, 최종 DB 검증 또는 운영 적용 완료를 의미하지 않는다.
+위 수치는 #539 구현 입력의 검증 이력이다. 후속 문서 갱신의 CI와 구별하며,
+v1.0.0 최종 전체 DB 검증 또는 운영 적용 완료를 의미하지 않는다.
