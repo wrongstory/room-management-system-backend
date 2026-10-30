@@ -6,7 +6,7 @@
 - DB migration 추가/수정 0개. 운영 기준 122개/head `post_approval_memo_only` 그대로다. dev의 후속 15개 DB 변경은 포함하지 않는다.
 - Node 22 전체 126파일/3,157테스트, Deno 2.1.4 Preview core 7테스트, typecheck/build/manifest/OpenAPI 154 paths/166 operations 통과.
 - 개발 후보의 5,391테스트 기록과 운영 후보의 3,157테스트 기록은 각각 다른 기준 소스의 검증이다.
-- Full DB NOT RUN. AGENTS.md와 FINAL_DB_VALIDATION.md에 따른 사용자 승인 전에는 hotfix push/PR 생성 및 전체 DB 재구축을 실행하지 않는다.
+- 2026-10-30 사용자가 이 후보의 격리 CI 검증 1회를 명시 승인했다. 기록 시점 Full DB NOT RUN이며 성공 결과는 해당 PR/run에서 별도로 확인한다.
 - 승인 대상: 이 후보의 GitHub Actions 격리 DB 전체 검증 1회(기존 122 migration fresh/upgrade/SQL/권한/경합/cleanup). 실패/취소/입력 변경 뒤 재실행은 다시 승인받는다.
 - 운영 DB reset/migration/업무 데이터 쓰기는 제외한다. 필수 CI/리뷰 통과 뒤 main 병합, 정확한 main의 API 및 프런트 배포, health/OpenAPI/비인증 거부/CORS/정적 파일·서비스워커 확인을 수행한다.
 - API 응답은 no-store이며 관리자 기존 미리보기/저장 흐름을 유지한다. 실제 배정 저장·통보 smoke는 실행하지 않는다.
