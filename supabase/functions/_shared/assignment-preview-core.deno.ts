@@ -3,6 +3,74 @@ import {
   type PreviewTarget,
 } from "./assignment-preview-core.ts";
 
+Deno.test("floor proximity preserves fixed work and fee priority in the Edge core", async () => {
+  const makeTarget = (id: string, roomNumber: string): PreviewTarget => ({
+    cleaningTargetId: id,
+    roomId: `room-${id}`,
+    roomNumber,
+    roomTypeCode: "standard",
+    elevatorZone: "A",
+    feeSnapshot: 30000,
+    availableFrom: "2037-01-05T10:00:00+09:00",
+    dueAt: null,
+    serviceDate: "2037-01-05",
+    status: "unassigned",
+    assignmentVersion: 1,
+    source: "manual_room_request",
+    cleaningKind: "additional",
+    domainIdentity: null,
+    blockedReason: null,
+    recleanMaidProfileId: null,
+    currentAssignment: null,
+    activeAttempt: null,
+  });
+  const a = makeTarget("a-fixed", "120"), b = makeTarget("b-fixed", "201");
+  for (const [t, maid] of [[a, "a"], [b, "b"]] as const) {
+    t.status = "draft_assigned";
+    t.currentAssignment = {
+      assignmentId: `assignment-${maid}`,
+      maidProfileId: maid,
+      sequenceNumber: 1,
+      revision: 1,
+      serviceDate: t.serviceDate,
+      availableFrom: t.availableFrom,
+      dueAt: t.dueAt,
+      targetAssignmentVersion: 1,
+    };
+  }
+  const input = {
+    serviceDate: "2037-01-05",
+    planningAt: "2037-01-05T09:00:00+09:00",
+    maids: ["a", "b"].map((id) => ({
+      maidProfileId: id,
+      maidDisplayName: id,
+      role: "maid",
+      status: "active",
+      availabilityVersion: 1,
+      available: true,
+    })),
+    targets: [a, b, makeTarget("new", "199")],
+  };
+  const before = JSON.stringify(input);
+  const r = await optimizeAssignmentPreview(input, "floor");
+  if (
+    r.proposedAssignments[0]?.maidProfileId !== "a" ||
+    r.objectiveScore.routeScore.floorDistance !== 0 ||
+    JSON.stringify(input) !== before ||
+    r.fixedAssignments.length !== 2 ||
+    r.proposedAssignments[0]?.proposedSequenceNumber !== 2
+  ) {
+    throw new Error(
+      "Same-floor assignment or fixed snapshot preservation failed",
+    );
+  }
+  a.feeSnapshot = 60000;
+  const balanced = await optimizeAssignmentPreview(input, "fee");
+  if (balanced.proposedAssignments[0]?.maidProfileId !== "b") {
+    throw new Error("Floor proximity overrode fee balance");
+  }
+});
+
 Deno.test("preview core works without duration policy", async () => {
   const result = await optimizeAssignmentPreview({
     serviceDate: "2037-01-05",
