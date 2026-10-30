@@ -3,6 +3,9 @@
 > **2026-10-24 범위 변경:** 필수 자동 백업은 예약 자료로 축소됐다.
 > 현재 계약·소스·활성화 gate는 [RESERVATION_AUTO_BACKUP.md](RESERVATION_AUTO_BACKUP.md)를 따른다.
 > 아래 전체 DB/Auth 복제·로컬 보관·recovery 교체 설명은 과거 기록이며 신규 예약 백업의 선행조건이 아니다.
+> **2026-10-31 공개 근거 재확인:** 예약 전용 정기 백업·감시는 캐슬디아트 전용 저장소에서 활성화됐고
+> [#12/#273은 10월27일 완료 종료](https://github.com/wrongstory/room-management-system-backend/issues/12)했다.
+> 현장 PC 인계·실제 만료 삭제·전체 DB/Auth/PIN/사진 복원은 이 완료 범위에 포함하지 않는다.
 
 > 결정일: 2026-08-26
 > 상태: 대상 계정 연결과 Free 프로젝트 2개 확인 완료, 운영·복구검증 migration 적용·재현 완료. 정기 dump 정책은 매일 01:00~06:00 KST, 15일 보관으로 확정했다. 로컬 합성 DB의 dump·격리 복원 dry-run은 source/dev 자동화가 준비됐으며 정확한 운영 실행 시각, 미래 PC 저장 경로, 원격 자동화는 남아 있다.
