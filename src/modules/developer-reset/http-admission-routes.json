@@ -626,6 +626,7 @@
     "method": "POST",
     "path": "/v1/offline-quarantines/{quarantineId}/resolve",
     "routeId": "resolveOfflineQuarantine",
+    "completionAdapter": "OFFLINE_RESOLUTION_V141",
     "kind": "BUSINESS_WRITE",
     "authority": "ACTIVE_SESSION",
     "rpc": null,

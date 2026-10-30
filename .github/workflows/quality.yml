@@ -77,6 +77,13 @@ jobs:
           RMS_FINAL_DB_GATE_MODE: ${{ steps.db_gate.outputs.mode }}
           RMS_FINAL_DB_INPUT_SHA256: ${{ steps.db_gate.outputs.fingerprint }}
         run: node scripts/test-migration-baseline-checkpoint.mjs
+      - name: Exercise installed reset catalog and synthetic photo HOLD graph (#396)
+        if: steps.db_gate.outputs.full == 'true'
+        timeout-minutes: 1
+        env:
+          RMS_FINAL_DB_GATE_MODE: ${{ steps.db_gate.outputs.mode }}
+          RMS_FINAL_DB_INPUT_SHA256: ${{ steps.db_gate.outputs.fingerprint }}
+        run: npm run db:test:reset-final-catalog
       - run: npm run db:test:template-contract
         if: steps.db_gate.outputs.full == 'true'
       - name: Prepare exact isolated PG17 TLS fixture image (#378)

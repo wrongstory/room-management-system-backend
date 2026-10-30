@@ -14,8 +14,8 @@ describe('source137 finite lifecycle admission', () => {
     const original = read('supabase/migrations/20261025032719_operation_admission_authority.sql');
     expect(createHash('sha256').update(original).digest('hex')).toBe('03d67e06609adad00d72805332c53dc550000145368f428e21f2168bc6ca2b43');
     expect(generateAdmissionSql(routes, read('scripts/operation-admission.sql.in'))).toBe(original);
-    expect(routes.filter(r => r.completionAdapter)).toHaveLength(1);
-    expect(routes.filter(r => r.hashMode === 'NONE' && !r.completionAdapter)).toHaveLength(26);
+    expect(routes.filter(r => r.completionAdapter === 'LIFECYCLE_V137')).toHaveLength(1);
+    expect(routes.filter(r => r.hashMode === 'NONE' && !r.completionAdapter)).toHaveLength(25);
     expect(routes.filter(r => ['CALLER', 'SQL_AVAILABILITY'].includes(r.hashMode))).toHaveLength(66);
   });
   it.each(['value', 'route', 'kind', 'authority', 'hashMode', 'rpc', 'key'])('rejects %s tag substitution without changing historical generation', field => {

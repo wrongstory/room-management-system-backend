@@ -1,6 +1,27 @@
 # #12 예약 자동 백업 실행 감시
 
-## 범위
+## 운영 완료 근거 — 2026-10-31 공개 기록 재확인
+
+운영 정본은 [캐슬디아트 예약 백업 저장소](https://github.com/yeosucastletheart-cyber/reservation-backup)다.
+2026-10-25에 `castle-reservation-backup` App을 해당 저장소 하나의 Issues write/Metadata read로
+설치하고 실제 미실행·정상 복구 알림을 확인했다. 승인된 recovery 설치와 signed-v1 감시 배포,
+매시17분 Cron 활성화가 완료됐으며 기존 wrongstory 백업은 비활성을 유지한다.
+[#12/#273 완료 기록](https://github.com/wrongstory/room-management-system-backend/issues/12)에
+첫 정기 백업과 10월27일 03:17 KST 감시 job1/run36·request38의 HTTP200 HEALTHY가 남아 있다.
+
+[운영 알림 #4](https://github.com/yeosucastletheart-cyber/reservation-backup/issues/4)는 계속 열어 둔다.
+정상 상태가 이어지면 marker를 매번 갱신하지 않으므로 최신 성공은 Actions의 실제 검증 step과
+사본 날짜를 함께 확인한다. 10월30일 13:17 KST의
+[MONITOR_CHECK_FAILED](https://github.com/yeosucastletheart-cyber/reservation-backup/issues/4#issuecomment-6514843847) 뒤
+14:17 KST에 [HEALTHY 전환](https://github.com/yeosucastletheart-cyber/reservation-backup/issues/4#issuecomment-6515584424)이
+기록됐다. 이 기록만으로 실패 원인을 확정하거나 계속 무장애였다고 판단하지 않는다.
+
+기존 비밀번호·키·App 등록이나 recovery 설치를 v1.0.0에서 반복하지 않는다.
+실제 15일 만료 삭제·전체 DB 복원은 미검증이며 [현장 인계 #6](https://github.com/yeosucastletheart-cyber/reservation-backup/issues/6)은
+별도로 남는다. 아래는 이 저장소에 보존된 초기 구현과 분리 전 설치 기록이고 현재 운영 설정 지시가 아니다.
+이번 재확인은 GitHub 읽기만 했으며 DB·Storage·Cron·provider 실행은 없다.
+
+## 백엔드에 보존된 소스 범위
 
 PR #484의 예약 전용 백업에 실패·미실행 감시를 추가하는 개발 후보다.
 운영 DB/API/프런트 계약은 변경하지 않는다. 기존 recovery 프로젝트
@@ -41,14 +62,17 @@ recovery 감시는 매시 17분에 실행한다. 조회 실패·제한 초과·�
 댓글 전송 실패를 성공으로 기록하지 않는다. API 성공은 실제 사용자 알림 수신과 구분한다.
 
 GitHub 실패 job은 짧게 유효한 GITHUB_TOKEN을 사용하고 백업 Secrets는 전달받지 않는다.
-독립 감시는 전용 GitHub App의 설치 토큰을 사용하도록 준비한다. App 권한은 단일 저장소
+이 백엔드 소스의 독립 감시는 전용 GitHub App의 설치 토큰을 사용하도록 준비했다. App 권한은 단일 저장소
 Issues 쓰기와 기본 metadata 읽기로 제한한다. 기존 개인 CLI의 광범위 토큰은 복제하지 않는다.
 App slug는 `rms-reservation-backup-wrongstory`로 고정한다. 댓글 복구는 이 App 봇과
 `github-actions[bot]`의 기록만 인정한다. 다른 이름을 설치하면 이 허용 목록도 검토해야 한다.
 자가 PAT로 작성한 댓글은 본인 알림 수신을 보장하지 않으므로 봇 계정의 실제 알림 수신까지
 검증한다. App private key는 source/로그/채팅에 기록하지 않는다.
 
-## 설치 및 활성화 순서 — 아직 실행하지 않음
+## 분리 전 설치·활성화 계획 — 재실행 지시 아님
+
+당시 backend release 후보의 순서다. 실제 운영은 위 전용 저장소에서 별도로 완료했으므로
+현재 v1.0.0 Full DB 승인이나 main 반영을 백업 최초 활성화의 새 선행조건으로 삼지 않는다.
 
 1. source/합성·Edge 검사, 독립 QA, dev PR CI와 병합을 완료한다.
 2. 전용 알림 이슈와 저장소 1개에 설치된 GitHub App을 준비하고 키를 안전하게 등록한다.
@@ -68,13 +92,13 @@ App slug는 `rms-reservation-backup-wrongstory`로 고정한다. 댓글 복구�
 장애 시 `RESERVATION_BACKUP_ENABLED=false`, `RESERVATION_BACKUP_MONITOR_ENABLED=false`와
 해당 Cron만 비활성화한다. 이전 검증 사본·기존 job·업무 데이터·Auth는 삭제하지 않는다.
 
-## 현재 검증 경계
+## 2026-10-25 분리 전 검증 기록
 
 2026-10-25 source 검증: `npm run ci:quality` PASS(132파일/3,266테스트, OpenAPI 154경로/
 166작업), `npm run edge:check` PASS, migration manifest 122건 PASS. 마지막 알림 작성자 제한
 보완 후 관련 78테스트·Deno check·감시 번들 89,594 bytes를 재검증했다.
 독립 QA는 감시·알림·App 인증·workflow 관련 4파일/78테스트 PASS이며 차단 결함이 없다.
-합성 검사는 실제 DB 검증이나 알림 수신을 대신하지 않는다. recovery SQL/실제 Cron/새 Edge 배포,
+합성 검사는 실제 DB 검증이나 알림 수신을 대신하지 않는다. 이 source 검토 당시 recovery SQL/실제 Cron/새 Edge 배포,
 GitHub App 생성·실제 알림 수신, release 전체 DB 검증과 main 승격·정기 활성화는 NOT RUN이다.
 PR #484의 실제 28건 백업·재조회 성공과 이 후보의 감시 활성화 성공을 혼동하지 않는다.
 

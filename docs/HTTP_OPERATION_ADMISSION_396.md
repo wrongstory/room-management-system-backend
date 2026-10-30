@@ -54,7 +54,10 @@ source130/131의 분류는 99개 HTTP 경로 중 65개 DB command receipt 후보
 
 source137의 [청소 진행 변경 연결](LIFECYCLE_OPERATION_ADMISSION.md)은 위 27개 중
 `manageAttemptLifecycle` 한 경로의 세 공개 action만 별도 고정 adapter로 처리한다.
-기존65개와 이1개는 정확한 DB 원장으로 완료를 관찰할 수 있고, 나머지26개는 계속 OPAQUE다.
+source137 시점에는 기존65개와 이1개가 정확한 DB 원장으로 완료를 관찰할 수 있었고, 나머지26개는 OPAQUE였다.
+source141의 [오프라인 격리 해결 연결](OFFLINE_RESOLUTION_OPERATION_ADMISSION.md)은 그중
+`resolveOfflineQuarantine` 1개만 기존 해결 원장에 연결한다. 현재 나머지25개는 계속 OPAQUE이며,
+전체 drain·보호복구·reset 활성화 완료를 뜻하지 않는다.
 `expire_scheduled`나 다른 Auth/provider 경로를 확대하지 않으며, source130 SQL은 그대로 유지한다.
 
 예약 전환은 내부 receipt가 아닌 `reservation.process_due_transitions.v66`을 사용한다.

@@ -345,11 +345,53 @@ export async function beginHttpAdmission(input: {
     p_auth: identity?.authUserId ?? null,
     p_session: identity?.sessionId ?? null,
   };
-  // One reviewed domain adapter. The source130 route remains opaque; only
-  // append137 can bind its three public actions to immutable command receipts.
+  // Reviewed domain adapters keep source130's historical opaque routes intact.
   const lifecycle = route.routeId === "manageAttemptLifecycle" &&
     "completionAdapter" in route &&
     route.completionAdapter === "LIFECYCLE_V137";
+  const offlineResolution = route.routeId === "resolveOfflineQuarantine" &&
+    "completionAdapter" in route &&
+    route.completionAdapter === "OFFLINE_RESOLUTION_V141";
+  const offlineResolutionBinding = (args: Record<string, unknown>) => {
+    const keys = [
+      "p_actor_profile_id",
+      "p_session_id",
+      "p_quarantine_id",
+      "p_resolution",
+      "p_expected_execution_version",
+      "p_reason_code",
+      "p_idempotency_key",
+      "p_request_hash",
+    ];
+    const reasons: Record<string, string> = {
+      record_only: "OFFLINE_RECORD_ONLY",
+      reject_effect: "OFFLINE_REJECT_EFFECT",
+      correction_link: "OFFLINE_CORRECTION_APPROVED",
+    };
+    if (
+      Object.keys(args).length !== keys.length ||
+      keys.some((key) => !Object.hasOwn(args, key)) ||
+      args.p_actor_profile_id !== identity?.profileId ||
+      args.p_session_id !== identity?.sessionId ||
+      typeof args.p_quarantine_id !== "string" ||
+      !uuid.test(args.p_quarantine_id) ||
+      typeof args.p_resolution !== "string" ||
+      !Object.hasOwn(reasons, args.p_resolution) ||
+      args.p_reason_code !== reasons[args.p_resolution] ||
+      (args.p_resolution === "correction_link"
+        ? typeof args.p_expected_execution_version !== "number" ||
+          !Number.isSafeInteger(args.p_expected_execution_version) ||
+          args.p_expected_execution_version < 1
+        : args.p_expected_execution_version !== null) ||
+      typeof args.p_idempotency_key !== "string" ||
+      !/^[A-Za-z0-9._:-]{8,128}$/.test(args.p_idempotency_key) ||
+      typeof args.p_request_hash !== "string" ||
+      !digest.test(args.p_request_hash)
+    ) {
+      throw new HttpAdmissionError();
+    }
+    return JSON.stringify(keys.map((key) => args[key]));
+  };
   const lifecycleBinding = (args: Record<string, unknown>) => {
     if (
       args.p_actor_profile_id !== identity?.profileId ||
@@ -386,6 +428,11 @@ export async function beginHttpAdmission(input: {
         ...common,
         p_action: args?.p_action,
       })
+      : offlineResolution
+      ? await call("acquire_operation_offline_resolution_admission", {
+        ...common,
+        p_resolution: args?.p_resolution,
+      })
       : await call("acquire_operation_http_admission", {
         ...common,
         p_route_id: route.routeId,
@@ -402,11 +449,15 @@ export async function beginHttpAdmission(input: {
       typeof data.admissionId !== "string" || !uuid.test(data.admissionId) ||
       data.controlVersion !== control.controlVersion ||
       data.completionMode !==
-        (route.rpc || lifecycle ? "COMMAND_RECEIPT" : "OPAQUE")
+        (offlineResolution
+          ? "OFFLINE_RESOLUTION"
+          : route.rpc || lifecycle
+          ? "COMMAND_RECEIPT"
+          : "OPAQUE")
     ) throw new HttpAdmissionError();
     return data.admissionId;
   };
-  if (!route.rpc && !lifecycle) {
+  if (!route.rpc && !lifecycle && !offlineResolution) {
     await acquire();
     // Auth session creation/revocation, photo/PIN/provider effects need dedicated
     // reconciliation. HTTP success/error/expiry never completes their lease.
@@ -415,12 +466,17 @@ export async function beginHttpAdmission(input: {
   let used = false;
   const matches = (name: string) =>
     (lifecycle && name === "manage_cleaning_attempt_lifecycle") ||
+    (offlineResolution && name === "resolve_offline_event_quarantine") ||
     name === route.rpc ||
     (route.rpcAliases as readonly string[]).includes(name);
   return {
     matches,
     async execute(name, args, invoke) {
       const boundLifecycle = lifecycle ? lifecycleBinding(args) : null;
+      const boundOfflineResolution = offlineResolution
+        ? offlineResolutionBinding(args)
+        : null;
+      const offlineArgs = offlineResolution ? { ...args } : null;
       const key = args[route.keyArgument];
       if (
         used || !matches(name) ||
@@ -445,15 +501,32 @@ export async function beginHttpAdmission(input: {
       if (lifecycle && lifecycleBinding(args) !== boundLifecycle) {
         throw new HttpAdmissionError();
       }
+      if (
+        offlineResolution &&
+        offlineResolutionBinding(args) !== boundOfflineResolution
+      ) {
+        throw new HttpAdmissionError();
+      }
       const complete = async () => {
         try {
           // The DB independently finds the exact immutable terminal receipt.
           // Missing receipt, error, response loss and timeout retain UNKNOWN.
-          const result = await call("complete_operation_http_admission", {
-            p_admission_id: admissionId,
-            p_nonce: nonce,
-            ...identityArgs,
-          });
+          const result = await call(
+            offlineResolution
+              ? "complete_operation_offline_resolution_admission"
+              : "complete_operation_http_admission",
+            {
+              p_admission_id: admissionId,
+              p_nonce: nonce,
+              ...identityArgs,
+              ...(offlineArgs
+                ? {
+                  p_quarantine_id: offlineArgs.p_quarantine_id,
+                  p_resolution: offlineArgs.p_resolution,
+                }
+                : {}),
+            },
+          );
           if (
             Object.keys(result).join(",") !== "completed" ||
             result.completed !== true
