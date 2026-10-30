@@ -1,5 +1,14 @@
 # 프런트엔드 계약 snapshot
 
+## 2026-10-30 #532 예약 가능 상태 정정 후보
+
+source OpenAPI는 159 paths / 171 operations다. 관리자 preview/정정 POST 두 경로를 추가했다.
+프런트 main `36153cc6742c2559f76cb44a2981fb93228f5bed`와 dev `4c696841bca128356b506455042f30c179154d27`의
+객실 카드 상태·예약 저장 흐름만 대조했으며 전역 제품 snapshot은 바꾸지 않는다.
+수당 별도 확인·기존 예약/투숙 별도 처리 정책 및 응답 계약은 [#532 인계](./ROOM_READY_CORRECTION_532.md),
+프런트 작업은 [#268](https://github.com/makee-ham/room-management-system/issues/268)을 따른다.
+운영 미배포·프런트 미연결이며 전체 DB 검증은 승인 전 NOT RUN이다.
+
 ## 2026-10-25 #396 초기화 영향 조회 후보
 
 #396 단독 checkpoint의 source OpenAPI는 156 paths / 168 operations다. `GET /v1/developer/reset/preview`만 추가했으며

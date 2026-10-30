@@ -1,5 +1,13 @@
 # Room Management System ERD 초안
 
+## #532 예약 가능 상태 정정 — 미배포 후보
+
+새 업무 테이블 없이 기존 target/checkout obligation/assignment의 취소·종료와 immutable
+`audit_events`의 `room.ready_corrected` 근거, command receipt를 같은 transaction으로 연결한다.
+현장 완료·제출/사진·검수·수익은 보존한다. 미래 계획·기존 예약/투숙을 일괄 종료하지 않는다.
+이력 보존된 완료 회차를 후속 활성작업에서 제외하려면 exact 정정 근거가 있어야 한다.
+실제 DB 검증·운영 적용은 별도 승인 전 NOT RUN이며 [정정 계약](./ROOM_READY_CORRECTION_532.md)을 따른다.
+
 > 2026-10-07 최신 #336: dev `ac8c775` 기반111 migration/source API150 paths·162 operations
 > 후보는 기본 Fastify/Edge 등록과 전체 로컬 SQL·동시성·fresh 검증을 완료했다. 아래 과거
 > 후보 수치는 당시 이력이며 [31차 checkpoint](./POST_APPROVAL_ROOM_ISSUE_REPORT.md)를 우선한다.

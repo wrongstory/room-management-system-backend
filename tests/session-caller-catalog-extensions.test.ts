@@ -170,7 +170,8 @@ describe('#389/#336 immutable source and bounded approved catalog declarations',
     expect(sql).toContain("then has_function_privilege(role_name,p.oid,'EXECUTE')");
     expect(sql).toContain("else not has_function_privilege(role_name,p.oid,'EXECUTE') end");
     expect(sql).toContain("/length(case when e.helper_kind='snapshot'");
-    expect(sql).toContain("else 'private.assert_attempt_actor_session_fresh(' end)=1");
+    expect(sql).toContain("else 'private.assert_attempt_actor_session_fresh(' end)=case when e.signature in (");
+    expect(sql).toContain("'public.apply_room_ready_correction(uuid,uuid,uuid,bigint,text,timestamptz,timestamptz,boolean,boolean,boolean,text,text,text)') then 2 else 1 end");
   });
   it('preserves transaction rollback and original post-catalog runtime regression', () => {
     expect(sql.startsWith('begin;\nselect no_plan();\n\\ir limited_existing_session_fixture.psql')).toBe(true);

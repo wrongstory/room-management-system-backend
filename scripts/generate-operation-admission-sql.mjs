@@ -1,6 +1,13 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
+const roomReadyExtension = {
+  previewRoomReadyCorrection: { path: '/v1/rooms/{roomId}/ready-correction/preview',
+    hashMode: 'READ_ONLY', rpc: null, commandName: null },
+  applyRoomReadyCorrection: { path: '/v1/rooms/{roomId}/ready-correction',
+    hashMode: 'CALLER', rpc: 'apply_room_ready_correction', commandName: 'room.ready_correction' },
+};
+
 export function admissionRouteRows(routes) {
   if (!Array.isArray(routes) || !routes.length) throw new Error('ADMISSION_MANIFEST_INVALID');
   const seen = new Set();
@@ -15,6 +22,21 @@ export function admissionRouteRows(routes) {
       throw new Error('ADMISSION_MANIFEST_INVALID');
     }
     seen.add(route.routeId);
+    if (route.sqlExtension !== undefined) {
+      const expected = roomReadyExtension[route.routeId];
+      if (route.sqlExtension !== 'ROOM_READY_CORRECTION_532' || !expected
+        || route.method !== 'POST' || route.path !== expected.path
+        || route.hashMode !== expected.hashMode || route.rpc !== expected.rpc
+        || route.commandName !== expected.commandName || route.kind !== 'BUSINESS_WRITE'
+        || route.authority !== 'ACTIVE_SESSION' || route.keyArgument !== 'p_idempotency_key'
+        || !Array.isArray(route.rpcAliases) || route.rpcAliases.length !== 0
+        || Object.keys(route.bindings ?? {}).length !== 0
+        || Object.keys(route.hashArgs ?? {}).length !== 0) {
+        throw new Error('ADMISSION_MANIFEST_INVALID');
+      }
+    } else if (Object.hasOwn(roomReadyExtension, route.routeId)) {
+      throw new Error('ADMISSION_MANIFEST_INVALID');
+    }
     // The append137 adapter reuses the fixed source130 opaque route in the same
     // transaction. This tag must never regenerate a different historical SQL.
     if (route.completionAdapter !== undefined && (route.completionAdapter !== 'LIFECYCLE_V137'
@@ -45,7 +67,11 @@ export function admissionRouteRows(routes) {
 
 export function generateAdmissionSql(routes, template) {
   if (template.split('@@HTTP_ROUTES@@').length !== 2) throw new Error('ADMISSION_TEMPLATE_INVALID');
-  return template.replaceAll('\r\n', '\n').replace('@@HTTP_ROUTES@@', admissionRouteRows(routes));
+  // Source130 is immutable. Later, explicitly reviewed routes are registered by
+  // their append-only migration, never by rewriting the historical SQL file.
+  admissionRouteRows(routes);
+  return template.replaceAll('\r\n', '\n').replace('@@HTTP_ROUTES@@',
+    admissionRouteRows(routes.filter(route => route.sqlExtension === undefined)));
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

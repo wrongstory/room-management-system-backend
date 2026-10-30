@@ -10,6 +10,7 @@ const sourcePaths = [
   'supabase/functions/_shared/api-timing.ts',
   'supabase/functions/_shared/runtime.ts',
   'src/modules/auth/auth-context.ts',
+  'src/modules/rooms/room-ready-correction-contract.ts',
   'supabase/functions/_shared/http-admission.ts',
   'supabase/functions/_shared/http-admission-api.ts',
   'supabase/functions/_shared/operation-atomic-rpc.ts',

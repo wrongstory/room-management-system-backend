@@ -421,6 +421,8 @@ function services(): AppServices {
         roomStateVersion: input.expectedRoomVersion + 1,
         recordedAt: '2026-09-20T00:00:01.000Z'
       })),
+      previewReadyCorrection: vi.fn(),
+      applyReadyCorrection: vi.fn(),
       overrideDisplayStatus: vi.fn(async (_actor, input) => ({
         overrideId: '72000000-0000-4000-8000-000000000001',
         roomId: input.roomId,

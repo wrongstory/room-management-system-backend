@@ -491,6 +491,9 @@ function reservationError(
   roomMoveCommand = false
 ): AppError {
   const message = error?.message ?? '';
+  if (message.includes('CLEANING_DUE_REPLAN_REQUIRED')) {
+    return new AppError(409, 'CLEANING_DUE_REPLAN_REQUIRED', '이전 청소의 배정 일정이 새 예약과 충돌합니다. 객실 상태 변경에서 청소를 확인·취소하거나 배정 일정을 다시 조정해 주세요.');
+  }
   if (message.includes('VALIDATION_ERROR')) {
     return new AppError(400, 'VALIDATION_ERROR', '청소 요청 취소 입력이 올바르지 않습니다.');
   }

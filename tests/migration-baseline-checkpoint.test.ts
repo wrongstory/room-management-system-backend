@@ -36,7 +36,7 @@ describe('#14 prefix122 checkpoint source and synthetic boundary, no database',(
     expect(r.files.at(-1)?.name).toBe(f.manifest.head);expect(Object.isFrozen(r.files)).toBe(true);
   });
   it('supports a separately source-bound future tip without a hardcoded135 ceiling',()=>{
-    const f=source(),raw=Buffer.from('select 1;\n'),file='20261026000000_synthetic_future_tail.sql';
+    const f=source(),raw=Buffer.from('select 1;\n'),file='20990101000000_synthetic_future_tail.sql';
     f.entries.push({file,raw,isFile:true,isSymbolicLink:false});f.manifest.totalCount++;f.manifest.head='synthetic_future_tail';
     f.manifest.migrations.push({order:f.manifest.totalCount,name:'synthetic_future_tail',sha256:hash(raw)});
     const r=api.validateBaselineCheckpointSource(f.manifest,f.entries);expect(r.files.at(-1)?.file).toBe(file);

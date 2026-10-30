@@ -4,6 +4,11 @@ import { AppError } from '../../lib/app-error.js';
 import { requestHash } from '../../lib/command.js';
 import type { SupabaseClients } from '../../lib/supabase.js';
 import {
+  parseRoomReadyPreviewRequest, parseRoomReadyCorrectionRequest, parseRoomReadyPreview, parseRoomReadyCorrectionResult,
+  roomReadyUuid, roomReadyErrors, RoomReadyContractError, parseRoomReadyEventSummary,
+  type RoomReadyPreviewRequest, type RoomReadyCorrectionRequest, type RoomReadyPreview, type RoomReadyCorrectionResult
+} from './room-ready-correction-contract.js';
+import {
   canonicalRoomPin,
   decryptRoomPin,
   encryptRoomPin,
@@ -432,6 +437,8 @@ export interface RoomEventsResult {
 }
 
 export interface RoomService {
+  previewReadyCorrection(actor: Actor, input: RoomReadyPreviewRequest & { roomId: string }): Promise<RoomReadyPreview>;
+  applyReadyCorrection(actor: Actor, input: RoomReadyCorrectionRequest & { roomId: string; idempotencyKey: string }): Promise<RoomReadyCorrectionResult>;
   listCandles(actor: Actor, input: { roomId?: string | undefined; cursor?: string | undefined; limit?: number | undefined }): Promise<RoomCandlePage>;
   listTypes(actor: Actor): Promise<RoomTypeCatalogItem[]>;
   listOperationBlocks(actor: Actor, roomId: string, input: RoomOperationPageInput): Promise<RoomOperationBlocksResult>;
@@ -746,6 +753,8 @@ export function generateUniqueFourDigitPins(
 }
 
 function roomError(error: { message?: string } | null): AppError {
+  const correctionError = roomReadyErrors.find(([code]) => error?.message?.includes(code));
+  if (correctionError) return new AppError(correctionError[1], correctionError[0], correctionError[2]);
   const message = error?.message ?? '';
   if (message.includes('ROOM_OPERATION_PAGE_LIMIT_INVALID')) {
     return new AppError(400, 'ROOM_OPERATION_PAGE_LIMIT_INVALID', '객실 운영 page 크기가 올바르지 않습니다.');
@@ -948,7 +957,54 @@ export function assertNoContactInformation(value: string | undefined): void {
   }
 }
 
+export function roomReadyContractAppError(error: unknown): unknown {
+  if (error instanceof RoomReadyContractError) return new AppError(error.response ? 500 : 400,
+    error.response ? 'ROOM_READY_CORRECTION_RESPONSE_INVALID' : 'ROOM_READY_CORRECTION_INVALID_INPUT', error.message);
+  return error;
+}
+
+function roomReadySessionId(actor: Actor): string {
+  try { return roomReadyUuid(verifiedSessionId(actor.accessToken)); }
+  catch { throw new AppError(401, 'INVALID_ACCESS_TOKEN', '로그인이 필요합니다.'); }
+}
+
 export class SupabaseRoomService implements RoomService {
+  async previewReadyCorrection(actor: Actor, input: RoomReadyPreviewRequest & { roomId: string }): Promise<RoomReadyPreview> {
+    ensureAdmin(actor);
+    if (actor.mustChangePassword) throw new AppError(403, 'PASSWORD_CHANGE_REQUIRED', '비밀번호를 먼저 변경해 주세요.');
+    try {
+      const roomId = roomReadyUuid(input.roomId);
+      const { roomId: _roomId, ...body } = input;
+      const parsed = parseRoomReadyPreviewRequest(body);
+      const { data, error } = await this.clients.admin.rpc('preview_room_ready_correction', {
+        p_actor_profile_id: actor.profileId, p_session_id: roomReadySessionId(actor),
+        p_room_id: roomId, p_reason_code: parsed.reasonCode
+      });
+      if (error) throw roomError(error);
+      return parseRoomReadyPreview(data, roomId);
+    } catch (error) { throw roomReadyContractAppError(error); }
+  }
+
+  async applyReadyCorrection(actor: Actor, input: RoomReadyCorrectionRequest & { roomId: string; idempotencyKey: string }): Promise<RoomReadyCorrectionResult> {
+    ensureAdmin(actor);
+    if (actor.mustChangePassword) throw new AppError(403, 'PASSWORD_CHANGE_REQUIRED', '비밀번호를 먼저 변경해 주세요.');
+    try {
+      const roomId = roomReadyUuid(input.roomId);
+      const { roomId: _roomId, idempotencyKey, ...body } = input;
+      if (!/^[A-Za-z0-9._:-]{8,128}$/.test(idempotencyKey)) throw new RoomReadyContractError(false);
+      const parsed = parseRoomReadyCorrectionRequest(body);
+      const { data, error } = await this.clients.admin.rpc('apply_room_ready_correction', {
+        p_actor_profile_id: actor.profileId, p_session_id: roomReadySessionId(actor), p_room_id: roomId,
+        p_expected_room_version: parsed.expectedRoomVersion, p_impact_fingerprint: parsed.impactFingerprint,
+        p_evaluated_at: parsed.evaluatedAt, p_expires_at: parsed.expiresAt, p_confirmed: parsed.confirmed,
+        p_acknowledge_no_new_earnings: parsed.acknowledgeNoNewEarnings, p_confirm_physical_candle_removal: parsed.confirmPhysicalCandleRemoval,
+        p_reason_code: parsed.reasonCode, p_idempotency_key: idempotencyKey, p_request_hash: requestHash({ roomId, ...parsed })
+      });
+      if (error) throw roomError(error);
+      return parseRoomReadyCorrectionResult(data, roomId);
+    } catch (error) { throw roomReadyContractAppError(error); }
+  }
+
   async listCandles(actor: Actor, input: { roomId?: string | undefined; cursor?: string | undefined; limit?: number | undefined }): Promise<RoomCandlePage> {
     ensureCandleActor(actor);
     const limit = input.limit ?? 50;
@@ -1262,7 +1318,11 @@ export class SupabaseRoomService implements RoomService {
       p_limit: limit
     });
     if (error) throw roomError(error);
-    return data as unknown as RoomEventsResult;
+    const page = data as unknown as RoomEventsResult;
+    try {
+      return { ...page, items: page.items.map(item => item.eventType === 'room.ready_corrected'
+        ? { ...item, summary: parseRoomReadyEventSummary(item.summary) } : item) };
+    } catch (error) { throw roomReadyContractAppError(error); }
   }
 
   async list(actor: Actor, input: RoomListInput = {}): Promise<RoomSummary[]> {
