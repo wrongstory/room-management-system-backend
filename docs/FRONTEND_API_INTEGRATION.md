@@ -11,6 +11,12 @@ CI41079932523의 application/migration(source-only)는 PASS지만 실제 전체 
 포함 확인, 격리 CI 사전 승인, release/main 병합·proof 확인, 운영 migration 별도 승인,
 DB → API/Swagger → 프런트 연결·실사용 확인을 정리했다. 이 인계 자체는 DB 실행 승인이 아니다.
 
+같은 날 후보 재확인: 로컬 `release/v1.0.0@6d13f13`에는 #534 기능·#540 인계·#544 경합 검사
+준비와 main hotfix가 모두 포함됐다. 확인 당시 원격 릴리스 브랜치·PR은 없고 실제 전체 DB·운영
+적용도 NOT RUN이다. 후속 변경 대조·최종 입력 동결 → 실행 전 승인 → 전체 DB 검증 → main 병합
+및 동일 입력 proof 확인 → 운영 별도 승인 → DB/API/Swagger → 프런트 순서로 이어간다.
+직전 후보의 인계 누락·미커밋 작업 설명은 과거 기록이며 상세 문서의 최신 checkpoint를 따른다.
+
 ## 2026-10-25 #396 읽기 전용 초기화 영향 조회 — 운영 미배포
 
 `GET /v1/developer/reset/preview`는 조건/body 없이 개발자 access token만 받는다. 기존 인증과
