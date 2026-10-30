@@ -162,8 +162,11 @@ describe("assignment preview pure optimizer", () => {
     const { diagnostics, ...result } = await optimizeAssignmentPreview(
       zeroPreviewSnapshot("2037-01-05"), "golden",
     );
+    const { floorDistance, ...legacyRouteScore } = result.objectiveScore.routeScore;
+    expect(floorDistance).toBe(0);
     const legacy = {
       ...result,
+      objectiveScore: { ...result.objectiveScore, routeScore: legacyRouteScore },
       remainingUnassignedTargets: result.remainingUnassignedTargets.map(
         ({ reasonCodes, ...row }) => {
           expect(reasonCodes).toEqual(["AVAILABILITY_NOT_SUBMITTED"]);
@@ -884,6 +887,56 @@ describe("assignment preview pure optimizer", () => {
       (await optimizeAssignmentPreview(s, "s")).proposedAssignments[0]
         ?.maidProfileId,
     ).toBe("a");
+  });
+  it.each([
+    ["199", "120", "201", "a", 0],
+    ["350", "199", "499", "b", 1],
+    ["999", "920", "1001", "a", 0],
+  ])("compares floors before raw room-number distance for %s", async (room, sameOrNear, other, maid, floorDistance) => {
+    const s = snapshot([
+      fixed("a-fixed", "a", 1, { roomNumber: sameOrNear }),
+      fixed("b-fixed", "b", 1, { roomNumber: other }),
+      target("new", { roomNumber: room }),
+    ]);
+    const before = JSON.stringify(s);
+    const r = await optimizeAssignmentPreview(s, "floor");
+    expect(r.proposedAssignments[0]?.maidProfileId).toBe(maid);
+    expect(r.objectiveScore.routeScore.floorDistance).toBe(floorDistance);
+    expect(r.fixedAssignments.map((row) => [row.maidProfileId, row.proposedSequenceNumber]))
+      .toEqual([["a", 1], ["b", 1]]);
+    expect(JSON.stringify(s)).toBe(before);
+    expect(await optimizeAssignmentPreview({ ...s, targets: [...s.targets].reverse(), maids: [...s.maids].reverse() }, "floor"))
+      .toEqual(r);
+  });
+  it("keeps fee balance and elevator priority ahead of floor proximity", async () => {
+    const s = snapshot([
+      fixed("a-fixed", "a", 1, { roomNumber: "120", feeSnapshot: 60000 }),
+      fixed("b-fixed", "b", 1, { roomNumber: "201", feeSnapshot: 30000 }),
+      target("new", { roomNumber: "199" }),
+    ]);
+    expect((await optimizeAssignmentPreview(s, "fee")).proposedAssignments[0]?.maidProfileId).toBe("b");
+    s.targets[0] = fixed("a-fixed", "a", 1, { roomNumber: "120", elevatorZone: "B" });
+    expect((await optimizeAssignmentPreview(s, "zone")).proposedAssignments[0]?.maidProfileId).toBe("b");
+    required(s.maids[1]).available = false;
+    expect((await optimizeAssignmentPreview(s, "available")).proposedAssignments[0]?.maidProfileId).toBe("a");
+  });
+  it("scores all fixed route legs and the transition to new work without reordering fixed assignments", async () => {
+    const s = snapshot([
+      fixed("first", "a", 1, { roomNumber: "199" }),
+      fixed("second", "a", 2, { roomNumber: "201" }),
+      target("new", { roomNumber: "399" }),
+    ]);
+    s.maids = [required(s.maids[0])];
+    const r = await optimizeAssignmentPreview(s, "route");
+    expect(r.objectiveScore.routeScore).toEqual({ zoneChanges: 0, floorDistance: 2, roomDistance: 200 });
+    expect(r.proposedAssignments[0]?.proposedSequenceNumber).toBe(3);
+    expect(r.fixedAssignments.map((row) => row.proposedSequenceNumber).sort()).toEqual([1, 2]);
+  });
+  it("keeps legacy room-number fallback when a floor is not encoded", async () => {
+    const s = snapshot([fixed("old", "a", 1, { roomNumber: "9" }), target("new", { roomNumber: "10" })]);
+    s.maids = [required(s.maids[0])];
+    expect((await optimizeAssignmentPreview(s, "legacy")).objectiveScore.routeScore)
+      .toEqual({ zoneChanges: 0, floorDistance: 0, roomDistance: 1 });
   });
   it("uses a deterministic final tie-break independent of seed", async () => {
     const s = snapshot([target("new")]),

@@ -7982,6 +7982,12 @@ export const openApiDocument = {
                 required: ["zoneChanges", "roomDistance"],
                 properties: {
                   zoneChanges: { type: "integer", minimum: 0 },
+                  floorDistance: {
+                    type: "integer",
+                    minimum: 0,
+                    description:
+                      "연속 객실의 층수 차이 합. 요금·엘리베이터 점수 동률 시 호수 거리보다 먼저 비교한다. 객실 번호의 마지막 두 자리 앞을 층으로 계산하며 100 미만 번호는 층 비교에서 제외한다.",
+                  },
                   roomDistance: { type: "integer", minimum: 0 },
                 },
               },
