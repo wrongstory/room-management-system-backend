@@ -16,8 +16,8 @@ function checkExpectedCount(expectedCount) {
   // 116/117 payroll projection; 119 PIN transfer; 120/121 photo commands;
   // 122 memo-only reports; 123 password prepare return values. These sources add no notification catalog rows.
   // Runtime event dispatch is not permission to mutate historical catalog metadata.
-  assert(Number.isSafeInteger(expectedCount) && expectedCount >= 95 && expectedCount <= 123,
-    'Only the audited95..123 upgrade range is supported; 112..123 add no catalog rows');
+  assert(Number.isSafeInteger(expectedCount) && expectedCount >= 95 && expectedCount <= 124,
+    'Only the audited95..124 upgrade range is supported; 112..124 add no catalog rows');
 }
 function catalogRows(value) {
   assert(Array.isArray(value), 'An existing baseline notification catalog is required');
