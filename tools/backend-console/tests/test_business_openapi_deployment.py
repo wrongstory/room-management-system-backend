@@ -16,6 +16,7 @@ CHECKS = runpy.run_path(
 )
 CHECK = CHECKS["check_post_approval_contract"]
 CHECK_READY = CHECKS["check_room_ready_contract"]
+CHECK_INSTRUCTION = CHECKS["check_assignment_instruction_contract"]
 
 
 @pytest.fixture(scope="module")
@@ -32,6 +33,57 @@ def document() -> dict[str, Any]:
 def test_deployed_contract(document: dict[str, Any]) -> None:
     CHECK(document)
     CHECK_READY(document)
+    CHECK_INSTRUCTION(document)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "required",
+        "null",
+        "empty",
+        "length",
+        "default",
+        "read_optional",
+        "read_null",
+        "deployed",
+        "role",
+        "idempotency",
+        "error",
+    ],
+)
+def test_rejects_assignment_instruction_contract_drift(
+    document: dict[str, Any], mutation: str
+) -> None:
+    candidate = copy.deepcopy(document)
+    schemas = candidate["components"]["schemas"]
+    request = schemas["AssignmentDraftRequest"]
+    memo = request["properties"]["instructionMemo"]
+    operation = candidate["paths"]["/v1/assignments/drafts"]["post"]
+    if mutation == "required":
+        request["required"].append("instructionMemo")
+    elif mutation == "null":
+        memo["type"] = "string"
+    elif mutation == "empty":
+        memo["minLength"] = 1
+    elif mutation == "length":
+        memo["maxLength"] = 501
+    elif mutation == "default":
+        memo["default"] = None
+    elif mutation == "read_optional":
+        schemas["AssignmentCard"]["required"].remove("instructionMemo")
+    elif mutation == "read_null":
+        schemas["AttemptExecution"]["properties"]["instructionMemo"]["type"] = "string"
+    elif mutation == "deployed":
+        memo["description"] = "deployed"
+    elif mutation == "role":
+        operation["x-required-roles"] = ["maid"]
+    elif mutation == "idempotency":
+        operation["parameters"] = []
+    else:
+        schemas["ErrorCode"]["enum"].remove("ASSIGNMENT_INSTRUCTION_INVALID")
+    with pytest.raises(RuntimeError, match="#534"):
+        CHECK_INSTRUCTION(candidate)
 
 
 @pytest.mark.parametrize(

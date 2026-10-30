@@ -27,11 +27,13 @@ const sourcePaths = [
   'supabase/functions/_shared/account-api.ts',
   'supabase/functions/_shared/availability-api.ts',
   'supabase/functions/_shared/assignment-api.ts',
+  'supabase/functions/_shared/assignment-instruction-memo.ts',
   'supabase/functions/_shared/assignment-schedule-core.ts',
   'supabase/functions/_shared/assignment-hydration.ts',
   'supabase/functions/_shared/attempt-api.ts',
   'supabase/functions/_shared/attempt-lifecycle-api.ts',
   'src/modules/limited-attempts/limited-attempt-contract.ts',
+  'src/modules/assignments/instruction-memo.ts',
   'supabase/functions/_shared/attempt-offline-api.ts',
   'supabase/functions/_shared/checkout-incident-api.ts',
   'supabase/functions/_shared/checkout-incident-cursor.ts',
@@ -294,6 +296,8 @@ export function verifyPostApprovalReportEdgeBundle({ rawSourceDiagnostic = false
 }
 
 function main() {
+const assignmentInstruction = spawnSync(process.execPath, ['scripts/generate-assignment-instruction-edge.mjs', '--check'], { stdio: 'inherit' });
+if (assignmentInstruction.status !== 0) throw new Error('Assignment instruction generated source verification failed');
 const schedulerAdmission = spawnSync(process.execPath, ['scripts/generate-scheduler-admission-edge.mjs', '--check'], { stdio: 'inherit' });
 if (schedulerAdmission.status !== 0) throw new Error('Scheduler admission source drift');
 const resetPreview = spawnSync(process.execPath, ['scripts/generate-reset-preview-edge.mjs', '--check'], { stdio: 'inherit' });

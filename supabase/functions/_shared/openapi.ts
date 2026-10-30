@@ -8347,6 +8347,7 @@ export const openApiDocument = {
             "ACCOUNT_MANAGER_REQUIRED",
             "ADMIN_REQUIRED",
             "ASSIGNMENT_ACCESS_REQUIRED",
+            "ASSIGNMENT_INSTRUCTION_INVALID",
             "DEVELOPER_REQUIRED",
             "DEVELOPER_PROJECTION_FAILED",
             "DATABASE_UNREACHABLE",
@@ -10618,6 +10619,7 @@ export const openApiDocument = {
           "endedAt",
           "effectiveAt",
           "recordedAt",
+          "instructionMemo",
         ],
         properties: {
           attemptId: { type: "string", format: "uuid" },
@@ -10645,6 +10647,7 @@ export const openApiDocument = {
           endedAt: { type: ["string", "null"], format: "date-time" },
           effectiveAt: { type: "string", format: "date-time" },
           recordedAt: { type: "string", format: "date-time" },
+          instructionMemo: assignmentInstructionMemoSchema(),
         },
         description:
           "서버가 검증한 수행 identity/version/timestamp만 포함합니다. 일반 상태 enum의 후속 단계가 보이더라도 이번 API는 scheduled→in_progress→field_completed만 변경합니다. 현장 상태는 attempt.status·fieldCompletedAt·endedAt이 정본이며 target의 거친 in_progress 값만으로 청소중 표시를 판단하지 않습니다. 전체 room/template snapshot·고객명·PIN·사진·token은 공개하지 않습니다.",
@@ -10669,6 +10672,7 @@ export const openApiDocument = {
           "notifiedAt",
           "endedAt",
           "createdAt",
+          "instructionMemo",
         ],
         properties: {
           assignmentId: { type: "string", format: "uuid" },
@@ -10707,6 +10711,7 @@ export const openApiDocument = {
           notifiedAt: { type: ["string", "null"], format: "date-time" },
           endedAt: { type: ["string", "null"], format: "date-time" },
           createdAt: { type: "string", format: "date-time" },
+          instructionMemo: assignmentInstructionMemoSchema(),
         },
         description:
           "배정 당시 서비스 날짜·접근 가능 시각·마감 시각을 보존하는 revision projection입니다. 전화번호, 고객명, PIN, provider 식별자는 포함하지 않습니다.",
@@ -10837,6 +10842,7 @@ export const openApiDocument = {
           "serviceDate",
           "sequenceNumber",
           "revision",
+          "instructionMemo",
           "isCurrent",
           "targetAssignmentVersion",
           "cleaningKind",
@@ -10861,6 +10867,7 @@ export const openApiDocument = {
         ]),
         properties: {
           ...assignmentTargetReadProperties,
+          instructionMemo: assignmentInstructionMemoSchema(),
           assignmentId: { type: "string", format: "uuid" },
           cleaningTargetId: { type: "string", format: "uuid" },
           roomId: {
@@ -10989,6 +10996,7 @@ export const openApiDocument = {
           "expectedAssignmentVersion",
         ],
         properties: {
+          instructionMemo: assignmentInstructionMemoSchema(true),
           cleaningTargetId: { type: "string", format: "uuid" },
           maidProfileId: { type: "string", format: "uuid" },
           sequenceNumber: { type: "integer", minimum: 1 },
@@ -11008,6 +11016,7 @@ export const openApiDocument = {
           "serviceDate",
           "sequenceNumber",
           "revision",
+          "instructionMemo",
           "targetAssignmentVersion",
           "expectedAvailabilityVersion",
           "availableFrom",
@@ -11015,6 +11024,7 @@ export const openApiDocument = {
         ]),
         properties: {
           ...assignmentTargetReadProperties,
+          instructionMemo: assignmentInstructionMemoSchema(),
           assignmentId: { type: "string", format: "uuid" },
           cleaningTargetId: { type: "string", format: "uuid" },
           roomId: { type: "string", format: "uuid" },
@@ -11043,6 +11053,7 @@ export const openApiDocument = {
           "serviceDate",
           "sequenceNumber",
           "revision",
+          "instructionMemo",
           "targetAssignmentVersion",
           "currentAvailabilityVersion",
           "reasonCodes",
@@ -11051,6 +11062,7 @@ export const openApiDocument = {
         ]),
         properties: {
           ...assignmentTargetReadProperties,
+          instructionMemo: assignmentInstructionMemoSchema(),
           assignmentId: { type: "string", format: "uuid" },
           cleaningTargetId: { type: "string", format: "uuid" },
           roomId: { type: "string", format: "uuid" },
@@ -15696,6 +15708,17 @@ function prestartOperation(
   };
 }
 
+function assignmentInstructionMemoSchema(input = false) {
+  return {
+    type: ["string", "null"],
+    minLength: input ? 0 : 1,
+    maxLength: 500,
+    description: input
+      ? "#534 미배포 후보. 선택 작업 요청사항. 원문 최대 500 UTF-16 code units이며 앞뒤 공백을 제거합니다. 생략은 같은 청소 대상의 직전 배정 메모 유지, null/공백만 입력은 지우기입니다. 수량·호실·줄바꿈을 허용하고 개인정보·PIN·인증정보 입력은 금지합니다. 내용 변경은 새 요청 키를 사용합니다."
+      : "#534 미배포 후보. 해당 assignment revision에 저장된 작업 요청사항. 메모 없음·legacy receipt 부재는 null이며 현재 다른 배정으로 보충하지 않습니다. 사진 보존기한과 분리해 작업 이력으로 남습니다. 메모가 청소 종류·사진 필수조건·수당을 변경하지 않습니다.",
+  };
+}
+
 function prestartRequestSchema(
   action: "change" | "unassign" | "request" | "decision" | "unavailable",
 ) {
@@ -15725,6 +15748,7 @@ function prestartRequestSchema(
   };
   const required = Object.keys(properties);
   if (action === "change") {
+    properties.instructionMemo = assignmentInstructionMemoSchema(true);
     properties.serviceDate = {
       type: "string",
       format: "date",

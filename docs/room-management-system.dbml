@@ -990,6 +990,7 @@ Table public.cleaning_target_schedule_revisions {
 
 Table public.cleaning_assignments {
   id uuid [pk]
+  instruction_memo text [note: '#534 candidate, nullable. Immutable assignment revision instruction; omitted new revision inherits latest same-target value including null clears. Existing rows null. No automatic retention purge, audit/push raw text or next-target inheritance.']
   cleaning_target_id uuid [not null]
   maid_profile_id uuid [not null]
   service_date date [not null, note: '#326 card effectiveServiceDate is this immutable revision date, never later target effective date.']

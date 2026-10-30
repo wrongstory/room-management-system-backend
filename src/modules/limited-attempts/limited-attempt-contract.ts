@@ -1,4 +1,5 @@
 // Pure public DTO validation shared by Fastify and Edge. Never hydrates current room data.
+import { parseInstructionMemoRead } from "../assignments/instruction-memo.js";
 export const LIMITED_DISCOVERY_MAX = 1000;
 export const capabilityActions = {
   finish_current: ["complete_field_work"],
@@ -162,6 +163,7 @@ export function projectLimitedAttempt(value: unknown, profileId: string) {
     endedAt: raw.endedAt as string | null,
     effectiveAt: raw.effectiveAt as string,
     recordedAt: raw.recordedAt as string,
+    instructionMemo: parseInstructionMemoRead(raw.instructionMemo),
   };
   for (
     const time of [attempt.startedAt, attempt.fieldCompletedAt, attempt.endedAt]

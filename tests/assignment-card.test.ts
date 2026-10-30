@@ -569,6 +569,47 @@ describe('assignment schedule reads', () => {
   });
 });
 
+describe('#534 assignment instruction read snapshots', () => {
+  it('returns the exact per-assignment memo to each administrator and its notified maid', async () => {
+    const rows = assignments.map((row, index) => ({ ...row,
+      instruction_memo: index === 0 ? '수건 5. 물 캡슐 2.\n쓰레기만 치워주세요' : null }));
+    for (const actor of [admin, { ...admin, profileId: otherMaidId }, maid]) {
+      const result = await service({ cleaning_assignments: rows }).list(actor, {
+        serviceDate: '2026-09-20', includeHistory: true
+      });
+      expect(result[0]).toMatchObject({ assignmentId: assignmentIds[0], instructionMemo: rows[0]?.instruction_memo });
+      expect(result[1]).toMatchObject({ assignmentId: assignmentIds[1], instructionMemo: null });
+    }
+  });
+
+  it('preserves a past memo without hydrating a new assignee or draft memo into its history', async () => {
+    const old = { ...assignments[0], revision: 1, is_current: false, instruction_memo: '쓰레기만 치워주세요' };
+    const newer = { ...old, id: assignmentIds[1], maid_profile_id: otherMaidId, revision: 2,
+      is_current: true, notified_at: null, instruction_memo: '수건 5. 물 캡슐 2.' };
+    const result = await service({ cleaning_assignments: [old, newer] }).history(maid, targetIds[0] as string);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({ instructionMemo: old.instruction_memo, revision: 1 });
+    expect(JSON.stringify(result)).not.toContain(newer.instruction_memo);
+  });
+
+  it('keeps a cleared memo null even when a previous revision contains text', async () => {
+    const old = { ...assignments[0], is_current: false, instruction_memo: '쓰레기만 치워주세요' };
+    const cleared = { ...old, id: assignmentIds[1], revision: 2, is_current: true, instruction_memo: null };
+    const result = await service({ cleaning_assignments: [old, cleared] }).history(admin, targetIds[0] as string);
+    expect(result.map(row => (row as Row).instructionMemo)).toEqual([old.instruction_memo, null]);
+  });
+
+  it.each([false, 5, {}, ' ', ' x ', 'x'.repeat(501), '🚿'.repeat(251), 'a\u0000b'])('fails closed on malformed stored memo %#', async (instruction_memo) => {
+    await expect(service({ cleaning_assignments: [{ ...assignments[0], instruction_memo }] })
+      .history(admin, targetIds[0] as string)).rejects.toMatchObject({ code: 'ASSIGNMENT_QUERY_FAILED' });
+  });
+
+  it('returns legacy missing fields as null without looking up current note text', async () => {
+    const result = await service().history(maid, targetIds[0] as string);
+    expect(result[0]).toMatchObject({ instructionMemo: null });
+  });
+});
+
 describe('assignment card Fastify routes', () => {
   it('returns no-store list/history envelopes and rejects query aliases', async () => {
     const assignmentService: AssignmentService = {

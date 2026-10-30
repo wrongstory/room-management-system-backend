@@ -1,5 +1,15 @@
 # 백엔드 서버 설계
 
+## #534 청소 배정 메모 — 미배포 후보
+
+선택 `instructionMemo`를 기존 배정 draft/change API에 가산한다. 명시 입력만 메모 지원 RPC와
+새 요청 hash 항목을 사용하며 생략한 기존 요청은 기존 RPC·hash·receipt 계약을 보존한다.
+DB는 같은 청소의 최신 배정 revision에서 생략 메모를 계승한다. 메모 자체는 revision 불변이다.
+Edge/Fastify 조회는 exact assignment의 허용된 필드만 반환하며 기존 receipt를 현재 DB로 보강하지 않는다.
+감사에 쓰이는 기본 수행 projection은 유지하고 인가된 읽기에만 메모를 추가한다.
+전체 DB·운영 적용 승인, v1.0.0 통합 순서와 프런트 계약은
+[#534 인계](./ASSIGNMENT_INSTRUCTION_MEMO_534.md)를 따른다.
+
 ## #532 예약 가능 상태 정정 — 미배포 후보
 
 `POST /v1/rooms/{roomId}/ready-correction/preview`는 현재 해제 대상·차단 이유·수당 경고와

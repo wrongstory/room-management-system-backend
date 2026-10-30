@@ -1,4 +1,5 @@
 import { AssignmentHydrationError, loadAssignmentHydration } from './assignment-hydration.js';
+import { parseInstructionMemoRead } from './instruction-memo.js';
 import type { Actor } from '../../domain/actor.js';
 import { AppError } from '../../lib/app-error.js';
 import type { SupabaseClients } from '../../lib/supabase.js';
@@ -22,6 +23,7 @@ interface AssignmentRow {
   available_from_snapshot: string | null; due_at_snapshot: string | null;
   notified_at: string | null; notified_room_id_snapshot: string | null;
   notified_room_number_snapshot: string | null;
+  instruction_memo?: string | null;
   ended_at: string | null; created_at: string;
 }
 interface TargetRow {
@@ -155,7 +157,8 @@ export class SupabaseAssignmentService implements AssignmentService {
     return [
       'id', 'cleaning_target_id', 'maid_profile_id', 'service_date', 'sequence_number', 'revision',
       'is_current', 'available_from_snapshot', 'due_at_snapshot', 'notified_at',
-      'notified_room_id_snapshot', 'notified_room_number_snapshot', 'ended_at', 'created_at'
+      'notified_room_id_snapshot', 'notified_room_number_snapshot', 'ended_at', 'created_at',
+      'instruction_memo'
     ].join(',');
   }
 
@@ -246,6 +249,9 @@ export class SupabaseAssignmentService implements AssignmentService {
         target.source, target.status, capabilityAttempts.get(row.id) ?? []);
       const scheduleRead = scheduleReads.get(row.id);
       if (!scheduleRead) throw databaseError(null);
+      let instructionMemo: string | null;
+      try { instructionMemo = parseInstructionMemoRead(row.instruction_memo); }
+      catch { throw databaseError(null); }
       return {
         assignmentId: row.id, cleaningTargetId: row.cleaning_target_id,
         roomId: actor.role === 'maid' ? row.notified_room_id_snapshot : target.room_id,
@@ -253,6 +259,7 @@ export class SupabaseAssignmentService implements AssignmentService {
         maidProfileId: row.maid_profile_id,
         maidDisplayName: actor.role === 'maid' ? actor.displayName : profile.display_name,
         serviceDate: row.service_date, sequenceNumber: row.sequence_number, revision: row.revision,
+        instructionMemo,
         isCurrent: row.is_current,
         targetAssignmentVersion: actor.role === 'maid' ? row.revision : target.assignment_version,
         cleaningKind: target.cleaning_kind, sourceKind: target.source ?? null,
