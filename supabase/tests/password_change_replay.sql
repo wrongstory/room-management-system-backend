@@ -49,7 +49,8 @@ select ok(not exists(
 ),'password versions are random nonsecret 64-hex identities');
 create temporary table password_version_observations(label text primary key, version text not null) on commit drop;
 insert into password_version_observations values
-  ('login-before',public.get_auth_password_version(pg_temp.pid(104)));
+  ('login-before',public.get_auth_password_version(pg_temp.pid(104))),
+  ('untouched-target',public.get_auth_password_version(pg_temp.pid(103)));
 update auth.users set last_sign_in_at=clock_timestamp() where id=pg_temp.pid(104);
 insert into password_version_observations values
   ('login-after',public.get_auth_password_version(pg_temp.pid(104)));
@@ -101,8 +102,8 @@ select is(
   'absent','new key is absent before preparation'
 );
 select is(
-  public.prepare_password_change(pg_temp.pid(1),pg_temp.pid(101),pg_temp.pid(901),'password-first-0001',repeat('a',64),repeat('b',64),repeat('e',64))->>'state',
-  'execute','first preparation owns the Auth mutation claim'
+  public.prepare_password_change(pg_temp.pid(1),pg_temp.pid(101),pg_temp.pid(901),'password-first-0001',repeat('a',64),repeat('b',64),repeat('e',64)),
+  jsonb_build_object('state','execute','attemptCount',1,'effectMarker',repeat('e',64)),'first preparation owns the Auth mutation claim'
 );
 select is(
   public.inspect_password_change(pg_temp.pid(1),pg_temp.pid(101),pg_temp.pid(901),'password-first-0001')->>'state',
@@ -166,8 +167,8 @@ select is(
 update private.password_change_commands set lease_expires_at=clock_timestamp()-interval '1 second'
 where actor_profile_id=pg_temp.pid(2);
 select is(
-  public.prepare_password_change(pg_temp.pid(2),pg_temp.pid(102),pg_temp.pid(903),'password-recover-01',repeat('1',64),repeat('3',64),repeat('5',64))->>'state',
-  'recover','expired claim is recoverable with a new nonsecret claim digest'
+  public.prepare_password_change(pg_temp.pid(2),pg_temp.pid(102),pg_temp.pid(903),'password-recover-01',repeat('1',64),repeat('3',64),repeat('5',64)),
+  jsonb_build_object('state','recover','attemptCount',2,'effectMarker',repeat('4',64)),'expired claim is recoverable with a new nonsecret claim digest'
 );
 select is((select attempt_count from private.password_change_commands where actor_profile_id=pg_temp.pid(2)),2,'recovery increments bounded attempt count');
 select lives_ok(
@@ -307,10 +308,114 @@ select throws_ok(
   '42501','SESSION_REVOKED','revoked session cannot inspect a receipt'
 );
 
-select ok(not exists(
-  select 1 from private.password_change_commands c
-  where to_jsonb(c)::text ~ '(1234|654321|tmp:|eyJ|Bearer|refresh)'
-),'receipt contains no password, transformed password, token, or reusable verifier material');
+-- #300: inspect exact synthetic provenance, not short digit substrings in
+-- random UUIDs/digests/versions or timestamp fractions. Unknown/missing fields
+-- fail closed. Only generated row IDs and typed timestamps vary freely.
+create function pg_temp.password_ledger_matches(
+  candidate jsonb, expected jsonb, uuid_fields text[], time_fields text[], nullable_times text[]
+) returns boolean language plpgsql immutable as $$
+declare
+  field text;
+begin
+  if candidate is null or jsonb_typeof(candidate) <> 'object'
+    or candidate - (uuid_fields || time_fields || nullable_times) is distinct from expected then
+    return false;
+  end if;
+  foreach field in array uuid_fields loop
+    if jsonb_typeof(candidate->field) is distinct from 'string'
+      or candidate->>field !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then
+      return false;
+    end if;
+  end loop;
+  foreach field in array time_fields || nullable_times loop
+    if field = any(nullable_times) and candidate->field = 'null'::jsonb then
+      continue;
+    end if;
+    if jsonb_typeof(candidate->field) is distinct from 'string'
+      or candidate->>field !~ '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,6})?([+-]\d{2}:\d{2}|Z)$' then
+      return false;
+    end if;
+    perform (candidate->>field)::timestamptz;
+  end loop;
+  return true;
+exception when invalid_datetime_format or datetime_field_overflow then
+  return false;
+end;
+$$;
+create temporary table expected_password_ledgers (
+  kind text not null, value jsonb not null,
+  uuid_fields text[] not null, time_fields text[] not null, nullable_times text[] not null
+) on commit drop;
+insert into expected_password_ledgers
+select 'receipt', jsonb_build_object(
+  'actor_profile_id',pg_temp.pid(actor),'auth_user_id',pg_temp.pid(auth_user),
+  'command_type','account.password.change','idempotency_key',key,
+  'request_hash',repeat(hash_char,64),'effect_marker',repeat(effect_char,64),
+  'session_digest',encode(extensions.digest(convert_to(
+    jsonb_build_array('password-change-session:v1',pg_temp.pid(session_number)::text)::text,'UTF8'
+  ),'sha256'),'hex'),
+  'state',state,'claim_digest',repeat(claim_char,64),'attempt_count',attempts,
+  'failure_code',failure,'reset_command_execution_id',(
+    select id from private.command_executions
+    where actor_profile_id=pg_temp.pid(1) and command_type='account.password.reset'
+      and idempotency_key=reset_key and request_hash=repeat('9',64) and entity_id=pg_temp.pid(2)
+  )
+), array['id'], array['created_at','updated_at'], array['lease_expires_at','completed_at']
+from (values
+  (1,101,901,'password-first-0001','a','e','completed',null::text,1,null::text,null::text),
+  (2,102,903,'password-recover-01','1','4','superseded',null,2,'PASSWORD_STATE_INCONSISTENT','password-admin-reset-01'),
+  (2,102,904,'password-after-reset-01','c','f','auth_pending','d',1,null,null)
+) as fixtures(actor,auth_user,session_number,key,hash_char,effect_char,state,claim_char,attempts,failure,reset_key);
+insert into expected_password_ledgers
+select 'version',jsonb_build_object('auth_user_id',pg_temp.pid(auth_user),'password_version',version),
+  array[]::text[],array['rotated_at'],array[]::text[]
+from (values
+  (101,repeat('e',64)),(102,repeat('a',64)),
+  (103,(select version from password_version_observations where label='untouched-target')),
+  (104,(select version from password_version_observations where label='direct-first'))
+) as fixtures(auth_user,version);
+insert into expected_password_ledgers
+select 'reset',jsonb_build_object(
+  'command_execution_id',(
+    select id from private.command_executions
+    where actor_profile_id=pg_temp.pid(1) and command_type='account.password.reset'
+      and idempotency_key=key and request_hash=repeat(hash_char,64) and entity_id=pg_temp.pid(target)
+  ),'actor_profile_id',pg_temp.pid(1),'target_profile_id',pg_temp.pid(target),
+  'effect_marker',repeat(effect_char,64),'state',state
+),array[]::text[],array['created_at','updated_at'],array['completed_at']
+from (values
+  (2,'password-admin-reset-01','9','a','completed'),
+  (3,'password-reset-plain-01','1','1','prepared')
+) as fixtures(target,key,hash_char,effect_char,state);
+create temporary view actual_password_ledgers as
+  select 'receipt'::text kind,to_jsonb(c) value from private.password_change_commands c
+  union all select 'version',to_jsonb(v) from private.auth_password_versions v
+  union all select 'reset',to_jsonb(m) from private.password_reset_auth_markers m;
+select is((select count(*) from private.password_change_commands),3::bigint,'exactly three self-change receipts');
+select is((select count(*) from private.auth_password_versions),4::bigint,'exactly four password versions');
+select is((select count(*) from private.password_reset_auth_markers),2::bigint,'exactly two reset markers');
+select ok(not exists (
+  select 1 from actual_password_ledgers actual where not exists (
+    select 1 from expected_password_ledgers expected where actual.kind=expected.kind
+      and pg_temp.password_ledger_matches(actual.value,expected.value,
+        expected.uuid_fields,expected.time_fields,expected.nullable_times)
+  )
+),'private password ledgers contain only exact safe fixture provenance');
+select ok(not exists (
+  select 1 from expected_password_ledgers expected where not exists (
+    select 1 from actual_password_ledgers actual where actual.kind=expected.kind
+      and pg_temp.password_ledger_matches(actual.value,expected.value,
+        expected.uuid_fields,expected.time_fields,expected.nullable_times)
+  )
+),'every expected password ledger row is present');
+select ok(not exists (
+  select 1 from private.auth_password_versions versions
+  join auth.users users on users.id=versions.auth_user_id
+  where users.encrypted_password is not null and (
+    versions.password_version=users.encrypted_password
+    or versions.password_version=encode(extensions.digest(users.encrypted_password,'sha256'),'hex')
+  )
+),'password versions are neither Auth hash fixtures nor their SHA-256 verifiers');
 select ok(not exists(
   select 1 from private.password_change_commands c
   where to_jsonb(c)::text like '%' || pg_temp.pid(901)::text || '%'
@@ -323,14 +428,42 @@ select ok(not exists(
        where to_jsonb(limits)::text like '%' || pg_temp.pid(session_number)::text || '%'
      )
 ),'verification limiter stores no raw session UUID, including rotated sessions');
-select ok(not exists(
-  select 1 from private.auth_password_versions versions
-  where to_jsonb(versions)::text ~ '(direct-password-hash|self-password-hash|admin-reset-password-hash|1234|654321|tmp:|eyJ|Bearer|refresh)'
-),'password version ledger stores no Auth hash, password, token, or reusable verifier material');
-select ok(not exists(
-  select 1 from private.password_reset_auth_markers markers
-  where to_jsonb(markers)::text ~ '(1234|654321|tmp:|eyJ|Bearer|refresh)'
-),'reset recovery ledger contains only nonsecret command and effect provenance');
+-- Exercise the matcher against full synthetic rows, without mutating ledgers.
+-- The matcher checks metadata types; existing table CHECK constraints enforce
+-- completed_at/lease nullability for each state on the actual rows above.
+create temporary view password_ledger_samples as
+select expected.*, value || coalesce((
+  select jsonb_object_agg(field,'12340000-0000-4000-8000-000000654321'::text)
+  from unnest(uuid_fields) as fields(field)
+),'{}'::jsonb) || (
+  select jsonb_object_agg(field,'2026-10-07T12:00:00.654321Z'::text)
+  from unnest(time_fields || nullable_times) as fields(field)
+) as sample from expected_password_ledgers expected;
+select ok(bool_and(pg_temp.password_ledger_matches(sample,value,uuid_fields,time_fields,nullable_times)),
+  'generated UUID and timestamp digit collisions are accepted') from password_ledger_samples;
+select ok(bool_and(not pg_temp.password_ledger_matches(
+  sample || jsonb_build_object(field,sentinel),value,uuid_fields,time_fields,nullable_times
+)), 'every ledger field rejects secret sentinel mutation')
+from password_ledger_samples
+cross join lateral jsonb_object_keys(sample) as fields(field)
+cross join (values ('1234'),('654321'),('tmp:secret'),('eyJtoken'),('Bearer token'),('refresh'),
+  ('direct-password-hash-fixture-1'),('self-password-hash-fixture-1'),('admin-reset-password-hash-fixture-1'),
+  (repeat('0',64))) as secrets(sentinel);
+select ok(bool_and(not pg_temp.password_ledger_matches(
+  sample - field,value,uuid_fields,time_fields,nullable_times
+)), 'missing ledger fields fail closed') from password_ledger_samples
+cross join lateral jsonb_object_keys(sample) as fields(field);
+select ok(bool_and(not pg_temp.password_ledger_matches(
+  sample || '{"unexpected":{"password":"1234"}}'::jsonb,value,uuid_fields,time_fields,nullable_times
+)), 'new nested ledger fields fail closed') from password_ledger_samples;
+select ok(bool_and(pg_temp.password_ledger_matches(
+  sample || jsonb_build_object(field,collision),value || jsonb_build_object(field,collision),
+  uuid_fields,time_fields,nullable_times
+)), 'exact nonsecret digest/version provenance may contain password-like digits')
+from password_ledger_samples
+cross join lateral jsonb_object_keys(value) as fields(field)
+cross join (values ('1234' || repeat('a',60)),('654321' || repeat('b',58))) as collisions(collision)
+where field in ('password_version','session_digest','effect_marker');
 -- #404: UUIDs and timestamp fractions can legitimately contain "1234".
 -- Compare every other field with the exact synthetic command contract instead
 -- of searching short digit strings inside generated identity/time metadata.

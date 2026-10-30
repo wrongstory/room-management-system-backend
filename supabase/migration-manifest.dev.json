@@ -2,17 +2,17 @@
   "schemaVersion": 1,
   "release": "dev",
   "hashAlgorithm": "sha256-lf-utf8",
-  "totalCount": 122,
+  "totalCount": 123,
   "baseline": {
     "count": 78,
     "head": "reservation_bookability_optional_guest_count"
   },
   "pending": {
-    "count": 44,
+    "count": 45,
     "first": "assignment_unavailability_reassignment",
-    "head": "post_approval_memo_only"
+    "head": "password_change_prepare_effect_marker"
   },
-  "head": "post_approval_memo_only",
+  "head": "password_change_prepare_effect_marker",
   "migrations": [
     {
       "order": 1,
@@ -623,6 +623,11 @@
       "order": 122,
       "name": "post_approval_memo_only",
       "sha256": "72402db775a83d683061eda1192765c8b1e9f27920ad987dfc5ab7511b3e1fa7"
+    },
+    {
+      "order": 123,
+      "name": "password_change_prepare_effect_marker",
+      "sha256": "fba87ded4fd085d2d4da8659e32897f79dcebbfd224adaf19a42fb9317f4bf95"
     }
   ]
 }
