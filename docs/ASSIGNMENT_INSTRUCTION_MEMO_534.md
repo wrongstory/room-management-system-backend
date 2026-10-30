@@ -14,23 +14,46 @@
 - 원 구현 브랜치: `codex/534-assignment-instruction-memo`; #535 및 #532 보완 통합 완료
 - DB 소스: `20261030143048_assignment_instruction_memo.sql` (확인 시 dev manifest 140번째)
 
+## 2026-10-31 릴리스 후보 포함 확인
+
+**#534는 로컬 v1.0.0 후보에 포함돼 있다.** Git commit 포함 관계와 실제 파일 내용을 함께
+대조했다. 다음은 읽기 전용 확인 시점의 기록이며 원격 릴리스·실제 DB 실행·운영 배포 완료가 아니다.
+
+| 대상 | 확인 결과 |
+| --- | --- |
+| 개발 통합본 `c8a2ec4a262de7d169d9311d207b1bb23dc8c3f4` | #539 기능, #540 인계, #544 경합 검사 준비 모두 dev 병합 완료 |
+| 로컬 `release/v1.0.0`의 `6d13f13f0b72e2edd6ac94e65888aefc2e7719a2` | 위 세 병합과 main #535 hotfix 포함; 확인 시 개발 통합본과 Git tree 동일 |
+| 원격 `release/v1.0.0` 브랜치·해당 릴리스 PR | 조회 결과 없음; 로컬 후보만 존재 |
+| 실제 메모 SQL/RLS·10개 경합·최종 Full DB·운영 적용 | NOT RUN |
+
+직전 로컬 후보 `ecedcc7`에서도 #534의 비문서 파일 36개가 당시 dev와 같았으나 #540 문서는
+빠져 있었다. 이후 위 `6d13f13`으로 전진하면서 문서와 경합 검사 준비까지 포함됐다.
+따라서 과거의 "미커밋 5건", "#540 인계 누락"을 현재 미완료 항목으로 반복하지 않는다.
+
+[PR #544](https://github.com/wrongstory/room-management-system-backend/pull/544)의 head
+`97ed4fdec08e56ff91d55555e1c304a1ddf7ff3f`는
+[CI41112185277](https://github.com/wrongstory/room-management-system-backend/actions/runs/41112185277)
+application/migration(source-only) PASS 후 dev `c8a2ec4`로 병합됐다. 기존 메모 pgTAP에 더해
+`scripts/test-assignment-instruction-concurrency.mjs`를 기존 reservation 경합 실행기에 연결했다.
+메모 전용 draft/change의 독립 연결 10개 사례, CAS·같은 키 재전송/내용 충돌, 초기화/생략의
+양방향 순서와 저장 이력을 검사하도록 준비했으며 추가 DB reset은 도입하지 않았다.
+이 코드를 최종 후보에 포함한 사실과 실제 DB 경합 PASS는 별개다.
+
+#534 SQL은 140번째, 전체 소스는 141개로 유지된다. PR #544에 기록된 실제 후보 번들은
+19,937,593 bytes(20,000,000 제한까지 62,407 bytes 여유)다. 이전 19,997,042와 아래 #539의
+수치는 과거 입력의 기록이다. 최종 입력 확정 후 실제 번들·manifest·명세를 다시 대조한다.
+
 ## 다른 채팅에서 바로 이어갈 지점
 
-PR #540 병합 전 재확인에서 dev는 `4323a3380af3b21d0754e8f422666151b6bbffa1`로 전진했다.
-기존 #534의 140번째 SQL을 보존한 채 offline 해결 완료 관측 SQL을 추가한 141개 소스다.
-[최신 v1.0.0 준비 기록](./RELEASE_V1.0.0_READINESS.md)은 보고 포함 번들을
-19,997,042 bytes(20,000,000 제한까지 2,958 bytes 여유)로 기록한다. 아래 #539의 테스트 수와
-번들 수치는 당시 구현 입력의 이력이며, 최종 릴리스의 새 입력·번들을 다시 확인해야 한다.
-
-1. 기존 v1.0.0 릴리스 작업공간과 미커밋 변경을 먼저 확인하고 보존한다. 최신 dev를 조회해
-   `46e47ed`가 포함됐는지 확인한다. 이미 병합된 #534를 중복 구현·cherry-pick하지 않는다.
-2. 확인 시 최신 main에는 별도 #535 hotfix
-   [PR #537](https://github.com/wrongstory/room-management-system-backend/pull/537),
-   `f1fbec94491ad9c360cdc4544c424cb9664719de`가 있다. 릴리스 후보에서 이 수정도 보존한다.
-   `20261030141647_password_change_prepare_effect_marker.sql`은 확인 시 main/dev에서 동일했다.
-   이는 Git 소스 확인이며 운영 DB 적용 여부 확인이 아니다.
-3. 최종 소스·명세·manifest·번들을 정리하는 작업부터 진행한다. 아래 실행 승인 없이
-   release PR 생성·push·재실행 또는 실제 DB 명령으로 넘어가지 않는다.
+1. 릴리스 담당 작업공간 `v1-readiness/room-management-system-backend`의 현재 branch/head와
+   미커밋 변경부터 다시 확인·보존한다. 다른 채팅의 작업은 진행될 수 있으므로 위 snapshot을
+   고정된 최신 상태로 가정하지 않는다. 이미 포함된 #539/#540/#544를 중복 구현·cherry-pick하지 않는다.
+2. 최종 후보의 소스·API/Swagger·manifest·번들·검증 입력 지문을 확정한다. 현재 후보에는
+   main [PR #537](https://github.com/wrongstory/room-management-system-backend/pull/537)의
+   `f1fbec94491ad9c360cdc4544c424cb9664719de`도 포함된다. 이는 소스 확인이며 운영 적용 확인이 아니다.
+3. 담당 채팅의 단일 `USER_DECISIONS.md` 및 실제 승인 기록에서 최종 commit·대상 환경·검증/정리
+   범위를 확인해 동결한다. 이 문서는 별도 승인 기록의 존재·사용 가능 여부를 증명하지 않는다.
+   승인 전에는 release PR 생성·push·재실행 또는 실제 DB 명령으로 넘어가지 않는다.
 
 **승인 경계:** 로컬·CI·운영 migration 적용 및 DB reset/재구축은 매 실행 전에 사용자 승인을
 받는다. 대상 환경·최종 입력·적용 범위를 먼저 제시한다. 전체 DB를 유발하는 release/hotfix PR
@@ -102,18 +125,19 @@ CAS/동시 요청/동일 키 다른 내용 거절 및 유지보수 차단을 기
 
 ## v1.0.0 통합·배포 순서
 
-1. **릴리스 입력 확정:** #539 dev 병합은 완료됐다. 최신 v1.0.0 후보의 포함 여부와 main hotfix를
-   대조한다. 기존 1~139 SQL 원문을 보존하고 새 통합 뒤 실제 순서·head·manifest·함수 변경 지점을
-   확인한다. exact-anchor 실패를 우회하지 않는다. 배포용 API/Swagger 설명·생성물·관련 검사까지
-   최종 입력에 포함한다. 로컬 합성 검사·독립 QA와 실제 번들 크기를 확인한다.
+1. **릴리스 입력 확정:** 위 후보에는 #539/#540/#544와 main hotfix가 포함돼 있다. 이후 변경과
+   최신 인계 갱신을 대조하고 기존 141개 SQL 원문을 보존한다. 실제 순서·head·manifest·함수 변경
+   지점을 확인하며 exact-anchor 실패를 우회하지 않는다. 배포용 API/Swagger·생성물·검증 모듈을
+   최종 입력에 포함하고 소스/합성 검사·독립 QA와 실제 번들 크기를 확인한다.
 2. **격리 CI 실행 승인:** 전체 DB 실행을 유발하기 전에 사용자에게 환경·최종 commit·범위를
    제시하고 승인받는다. 새 릴리스는 최신 dev에서 `release/v1.0.0`을 준비해 main을 대상으로 한다.
    이미 릴리스 PR이 있다면 그 PR과 입력을 먼저 확인하며 중복 생성하지 않는다. Draft release도
    전체 DB를 유발할 수 있다. 승인 전에는 해당 PR 생성·push·재실행을 하지 않는다.
 3. **최종 전체 DB 1회 검증:** 승인된 최종 통합본에서 기존 fresh/upgrade/역할별 RLS·경합·cleanup
-   전체 검사를 유지하고 `supabase/tests/assignment_instruction_memo.sql`을 포함한다. 메모
-   저장·생략/초기화·담당 인계·과거 이력·통보 권한·CAS/멱등성을 실제 DB에서 확인한다.
-   같은 release PR·동일 입력의 성공 proof만 재사용한다. #539 feature CI, #537의 별도 hotfix
+   전체 검사를 유지하고 `supabase/tests/assignment_instruction_memo.sql`과 #544의 메모 전용
+   10경합을 포함한다. 기존 임시 DB/fixture를 재사용하며 메모 저장·생략/초기화·담당 인계·과거
+   이력·통보 권한·CAS/멱등성을 실제 DB에서 확인한다. 같은 release PR·동일 입력의 성공 proof만
+   재사용한다. #539/#540/#544 feature CI, #537의 별도 hotfix
    proof, 실패·취소·skipped 결과는 v1.0.0 전체 DB 성공 증거가 아니다. 재실행도 실행 전에 승인받는다.
 4. **릴리스 병합:** 필수 application/migration CI·독립 리뷰·미해결 스레드·보호 규칙을 확인한 뒤
    `release/v1.0.0 → main`으로 병합한다. main의 동일 입력 proof 확인까지 통과해야 배포할 수 있다.
@@ -140,7 +164,9 @@ CI의 합성 backup dry-run을 실제 운영 복원 완료라고 표시하지 �
 
 - [x] #534 구현·독립 QA·필수 feature CI·PR #539 dev 병합
 - [x] 프런트 #270에 계약과 미배포 상태 인계
-- [ ] v1.0.0 최종 후보의 #534/main hotfix 포함 및 소스·명세·번들 확인
+- [x] PR #540 인계·PR #544 경합 검사 준비 dev 병합
+- [x] 로컬 v1.0.0 후보 `6d13f13`의 #534/인계/경합 준비 및 main hotfix 포함 확인
+- [ ] 후속 변경 대조 후 최종 후보·소스·명세·번들·검증 입력과 실행 승인 범위 동결
 - [ ] 사용자 승인 → 해당 release PR의 최종 실제 전체 DB 검증
 - [ ] 필수 CI·리뷰 후 main 병합 및 동일 입력 proof 확인
 - [ ] 운영 이력·전체 pending 확인 → 별도 승인 → 운영 migration 적용
