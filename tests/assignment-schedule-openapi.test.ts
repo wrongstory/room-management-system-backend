@@ -73,9 +73,9 @@ describe('#328 assignment schedule OpenAPI contract', () => {
     expect(paths['/v1/assignments/{cleaningTargetId}/history'].get.description).toContain('항상 null');
     expect(paths['/v1/assignments'].get['x-required-roles']).toEqual(['admin', 'maid']);
     expect(paths['/v1/assignments/{cleaningTargetId}/history'].get['x-required-roles']).toEqual(['admin', 'maid']);
-    expect(Object.keys(paths)).toHaveLength(157);
+    expect(Object.keys(paths)).toHaveLength(159);
     expect(Object.values(paths).flatMap((path) => Object.keys(path).filter((method) =>
-      ['get', 'post', 'put', 'patch', 'delete'].includes(method)))).toHaveLength(169);
+      ['get', 'post', 'put', 'patch', 'delete'].includes(method)))).toHaveLength(171);
     expect(openApiDocument.info.version).toBe('0.6.0');
   });
 });

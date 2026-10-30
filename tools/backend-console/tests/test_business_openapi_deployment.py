@@ -11,9 +11,11 @@ from typing import Any
 import pytest
 
 ROOT = Path(__file__).resolve().parents[3]
-CHECK = runpy.run_path(
+CHECKS = runpy.run_path(
     str(ROOT / "tools/backend-console/scripts/check_business_openapi_codegen.py")
-)["check_post_approval_contract"]
+)
+CHECK = CHECKS["check_post_approval_contract"]
+CHECK_READY = CHECKS["check_room_ready_contract"]
 
 
 @pytest.fixture(scope="module")
@@ -29,6 +31,73 @@ def document() -> dict[str, Any]:
 
 def test_deployed_contract(document: dict[str, Any]) -> None:
     CHECK(document)
+    CHECK_READY(document)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "method",
+        "role",
+        "deployed",
+        "preview_key",
+        "query",
+        "cache",
+        "envelope",
+        "additional",
+        "ack",
+        "proof",
+        "confirmed",
+        "version",
+        "fingerprint",
+        "blocker",
+        "error",
+    ],
+)
+def test_rejects_room_ready_contract_drift(document: dict[str, Any], mutation: str) -> None:
+    candidate = copy.deepcopy(document)
+    path = "/v1/rooms/{roomId}/ready-correction"
+    operation = candidate["paths"][path]["post"]
+    schemas = candidate["components"]["schemas"]
+    request = schemas["RoomReadyCorrectionRequest"]
+    if mutation == "method":
+        candidate["paths"][path]["get"] = copy.deepcopy(operation)
+    elif mutation == "role":
+        operation["x-required-roles"] = ["developer"]
+    elif mutation == "deployed":
+        operation["x-release-status"] = "deployed"
+    elif mutation == "preview_key":
+        candidate["paths"][path + "/preview"]["post"]["parameters"].append(
+            operation["parameters"][-1]
+        )
+    elif mutation == "query":
+        operation["parameters"].append({"name": "actorId", "in": "query", "required": False})
+    elif mutation == "cache":
+        operation["responses"]["409"]["headers"] = {}
+    elif mutation == "envelope":
+        operation["responses"]["200"]["content"]["application/json"]["schema"][
+            "additionalProperties"
+        ] = True
+    elif mutation == "additional":
+        request["additionalProperties"] = True
+    elif mutation == "ack":
+        request["required"].remove("acknowledgeNoNewEarnings")
+    elif mutation == "proof":
+        request["required"].remove("impactFingerprint")
+    elif mutation == "confirmed":
+        request["properties"]["confirmed"] = {"type": "boolean"}
+    elif mutation == "version":
+        request["properties"]["expectedRoomVersion"]["minimum"] = 0
+    elif mutation == "fingerprint":
+        request["properties"]["impactFingerprint"]["pattern"] = ".*"
+    elif mutation == "blocker":
+        schemas["RoomReadyPreview"]["properties"]["blockingReasons"]["items"]["enum"].remove(
+            "ASSIGNMENT_CHANGE_PENDING"
+        )
+    else:
+        schemas["ErrorCode"]["enum"].remove("ROOM_READY_PREVIEW_STALE")
+    with pytest.raises(RuntimeError, match="#532"):
+        CHECK_READY(candidate)
 
 
 @pytest.mark.parametrize("mutation", ["missing", "duplicate", "replacement"])

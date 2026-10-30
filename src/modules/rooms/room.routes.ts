@@ -9,6 +9,8 @@ import {
 } from './room-operation-cursor.js';
 import type { RoomOperationPageInput } from './room.service.js';
 import type { RoomService } from './room.service.js';
+import { roomReadyContractAppError } from './room.service.js';
+import { parseRoomReadyPreviewRequest, parseRoomReadyCorrectionRequest } from './room-ready-correction-contract.js';
 
 const roomIdSchema = z.object({ roomId: z.uuid() });
 const blockIdSchema = z.object({ roomId: z.uuid(), blockId: z.uuid() });
@@ -273,6 +275,28 @@ export function createRoomRoutes(roomService: RoomService): FastifyPluginAsync {
         idempotencyKey: idempotencyKey(request)
       });
       return reply.code(201).send({ correction });
+    });
+
+    app.post('/:roomId/ready-correction/preview', { preHandler: admin }, async (request, reply) => {
+      reply.header('Cache-Control', 'no-store');
+      z.object({}).strict().parse(request.query);
+      const { roomId } = roomIdSchema.parse(request.params);
+      try {
+        const body = parseRoomReadyPreviewRequest(request.body);
+        return reply.send({ preview: await roomService.previewReadyCorrection(request.actor, { roomId, ...body }) });
+      } catch (error) { throw roomReadyContractAppError(error); }
+    });
+
+    app.post('/:roomId/ready-correction', { preHandler: admin }, async (request, reply) => {
+      reply.header('Cache-Control', 'no-store');
+      z.object({}).strict().parse(request.query);
+      const { roomId } = roomIdSchema.parse(request.params);
+      try {
+        const body = parseRoomReadyCorrectionRequest(request.body);
+        return reply.send({ correction: await roomService.applyReadyCorrection(request.actor, {
+          roomId, ...body, idempotencyKey: idempotencyKey(request)
+        }) });
+      } catch (error) { throw roomReadyContractAppError(error); }
     });
 
     app.post('/:roomId/display-status-overrides', { preHandler: admin }, async (request, reply) => {

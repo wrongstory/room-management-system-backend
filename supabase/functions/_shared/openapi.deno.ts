@@ -416,13 +416,13 @@ Deno.test("photo OpenAPI collection operations retain raw body boundary, CAS and
     "limited cannot read original ID",
   );
   assert(
-    Object.keys(document.paths).length === 157 &&
+    Object.keys(document.paths).length === 159 &&
       Object.values(document.paths).flatMap((item) =>
           Object.keys(item).filter((method) =>
             ["get", "post", "put", "patch", "delete"].includes(method)
           )
-        ).length === 169,
-    "combined source contract 157/169 (not hosted deployment)",
+        ).length === 171,
+    "combined source contract 159/171 (not hosted deployment)",
   );
 });
 
@@ -1859,7 +1859,7 @@ Deno.test("lifecycle OpenAPI separates admin CAS, limited session actions and fu
     );
   }
   assert(
-    doc.components.schemas.DeveloperAuditEventType.enum.length === 74,
+    doc.components.schemas.DeveloperAuditEventType.enum.length === 75,
     "actual audit allowlist count",
   );
   assert(

@@ -139,6 +139,10 @@ class DeveloperAuditEventSummary:
         payment_attempt_number (int | Unset):
         payment_method (DeveloperAuditEventSummaryPaymentMethod | Unset):
         occupied (bool | Unset):
+        cancelled_cleaning_count (int | Unset):
+        released_operation_block_count (int | Unset):
+        resolved_room_issue_count (int | Unset):
+        candles_cleared (bool | Unset):
         display_status_override (None | RoomPrimaryDisplayStatus | Unset): 표시 분류 override 값. null은 override 해제를 뜻하며 실제
             점유·예약·readiness·bookability를 변경하지 않습니다.
         room_state_version (int | Unset):
@@ -248,6 +252,10 @@ class DeveloperAuditEventSummary:
     payment_attempt_number: int | Unset = UNSET
     payment_method: DeveloperAuditEventSummaryPaymentMethod | Unset = UNSET
     occupied: bool | Unset = UNSET
+    cancelled_cleaning_count: int | Unset = UNSET
+    released_operation_block_count: int | Unset = UNSET
+    resolved_room_issue_count: int | Unset = UNSET
+    candles_cleared: bool | Unset = UNSET
     display_status_override: None | RoomPrimaryDisplayStatus | Unset = UNSET
     room_state_version: int | Unset = UNSET
 
@@ -570,6 +578,14 @@ class DeveloperAuditEventSummary:
 
         occupied = self.occupied
 
+        cancelled_cleaning_count = self.cancelled_cleaning_count
+
+        released_operation_block_count = self.released_operation_block_count
+
+        resolved_room_issue_count = self.resolved_room_issue_count
+
+        candles_cleared = self.candles_cleared
+
         display_status_override: None | str | Unset
         if isinstance(self.display_status_override, Unset):
             display_status_override = UNSET
@@ -791,6 +807,14 @@ class DeveloperAuditEventSummary:
             field_dict["paymentMethod"] = payment_method
         if occupied is not UNSET:
             field_dict["occupied"] = occupied
+        if cancelled_cleaning_count is not UNSET:
+            field_dict["cancelledCleaningCount"] = cancelled_cleaning_count
+        if released_operation_block_count is not UNSET:
+            field_dict["releasedOperationBlockCount"] = released_operation_block_count
+        if resolved_room_issue_count is not UNSET:
+            field_dict["resolvedRoomIssueCount"] = resolved_room_issue_count
+        if candles_cleared is not UNSET:
+            field_dict["candlesCleared"] = candles_cleared
         if display_status_override is not UNSET:
             field_dict["displayStatusOverride"] = display_status_override
         if room_state_version is not UNSET:
@@ -1284,6 +1308,14 @@ class DeveloperAuditEventSummary:
 
         occupied = d.pop("occupied", UNSET)
 
+        cancelled_cleaning_count = d.pop("cancelledCleaningCount", UNSET)
+
+        released_operation_block_count = d.pop("releasedOperationBlockCount", UNSET)
+
+        resolved_room_issue_count = d.pop("resolvedRoomIssueCount", UNSET)
+
+        candles_cleared = d.pop("candlesCleared", UNSET)
+
         def _parse_display_status_override(data: object) -> None | RoomPrimaryDisplayStatus | Unset:
             if data is None:
                 return data
@@ -1410,6 +1442,10 @@ class DeveloperAuditEventSummary:
             payment_attempt_number=payment_attempt_number,
             payment_method=payment_method,
             occupied=occupied,
+            cancelled_cleaning_count=cancelled_cleaning_count,
+            released_operation_block_count=released_operation_block_count,
+            resolved_room_issue_count=resolved_room_issue_count,
+            candles_cleared=candles_cleared,
             display_status_override=display_status_override,
             room_state_version=room_state_version,
         )

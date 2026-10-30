@@ -4,6 +4,134 @@ import { EdgeError } from "../_shared/runtime.ts";
 import { PhotoError } from "../_shared/photo-binary.ts";
 import { PhotoService } from "../_shared/photo-service.ts";
 
+Deno.test("room READY correction routes expose private preview/commit and stable conflict envelopes", async () => {
+  const room = "10000000-0000-4000-8000-000000000142";
+  const proof = {
+    impactFingerprint: "a".repeat(64),
+    evaluatedAt: "2026-10-30T03:00:00Z",
+    expiresAt: "2026-10-30T03:05:00Z",
+  };
+  const preview = {
+    roomId: room,
+    targetStatus: "READY",
+    roomStateVersion: 3,
+    canApply: true,
+    blockingReasons: [],
+    requiresConfirmation: true,
+    requiresEarningAcknowledgement: false,
+    effects: {
+      cleaningTargets: [],
+      operationBlockIds: [],
+      roomIssueIds: [],
+      candleCount: 0,
+      displayStatusOverride: "READY",
+    },
+    warnings: [],
+    ...proof,
+  };
+  const result = {
+    roomId: room,
+    targetStatus: "READY",
+    roomStateVersion: 4,
+    recordedAt: "2026-10-30T03:01:00Z",
+    cancelledCleaningTargetIds: [],
+    releasedOperationBlockIds: [],
+    resolvedRoomIssueIds: [],
+    candlesCleared: false,
+  };
+  const base = {
+    targetStatus: "READY",
+    reasonCode: "ADMIN_ROOM_READY_CORRECTION",
+  };
+  const body = {
+    ...base,
+    expectedRoomVersion: 3,
+    ...proof,
+    confirmed: true,
+    acknowledgeNoNewEarnings: false,
+    confirmPhysicalCandleRemoval: false,
+  };
+  const calls: string[] = [];
+  let fail = false;
+  const dependencies: ApiHandlerDependencies = {
+    authenticateRequest: () => Promise.resolve({ ...actor, role: "admin" }),
+    createClients: () =>
+      ({
+        admin: {
+          rpc(name: string) {
+            calls.push(name);
+            return Promise.resolve({
+              data: fail
+                ? null
+                : name === "preview_room_ready_correction"
+                ? preview
+                : result,
+              error: fail
+                ? { message: "ROOM_READY_PREVIEW_STALE: private detail" }
+                : null,
+            });
+          },
+        },
+      }) as unknown as EdgeClients,
+  };
+  const path = `/v1/rooms/${room}/ready-correction`;
+  for (
+    const [suffix, payload, key] of [["/preview", base, "preview"], [
+      "",
+      body,
+      "correction",
+    ]] as const
+  ) {
+    const response = await handleApiRequest(
+      request("POST", path + suffix, payload),
+      dependencies,
+    );
+    assert(
+      response.status === 200 &&
+        response.headers.get("cache-control") === "no-store",
+      "private success",
+    );
+    const data = await response.json();
+    assert(data[key]?.roomId === room, "documented envelope");
+  }
+  assert(
+    calls.join(",") ===
+      "preview_room_ready_correction,apply_room_ready_correction",
+    "exact dispatch",
+  );
+  fail = true;
+  const conflict = await handleApiRequest(
+    request("POST", path, body),
+    dependencies,
+  );
+  assert(
+    conflict.status === 409 &&
+      conflict.headers.get("cache-control") === "no-store",
+    "private conflict",
+  );
+  assert(
+    await errorCode(conflict) === "ROOM_READY_PREVIEW_STALE",
+    "stable reload guidance",
+  );
+  fail = false;
+  const denied = await handleApiRequest(request("POST", path, body), {
+    ...dependencies,
+    authenticateRequest: () => Promise.resolve({ ...actor, role: "maid" }),
+  });
+  assert(denied.status === 403, "business admin only");
+  await denied.body?.cancel();
+  const before = calls.length;
+  for (const wrongPath of [path + "/preview/sibling", path + "/sibling"]) {
+    const response = await handleApiRequest(
+      request("POST", wrongPath, body),
+      dependencies,
+    );
+    assert(response.status === 404, "siblings do not dispatch");
+    await response.body?.cancel();
+  }
+  assert(calls.length === before, "wrong routes do not call commands");
+});
+
 for (const prefix of ["", "/api"]) {
   Deno.test(`photo batch metadata route ${prefix || "root"} uses limited live session and atomic RPC`, async () => {
     const uid = (n: number) =>

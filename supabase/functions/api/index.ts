@@ -168,6 +168,7 @@ import {
   reservationRoomMoveIdFromPath,
 } from "../_shared/reservation-api.ts";
 import {
+  applyRoomReadyCorrection,
   changeRoomMasterData,
   correctRoomOccupancy,
   createRoomOperationBlock,
@@ -180,6 +181,7 @@ import {
   listRooms,
   listRoomTypes,
   overrideRoomDisplayStatus,
+  previewRoomReadyCorrection,
   recordRoomPinSync,
   releaseRoomOperationBlock,
   reportRoomIssue,
@@ -187,6 +189,7 @@ import {
   roomDetailIdFromPath,
   roomListServiceDate,
   roomPathIds,
+  roomReadyCorrectionPath,
   setRoomCandleCount,
 } from "../_shared/room-api.ts";
 import {
@@ -2199,6 +2202,32 @@ async function handleApiRequestCore(
         201,
         corsHeaders,
       );
+    }
+    const readyCorrectionPath = request.method === "POST"
+      ? roomReadyCorrectionPath(path)
+      : null;
+    if (readyCorrectionPath) {
+      const response = readyCorrectionPath.preview
+        ? {
+          preview: await previewRoomReadyCorrection(
+            request,
+            clients,
+            actor,
+            readyCorrectionPath.roomId,
+          ),
+        }
+        : {
+          correction: await applyRoomReadyCorrection(
+            request,
+            clients,
+            actor,
+            readyCorrectionPath.roomId,
+          ),
+        };
+      return jsonResponse(response, 200, {
+        ...corsHeaders,
+        "cache-control": "no-store",
+      });
     }
     if (
       request.method === "POST" &&

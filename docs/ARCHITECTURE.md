@@ -1,5 +1,16 @@
 # 백엔드 서버 설계
 
+## #532 예약 가능 상태 정정 — 미배포 후보
+
+`POST /v1/rooms/{roomId}/ready-correction/preview`는 현재 해제 대상·차단 이유·수당 경고와
+5분 영향 fingerprint를 계산한다. `POST .../ready-correction`는 live 관리자·room CAS·동일
+영향 범위를 다시 검사하고 명시 확인/수당 확인 뒤 target·원천 의무·담당/수행 권한을 원자 정리한다.
+진행 중 사진 전송·실제 예약/점유 등 해결하지 못하는 사유는 별도 업무로 안내한다.
+사진·제출·완료 시각·기존 확정 수익을 보존하고 `room.ready_corrected` 감사로 취소 효력을 설명한다.
+현재와 미래 청소를 구별하며 후속 배정·수행 시작까지 exact 취소 근거를 일관되게 적용한다.
+기존 display override는 업무 취소 권한이 아니다. 새 확인 절차로 실제 상태를 변경한 뒤 override를
+해제해 카드 값을 다시 계산한다. [확정 정책·프런트 인계·검증 경계](./ROOM_READY_CORRECTION_532.md).
+
 ## #411 비공개 사진 미리보기 후보
 
 `GET /v1/photos/{photoId}/thumbnail`은 원본의 DB 읽기 권한과 보존 상태를 전후

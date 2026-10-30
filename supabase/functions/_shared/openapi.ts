@@ -2,6 +2,266 @@ import {
   postApprovalOpenApiErrorCodes,
   postApprovalOpenApiFragment,
 } from "./post-approval-openapi.js";
+// #532 source candidate. Runtime publication follows the separately approved release.
+const {
+  roomReadyCorrectionErrorCodes,
+  roomReadyCorrectionPaths,
+  roomReadyCorrectionSchemas,
+} = (() => {
+  const uuid = { type: "string", format: "uuid" };
+  const nullableUuid = { type: ["string", "null"], format: "uuid" };
+  const version = { type: "integer", minimum: 1, maximum: 9007199254740991 };
+  const timestamp = {
+    type: "string",
+    format: "date-time",
+    description:
+      "초·UTC offset을 포함한 실제 달력의 RFC 3339 시각. 소수 초는 최대 6자리.",
+  };
+  const uuidArray = {
+    type: "array",
+    maxItems: 100,
+    uniqueItems: true,
+    items: uuid,
+  };
+  const base = {
+    targetStatus: { const: "READY" },
+    reasonCode: { const: "ADMIN_ROOM_READY_CORRECTION" },
+  };
+  const proof = {
+    impactFingerprint: {
+      type: "string",
+      pattern: "^[0-9a-f]{64}$",
+      minLength: 64,
+      maxLength: 64,
+    },
+    evaluatedAt: timestamp,
+    expiresAt: timestamp,
+  };
+  const identity = {
+    roomId: uuid,
+    targetStatus: { const: "READY" },
+    roomStateVersion: version,
+  };
+  function object(properties: Record<string, unknown>) {
+    return {
+      type: "object",
+      additionalProperties: false,
+      required: Object.keys(properties),
+      properties,
+    };
+  }
+
+  const roomReadyCorrectionErrorCodes = [
+    "ROOM_READY_CORRECTION_INVALID_INPUT",
+    "ROOM_READY_CONFIRMATION_REQUIRED",
+    "ROOM_READY_EARNING_ACKNOWLEDGEMENT_REQUIRED",
+    "ROOM_READY_CANDLE_CONFIRMATION_REQUIRED",
+    "ROOM_READY_PREVIEW_STALE",
+    "ROOM_READY_CORRECTION_BLOCKED",
+    "ROOM_READY_CORRECTION_LIMIT_EXCEEDED",
+    "ROOM_READY_CORRECTION_REQUIRED",
+    "ROOM_READY_CORRECTION_RESPONSE_INVALID",
+    "CLEANING_DUE_REPLAN_REQUIRED",
+  ];
+  const roomReadyCorrectionSchemas = {
+    RoomReadyPreviewRequest: object(base),
+    RoomReadyCorrectionRequest: object({
+      ...base,
+      expectedRoomVersion: version,
+      ...proof,
+      confirmed: { const: true },
+      acknowledgeNoNewEarnings: {
+        type: "boolean",
+        description:
+          "시작·현장 완료·미승인 제출을 취소하면 새 수당이 적립되지 않는다는 별도 확인. 기존 확정 수당은 유지. 먼저 검수 승인을 권고합니다.",
+      },
+      confirmPhysicalCandleRemoval: {
+        type: "boolean",
+        description:
+          "현재 촛불이 남아 있으면 실제 회수 확인 true 필수. 물리적 회수를 자동 실행하지 않습니다.",
+      },
+    }),
+    RoomReadyPreview: object({
+      ...identity,
+      canApply: { type: "boolean" },
+      blockingReasons: {
+        type: "array",
+        uniqueItems: true,
+        items: {
+          type: "string",
+          enum: [
+            "ROOM_INACTIVE",
+            "ROOM_TYPE_INACTIVE",
+            "DATA_UNCONFIRMED",
+            "OCCUPIED",
+            "RESERVATION_CURRENT",
+            "CHECKOUT_NOT_COMPLETED",
+            "UNSUPPORTED_CLEANING_CHAIN",
+            "PHOTO_UPLOAD_IN_PROGRESS",
+            "ASSIGNMENT_CHANGE_PENDING",
+            "LIMIT_EXCEEDED",
+          ],
+        },
+      },
+      requiresConfirmation: { const: true },
+      requiresEarningAcknowledgement: { type: "boolean" },
+      effects: object({
+        cleaningTargets: {
+          type: "array",
+          maxItems: 100,
+          items: object({
+            cleaningTargetId: uuid,
+            assignmentId: nullableUuid,
+            attemptId: nullableUuid,
+            attemptStatus: {
+              type: ["string", "null"],
+              enum: [
+                null,
+                "scheduled",
+                "in_progress",
+                "field_completed",
+                "upload_pending",
+                "submitted",
+                "approved",
+                "rejected",
+                "interrupted",
+                "superseded",
+              ],
+            },
+            hasSubmission: { type: "boolean" },
+            fieldCompleted: { type: "boolean" },
+          }),
+        },
+        operationBlockIds: uuidArray,
+        roomIssueIds: uuidArray,
+        candleCount: { type: "integer", minimum: 0, maximum: 2147483647 },
+        displayStatusOverride: {
+          type: ["string", "null"],
+          enum: [
+            null,
+            "BLOCKED",
+            "OCCUPIED",
+            "ARRIVAL_PENDING",
+            "RESERVATION_PRESENT",
+            "CLEANING_REQUIRED",
+            "READY",
+          ],
+        },
+      }),
+      warnings: {
+        type: "array",
+        uniqueItems: true,
+        items: {
+          type: "string",
+          enum: [
+            "CANCEL_WITHOUT_NEW_EARNINGS",
+            "APPROVE_BEFORE_CANCEL_TO_PRESERVE_EARNINGS",
+            "PHYSICAL_CANDLE_REMOVAL_REQUIRED",
+          ],
+        },
+      },
+      ...proof,
+    }),
+    RoomReadyCorrectionResult: object({
+      ...identity,
+      recordedAt: timestamp,
+      cancelledCleaningTargetIds: uuidArray,
+      releasedOperationBlockIds: uuidArray,
+      resolvedRoomIssueIds: uuidArray,
+      candlesCleared: { type: "boolean" },
+    }),
+  };
+  const noStore = {
+    "Cache-Control": { schema: { type: "string", const: "no-store" } },
+  };
+  const error = {
+    description:
+      "안전한 error.code·message·requestId만 반환합니다. 상태 변경 시 미리보기부터 다시 확인하며 내부 DB 오류는 노출하지 않습니다.",
+    headers: noStore,
+    content: {
+      "application/json": {
+        schema: { $ref: "#/components/schemas/ErrorEnvelope" },
+      },
+    },
+  };
+  function operation(preview: boolean) {
+    const request = preview
+      ? "RoomReadyPreviewRequest"
+      : "RoomReadyCorrectionRequest";
+    const response = preview ? "RoomReadyPreview" : "RoomReadyCorrectionResult";
+    const responseKey = preview ? "preview" : "correction";
+    return {
+      tags: ["Rooms"],
+      operationId: preview
+        ? "previewRoomReadyCorrection"
+        : "applyRoomReadyCorrection",
+      summary: preview
+        ? "객실 준비 완료 변경 영향 조회 (미배포 후보)"
+        : "확인한 객실 상태를 실제 준비 완료로 변경 (미배포 후보)",
+      description:
+        (preview
+          ? "읽기 전용 5분 미리보기입니다. 청소 취소·중단, 운영 차단·이슈 해제, 촛불 회수 영향과 별도 수당 확인을 팝업으로 안내하세요. 예약·실제 점유는 일괄 종료하지 않으며 차단되면 기존 예약 취소/체크아웃 화면으로 안내합니다. canApply=false이면 확정 금지."
+          : "미리보기의 정확한 fingerprint/version/evaluatedAt/expiresAt을 다시 보내 명시 확인한 범위만 원자 변경합니다. 현장 완료·미승인 제출 취소는 새 수당 미적립 별도 동의가 필요하므로 먼저 검수 승인하도록 권고하세요. 과거 이력·사진·기존 확정 수당을 삭제하지 않으며 예약/실제 점유·PIN은 변경하지 않습니다. 같은 key/본문 재시도는 만료 검사보다 완료 receipt를 먼저 반환합니다. stale이면 최신 영향으로 다시 확인해야 합니다.") +
+        " 비밀번호 변경을 완료한 활성 업무 관리자와 유효한 세션만 허용합니다. #532 source 계약이며 현재 운영 제공을 뜻하지 않습니다. 성공 후 객실·선택 날짜 projection·배정/진행·예약·bookability를 재조회하세요.",
+      security: [{ bearerAuth: [] }],
+      "x-required-roles": ["admin"],
+      "x-release-status": "candidate",
+      parameters: [
+        { name: "roomId", in: "path", required: true, schema: uuid },
+        ...(preview ? [] : [{
+          name: "Idempotency-Key",
+          in: "header",
+          required: true,
+          schema: {
+            type: "string",
+            minLength: 8,
+            maxLength: 128,
+            pattern: "^[A-Za-z0-9._:-]{8,128}$",
+          },
+        }]),
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: { $ref: `#/components/schemas/${request}` },
+          },
+        },
+      },
+      responses: {
+        "200": {
+          description: preview
+            ? "변경 영향. 차단 상태도 200/canApply=false로 안내합니다."
+            : "확인한 변경 결과 또는 같은 요청의 완료 receipt",
+          headers: noStore,
+          content: {
+            "application/json": {
+              schema: object({
+                [responseKey]: { $ref: `#/components/schemas/${response}` },
+              }),
+            },
+          },
+        },
+        "400": error,
+        "401": error,
+        "403": error,
+        "404": error,
+        "409": error,
+        "500": error,
+        "503": error,
+      },
+    };
+  }
+  const roomReadyCorrectionPaths = {
+    "/v1/rooms/{roomId}/ready-correction/preview": { post: operation(true) },
+    "/v1/rooms/{roomId}/ready-correction": { post: operation(false) },
+  };
+  return {
+    roomReadyCorrectionErrorCodes,
+    roomReadyCorrectionPaths,
+    roomReadyCorrectionSchemas,
+  };
+})();
 
 // #331: display-only remittance contracts, never actual payout commands.
 const integer = { type: "integer", minimum: 0, maximum: 9007199254740991 };
@@ -965,6 +1225,7 @@ export const openApiDocument = {
     },
   ],
   paths: {
+    ...roomReadyCorrectionPaths,
     ...postApprovalOpenApiFragment.paths,
     "/v1/rooms/pins/export": {
       get: {
@@ -2589,7 +2850,7 @@ export const openApiDocument = {
             in: "query",
             schema: {
               type: "array",
-              maxItems: 74,
+              maxItems: 75,
               items: { $ref: "#/components/schemas/DeveloperAuditEventType" },
             },
             style: "form",
@@ -6108,6 +6369,7 @@ export const openApiDocument = {
       },
     },
     schemas: {
+      ...roomReadyCorrectionSchemas,
       ...payrollRemittanceSchemas,
       CheckoutIncidentReportRequest: {
         type: "object",
@@ -8339,6 +8601,7 @@ export const openApiDocument = {
             "RUNTIME_NOT_CONFIGURED",
             "INTERNAL_SERVER_ERROR",
             ...postApprovalOpenApiErrorCodes,
+            ...roomReadyCorrectionErrorCodes,
           ]),
         ],
       },
@@ -8700,6 +8963,7 @@ export const openApiDocument = {
           "room.record_pin_sync",
           "room.occupancy_corrected",
           "room.display_status_overridden",
+          "room.ready_corrected",
           "room.pin_change_prepared",
           "room.pin_change_confirmed",
           "room.pin_mismatch_resolved",
@@ -9441,6 +9705,22 @@ export const openApiDocument = {
               paymentAttemptNumber: { type: "integer", minimum: 1 },
               paymentMethod: { type: "string", enum: ["bank_transfer"] },
               occupied: { type: "boolean" },
+              cancelledCleaningCount: {
+                type: "integer",
+                minimum: 0,
+                maximum: 100,
+              },
+              releasedOperationBlockCount: {
+                type: "integer",
+                minimum: 0,
+                maximum: 100,
+              },
+              resolvedRoomIssueCount: {
+                type: "integer",
+                minimum: 0,
+                maximum: 100,
+              },
+              candlesCleared: { type: "boolean" },
               displayStatusOverride: {
                 oneOf: [
                   { $ref: "#/components/schemas/RoomPrimaryDisplayStatus" },
@@ -13320,6 +13600,7 @@ export const openApiDocument = {
       RoomEventType: {
         type: "string",
         enum: [
+          "room.ready_corrected",
           "room.master_data_changed",
           "room.create_block",
           "room.release_block",
@@ -13341,6 +13622,15 @@ export const openApiDocument = {
         type: "object",
         additionalProperties: false,
         properties: {
+          roomStateVersion: { type: "integer", minimum: 1 },
+          cancelledCleaningCount: { type: "integer", minimum: 0, maximum: 100 },
+          releasedOperationBlockCount: {
+            type: "integer",
+            minimum: 0,
+            maximum: 100,
+          },
+          resolvedRoomIssueCount: { type: "integer", minimum: 0, maximum: 100 },
+          candlesCleared: { type: "boolean" },
           roomTypeId: { type: "string", format: "uuid" },
           elevatorZone: {
             type: ["string", "null"],

@@ -1,4 +1,5 @@
 import {
+  applyRoomReadyCorrection,
   changeRoomMasterData,
   correctRoomOccupancy,
   createRoomOperationBlock,
@@ -11,6 +12,7 @@ import {
   listRooms,
   listRoomTypes,
   overrideRoomDisplayStatus,
+  previewRoomReadyCorrection,
   recordRoomPinSync,
   releaseRoomOperationBlock,
   reportRoomIssue,
@@ -19,6 +21,7 @@ import {
   roomDetailIdFromPath,
   roomListServiceDate,
   roomPathIds,
+  roomReadyCorrectionPath,
   setRoomCandleCount,
   toRoomProjections,
 } from "./room-api.ts";
@@ -61,6 +64,211 @@ function readRequest(path = "/v1/room-types"): Request {
     headers: { authorization: `Bearer header.${encoded}.signature` },
   });
 }
+
+Deno.test("room ready preview and commit bind session and preserve safe confirmation effects", async () => {
+  const requestBody = {
+    targetStatus: "READY",
+    reasonCode: "ADMIN_ROOM_READY_CORRECTION",
+  };
+  const proof = {
+    impactFingerprint: "a".repeat(64),
+    evaluatedAt: "2026-10-30T03:00:00.123456Z",
+    expiresAt: "2026-10-30T03:05:00.123456Z",
+  };
+  const preview = {
+    roomId,
+    targetStatus: "READY",
+    roomStateVersion: 5,
+    canApply: true,
+    blockingReasons: [],
+    requiresConfirmation: true,
+    requiresEarningAcknowledgement: true,
+    effects: {
+      cleaningTargets: [{
+        cleaningTargetId: issueId,
+        assignmentId: blockId,
+        attemptId: roomTypeId,
+        attemptStatus: "submitted",
+        hasSubmission: true,
+        fieldCompleted: true,
+        rawPin: "not-returned",
+      }],
+      operationBlockIds: [blockId],
+      roomIssueIds: [issueId],
+      candleCount: 2,
+      displayStatusOverride: "READY",
+    },
+    warnings: [
+      "CANCEL_WITHOUT_NEW_EARNINGS",
+      "APPROVE_BEFORE_CANCEL_TO_PRESERVE_EARNINGS",
+      "PHYSICAL_CANDLE_REMOVAL_REQUIRED",
+    ],
+    ...proof,
+  };
+  const applied = {
+    roomId,
+    targetStatus: "READY",
+    roomStateVersion: 6,
+    recordedAt: "2026-10-30T03:01:00Z",
+    cancelledCleaningTargetIds: [issueId],
+    releasedOperationBlockIds: [blockId],
+    resolvedRoomIssueIds: [issueId],
+    candlesCleared: true,
+    rawPin: "not-returned",
+  };
+  const calls: Array<[string, Record<string, unknown>]> = [];
+  const clients = {
+    admin: {
+      rpc(name: string, args: Record<string, unknown>) {
+        calls.push([name, args]);
+        return Promise.resolve({
+          data: name === "preview_room_ready_correction" ? preview : applied,
+          error: null,
+        });
+      },
+    },
+  } as unknown as EdgeClients;
+  const path = `/v1/rooms/${roomId}/ready-correction`;
+  const read = await previewRoomReadyCorrection(
+    commandRequest(path + "/preview", requestBody),
+    clients,
+    admin,
+    roomId,
+  );
+  assert(
+    read.effects.cleaningTargets[0].hasSubmission &&
+      read.requiresEarningAcknowledgement,
+    "submission and earnings warning preserved",
+  );
+  assert(
+    !JSON.stringify(read).includes("not-returned"),
+    "preview private fields removed",
+  );
+  assert(
+    calls[0][0] === "preview_room_ready_correction" &&
+      calls[0][1].p_session_id === sessionId,
+    "read-only RPC session",
+  );
+  const body = {
+    ...requestBody,
+    expectedRoomVersion: 5,
+    ...proof,
+    confirmed: true,
+    acknowledgeNoNewEarnings: true,
+    confirmPhysicalCandleRemoval: true,
+  };
+  const write = await applyRoomReadyCorrection(
+    commandRequest(path, body),
+    clients,
+    admin,
+    roomId,
+  );
+  assert(
+    !JSON.stringify(write).includes("not-returned") &&
+      write.cancelledCleaningTargetIds[0] === issueId,
+    "safe command result",
+  );
+  assert(
+    calls[1][0] === "apply_room_ready_correction" &&
+      calls[1][1].p_session_id === sessionId &&
+      calls[1][1].p_acknowledge_no_new_earnings === true,
+    "explicit acknowledgements forwarded",
+  );
+  const hash = calls[1][1].p_request_hash;
+  await applyRoomReadyCorrection(
+    commandRequest(path, body, "POST", "different-idempotency-key"),
+    clients,
+    admin,
+    roomId,
+  );
+  assert(
+    calls[2][1].p_request_hash === hash,
+    "idempotency key excluded from semantic hash",
+  );
+  await applyRoomReadyCorrection(
+    commandRequest(path, { ...body, confirmPhysicalCandleRemoval: false }),
+    clients,
+    admin,
+    roomId,
+  );
+  assert(
+    calls[3][1].p_request_hash !== hash,
+    "physical removal consent bound to hash",
+  );
+  const count = calls.length;
+  for (
+    const invalid of [
+      { ...body, confirmed: false },
+      { ...body, expectedRoomVersion: 0 },
+      { ...body, actorProfileId: issueId },
+      { ...body, expiresAt: "2026-10-30T03:05:00.123457Z" },
+    ]
+  ) {
+    const failure = await captureEdgeError(() =>
+      applyRoomReadyCorrection(
+        commandRequest(path, invalid),
+        clients,
+        admin,
+        roomId,
+      )
+    );
+    assert(
+      failure.status === 400 &&
+        failure.code === "ROOM_READY_CORRECTION_INVALID_INPUT",
+      "strict input gate",
+    );
+  }
+  for (
+    const denied of [{ ...admin, role: "maid" as const }, {
+      ...admin,
+      role: "developer" as const,
+    }, { ...admin, mustChangePassword: true }]
+  ) {
+    const failure = await captureEdgeError(() =>
+      applyRoomReadyCorrection(
+        commandRequest(path, body),
+        clients,
+        denied,
+        roomId,
+      )
+    );
+    assert(
+      failure.status === 403,
+      "exact business admin with completed password required",
+    );
+  }
+  assert(calls.length === count, "invalid commands cannot reach RPC");
+  assert(
+    roomReadyCorrectionPath(path + "/preview")?.preview === true &&
+      roomReadyCorrectionPath(path)?.preview === false,
+    "exact routes",
+  );
+  assert(
+    roomReadyCorrectionPath(path + "/preview/sibling") === null,
+    "no sibling prefix capture",
+  );
+});
+
+Deno.test("room ready DB conflicts use safe specific instructions including the legacy READY guard", () => {
+  for (
+    const code of [
+      "ROOM_READY_CONFIRMATION_REQUIRED",
+      "ROOM_READY_EARNING_ACKNOWLEDGEMENT_REQUIRED",
+      "ROOM_READY_CANDLE_CONFIRMATION_REQUIRED",
+      "ROOM_READY_PREVIEW_STALE",
+      "ROOM_READY_CORRECTION_BLOCKED",
+      "ROOM_READY_CORRECTION_LIMIT_EXCEEDED",
+      "ROOM_READY_CORRECTION_REQUIRED",
+    ]
+  ) {
+    const error = roomDatabaseError({ message: `${code}: private raw detail` });
+    assert(
+      error.code === code && error.status === 409 &&
+        !error.message.includes("private raw detail"),
+      "specific safe conflict",
+    );
+  }
+});
 Deno.test("registered reports bind admin session, validate paging and allowlist evidence", async () => {
   const previous = Deno.env.get("INSPECTION_CURSOR_HMAC_SECRET");
   Deno.env.set(

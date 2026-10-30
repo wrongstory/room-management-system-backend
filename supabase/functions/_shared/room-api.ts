@@ -1,5 +1,15 @@
 import { idempotencyKey, readJsonBody } from "./account-api.ts";
 import {
+  parseRoomReadyCorrectionRequest,
+  parseRoomReadyCorrectionResult,
+  parseRoomReadyEventSummary,
+  parseRoomReadyPreview,
+  parseRoomReadyPreviewRequest,
+  RoomReadyContractError,
+  roomReadyErrors,
+  roomReadyUuid,
+} from "../../../src/modules/rooms/room-ready-correction-contract.ts";
+import {
   assertRoomOperationResponseSize,
   decodeRoomOperationCursor,
   encodeRoomOperationCursor,
@@ -468,6 +478,16 @@ async function requestHash(value: unknown): Promise<string> {
 export function roomDatabaseError(
   error: { message?: string } | null,
 ): EdgeError {
+  const correctionError = roomReadyErrors.find(([code]) =>
+    error?.message?.includes(code)
+  );
+  if (correctionError) {
+    return new EdgeError(
+      correctionError[1],
+      correctionError[0],
+      correctionError[2],
+    );
+  }
   const message = error?.message ?? "";
   const mappings: Array<[string, number, string, string]> = [
     [
@@ -1290,6 +1310,7 @@ const roomCommandSummaryFields = new Set([
 ]);
 const occupancySummaryFields = new Set(["occupiedBefore", "occupiedAfter"]);
 const roomEventCategoryByType = new Map<string, string>([
+  ["room.ready_corrected", "room_configuration"],
   ["room.master_data_changed", "room_configuration"],
   ["room.create_block", "room_block"],
   ["room.release_block", "room_block"],
@@ -1310,7 +1331,22 @@ const roomEventCategoryByType = new Map<string, string>([
 function safeRoomEventSummary(
   value: unknown,
   source: "room_command" | "occupancy",
+  eventType: string,
 ): Record<string, unknown> {
+  if (eventType === "room.ready_corrected") {
+    if (source !== "room_command") {
+      throw new EdgeError(
+        500,
+        "ROOM_PROJECTION_INVALID",
+        "객실 이벤트 source가 올바르지 않습니다.",
+      );
+    }
+    try {
+      return parseRoomReadyEventSummary(value);
+    } catch (error) {
+      throw roomReadyContractEdgeError(error);
+    }
+  }
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new EdgeError(
       500,
@@ -1406,7 +1442,7 @@ export async function listRoomEvents(
         reservationId: row.reservationId === null
           ? null
           : uuidValue(row.reservationId, "reservationId"),
-        summary: safeRoomEventSummary(row.summary, source),
+        summary: safeRoomEventSummary(row.summary, source, eventType),
       };
     }),
   };
@@ -1625,6 +1661,99 @@ export async function overrideRoomDisplayStatus(
     ),
     recordedAt: responseTimestamp(row.recorded_at, "recordedAt"),
   };
+}
+
+export function roomReadyCorrectionPath(
+  path: string,
+): { roomId: string; preview: boolean } | null {
+  const match = /^\/v1\/rooms\/([^/]+)\/ready-correction(\/preview)?$/.exec(
+    path,
+  );
+  if (!match) return null;
+  try {
+    return { roomId: roomReadyUuid(match[1]), preview: !!match[2] };
+  } catch (error) {
+    throw roomReadyContractEdgeError(error);
+  }
+}
+
+function roomReadyContractEdgeError(error: unknown): unknown {
+  if (error instanceof RoomReadyContractError) {
+    return new EdgeError(
+      error.response ? 500 : 400,
+      error.response
+        ? "ROOM_READY_CORRECTION_RESPONSE_INVALID"
+        : "ROOM_READY_CORRECTION_INVALID_INPUT",
+      error.message,
+    );
+  }
+  return error;
+}
+
+export async function previewRoomReadyCorrection(
+  request: Request,
+  clients: EdgeClients,
+  actor: EdgeActor,
+  roomId: string,
+) {
+  requireRoomAdmin(actor);
+  try {
+    if (new URL(request.url).search) throw new RoomReadyContractError(false);
+    const normalizedRoomId = roomReadyUuid(roomId),
+      input = parseRoomReadyPreviewRequest(await readJsonBody(request));
+    const { data, error } = await clients.admin.rpc(
+      "preview_room_ready_correction",
+      {
+        p_actor_profile_id: actor.profileId,
+        p_session_id: verifiedRequestSessionId(request),
+        p_room_id: normalizedRoomId,
+        p_reason_code: input.reasonCode,
+      },
+    );
+    if (error) throw roomDatabaseError(error);
+    return parseRoomReadyPreview(data, normalizedRoomId);
+  } catch (error) {
+    throw roomReadyContractEdgeError(error);
+  }
+}
+
+export async function applyRoomReadyCorrection(
+  request: Request,
+  clients: EdgeClients,
+  actor: EdgeActor,
+  roomId: string,
+) {
+  requireRoomAdmin(actor);
+  try {
+    if (new URL(request.url).search) throw new RoomReadyContractError(false);
+    const normalizedRoomId = roomReadyUuid(roomId),
+      input = parseRoomReadyCorrectionRequest(await readJsonBody(request));
+    const { data, error } = await clients.admin.rpc(
+      "apply_room_ready_correction",
+      {
+        p_actor_profile_id: actor.profileId,
+        p_session_id: verifiedRequestSessionId(request),
+        p_room_id: normalizedRoomId,
+        p_expected_room_version: input.expectedRoomVersion,
+        p_impact_fingerprint: input.impactFingerprint,
+        p_evaluated_at: input.evaluatedAt,
+        p_expires_at: input.expiresAt,
+        p_confirmed: input.confirmed,
+        p_acknowledge_no_new_earnings: input.acknowledgeNoNewEarnings,
+        p_confirm_physical_candle_removal: input.confirmPhysicalCandleRemoval,
+        p_reason_code: input.reasonCode,
+        p_idempotency_key: idempotencyKey(request),
+        p_request_hash: await requestHash({
+          roomId: normalizedRoomId,
+          ...input,
+        }),
+      },
+    );
+    if (error) throw roomDatabaseError(error);
+    return parseRoomReadyCorrectionResult(data, normalizedRoomId);
+  } catch (error) {
+    throw roomReadyContractEdgeError(error);
+  }
 }
 
 async function mutateRoomOperation(

@@ -13,9 +13,9 @@ const receipt = routes.filter(r => ['CALLER', 'SQL_AVAILABILITY'].includes(r.has
 describe('finite HTTP admission SQL contract', () => {
   it('generates the committed migration from the exact canonical routes', () => {
     expect(generateAdmissionSql(routes, template)).toBe(source);
-    expect(receipt).toHaveLength(65);
+    expect(receipt).toHaveLength(66);
     expect(routes.filter(r => r.hashMode === 'NONE')).toHaveLength(27);
-    expect(routes.filter(r => r.hashMode === 'READ_ONLY')).toHaveLength(6);
+    expect(routes.filter(r => r.hashMode === 'READ_ONLY')).toHaveLength(7);
     expect(routes.filter(r => r.hashMode === 'ATOMIC_RPC')).toHaveLength(1);
   });
   it('never grants ordinary admission to read-only or same-transaction dispatch routes', () => {

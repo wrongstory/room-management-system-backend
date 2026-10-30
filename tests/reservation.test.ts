@@ -46,6 +46,14 @@ const commandResult = {
 };
 
 describe('reservation privacy and idempotency', () => {
+  it('explains cleaning replan conflict without leaking the database error', async () => {
+    const rpc = vi.fn().mockResolvedValue({ data: null, error: { message: 'CLEANING_DUE_REPLAN_REQUIRED: private database detail' } });
+    const service = new SupabaseReservationService({ admin: { rpc } } as unknown as SupabaseClients, piiKey, '1', guestNamePepper);
+    await expect(service.create(actor, { roomId: commandResult.room_id, reservationType: 'standard', checkInAt: commandResult.check_in_at,
+      checkOutAt: commandResult.check_out_at, guestCount: 2, expectedRoomVersion: 1, idempotencyKey: 'replan-test-1' }))
+      .rejects.toMatchObject({ statusCode: 409, code: 'CLEANING_DUE_REPLAN_REQUIRED',
+        message: '이전 청소의 배정 일정이 새 예약과 충돌합니다. 객실 상태 변경에서 청소를 확인·취소하거나 배정 일정을 다시 조정해 주세요.' });
+  });
   it('validates guest-name raw and normalized lengths before encryption', () => {
     expect(normalizeGuestName('가'.repeat(80))).toBe('가'.repeat(80));
     expect(() => normalizeGuestName('가'.repeat(81))).toThrowError(

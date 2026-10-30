@@ -30,6 +30,17 @@ insert into limited_session_caller_extensions values
   ('public.get_post_approval_room_issue_source(uuid,uuid,uuid)','public.get_post_approval_room_issue_source','snapshot','s','service-only'),
   ('private.assert_post_approval_room_issue_actor_fresh(uuid,uuid)','private.assert_post_approval_room_issue_actor_fresh','fresh','v','owner-only');
 -- END APPROVED SESSION CALLER EXTENSIONS
+-- BEGIN APPROVED ROOM READY SESSION EXTENSIONS
+insert into limited_session_caller_extensions values
+  ('public.preview_room_ready_correction(uuid,uuid,uuid,text)','public.preview_room_ready_correction','fresh','v','service-only'),
+  ('public.apply_room_ready_correction(uuid,uuid,uuid,bigint,text,timestamptz,timestamptz,boolean,boolean,boolean,text,text,text)','public.apply_room_ready_correction','fresh','v','service-only');
+-- END APPROVED ROOM READY SESSION EXTENSIONS
+select ok((to_regprocedure('public.preview_room_ready_correction(uuid,uuid,uuid,text)') is null
+    and to_regprocedure('public.apply_room_ready_correction(uuid,uuid,uuid,bigint,text,timestamptz,timestamptz,boolean,boolean,boolean,text,text,text)') is null)
+  or (to_regprocedure('public.preview_room_ready_correction(uuid,uuid,uuid,text)') is not null
+    and to_regprocedure('public.apply_room_ready_correction(uuid,uuid,uuid,bigint,text,timestamptz,timestamptz,boolean,boolean,boolean,text,text,text)') is not null
+    and to_regprocedure('private.assert_post_approval_room_issue_actor_fresh(uuid,uuid)') is not null),
+  '#532 preview/apply fresh pair installs atomically after the existing caller inventory');
 select ok(not exists(select 1 from limited_session_caller_extensions e
   join pg_namespace n on n.nspname=split_part(e.qualified_name,'.',1)
   join pg_proc p on p.pronamespace=n.oid and p.proname=split_part(e.qualified_name,'.',2)
@@ -50,7 +61,9 @@ select ok(coalesce((select p.prokind='f' and l.lanname='plpgsql' and p.provolati
   and (length(p.prosrc)-length(replace(p.prosrc,case when e.helper_kind='snapshot'
     then 'private.assert_attempt_actor_session(' else 'private.assert_attempt_actor_session_fresh(' end,'')))
     /length(case when e.helper_kind='snapshot' then 'private.assert_attempt_actor_session('
-      else 'private.assert_attempt_actor_session_fresh(' end)=1
+      else 'private.assert_attempt_actor_session_fresh(' end)=case when e.signature in (
+        'public.preview_room_ready_correction(uuid,uuid,uuid,text)',
+        'public.apply_room_ready_correction(uuid,uuid,uuid,bigint,text,timestamptz,timestamptz,boolean,boolean,boolean,text,text,text)') then 2 else 1 end
   and strpos(p.prosrc,case when e.helper_kind='snapshot'
     then 'private.assert_attempt_actor_session_fresh(' else 'private.assert_attempt_actor_session(' end)=0
   and strpos(p.prosrc,'private.assert_attempt_actor_session_at_clock(')=0

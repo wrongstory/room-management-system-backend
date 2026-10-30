@@ -1,3 +1,7 @@
+// #532 source candidate: no new table; exact room.ready_corrected audit/receipt links
+// current cleaning target/obligation cancellation with assignment/access termination.
+// Preserve completed attempt/submission/photo/earning history and all future plans.
+// Full DB and production NOT RUN; see docs/ROOM_READY_CORRECTION_532.md.
 // 2026-10-04 #363/#373 A candidate: seven function bodies + owner-only STABLE read guard.
 // Existing tables/columns/relationships/ACL/RLS/ledgers remain unchanged. Raw strict FAIL stays visible;
 // exact nine compatibility diagnostics/catalog/source fingerprints are a separate gate.

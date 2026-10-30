@@ -1414,5 +1414,35 @@
     "hashMode": "NONE",
     "hashArgs": {},
     "keyArgument": "p_idempotency_key"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/rooms/{roomId}/ready-correction/preview",
+    "routeId": "previewRoomReadyCorrection",
+    "kind": "BUSINESS_WRITE",
+    "authority": "ACTIVE_SESSION",
+    "rpc": null,
+    "commandName": null,
+    "rpcAliases": [],
+    "bindings": {},
+    "hashMode": "READ_ONLY",
+    "hashArgs": {},
+    "keyArgument": "p_idempotency_key",
+    "sqlExtension": "ROOM_READY_CORRECTION_532"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/rooms/{roomId}/ready-correction",
+    "routeId": "applyRoomReadyCorrection",
+    "kind": "BUSINESS_WRITE",
+    "authority": "ACTIVE_SESSION",
+    "rpc": "apply_room_ready_correction",
+    "commandName": "room.ready_correction",
+    "rpcAliases": [],
+    "bindings": {},
+    "hashMode": "CALLER",
+    "hashArgs": {},
+    "keyArgument": "p_idempotency_key",
+    "sqlExtension": "ROOM_READY_CORRECTION_532"
   }
 ]

@@ -16,7 +16,7 @@ describe('source137 finite lifecycle admission', () => {
     expect(generateAdmissionSql(routes, read('scripts/operation-admission.sql.in'))).toBe(original);
     expect(routes.filter(r => r.completionAdapter)).toHaveLength(1);
     expect(routes.filter(r => r.hashMode === 'NONE' && !r.completionAdapter)).toHaveLength(26);
-    expect(routes.filter(r => ['CALLER', 'SQL_AVAILABILITY'].includes(r.hashMode))).toHaveLength(65);
+    expect(routes.filter(r => ['CALLER', 'SQL_AVAILABILITY'].includes(r.hashMode))).toHaveLength(66);
   });
   it.each(['value', 'route', 'kind', 'authority', 'hashMode', 'rpc', 'key'])('rejects %s tag substitution without changing historical generation', field => {
     const changed = structuredClone(routes); const r = changed.find(r => r.completionAdapter);
