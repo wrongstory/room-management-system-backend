@@ -195,6 +195,12 @@ const localInput = { args: [], env: {}, config, endpoint: JSON.stringify('unix:/
     project: 'room-management-system-backend', ports: { '5432/tcp': [{ HostIp: '127.0.0.1', HostPort: '54322' }] } }) };
 
 describe('#336 isolated110->111 source/preflight only (no DB PASS claim)', () => {
+  it('pins completion124 and rejects a rehashed replacement', () => {
+    const changed=clone(entries), changedManifest=clone(manifest), tail=changed[123], record=changedManifest.migrations[123];
+    if (!tail || !record) throw new Error('EXPECTED124');
+    tail.raw=Buffer.from('select 1;\n'); record.sha256=createHash('sha256').update(tail.raw).digest('hex');
+    expect(()=>validatePostApprovalUpgradeSource(changedManifest,changed)).toThrow('Only the source-reviewed password-completion124 tail');
+  });
   it('pins password effect123 without accepting a self-rehashed replacement', () => {
     const changed = clone(entries), changedManifest = clone(manifest);
     const tail = changed[122], record = changedManifest.migrations[122];
