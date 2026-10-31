@@ -99,3 +99,16 @@ typecheck/build/Node3170 PASS. helper SHA256 `5090cf973b2f1fc235afdb288e66688452
 운영 migration `20261031030416/password_effect_completion` 적용, history124 및 main 함수 본문 정확 일치/ACL 보존 확인.
 12:05:41 KST 세 prepare RPC의 service_role EXECUTE 차단, owner 권한 보존. 12:20:42 이후 최소15분 및 이전 요청 종료 확인 전까지 계정 복구하지 않는다.
 이 기록 시점 유지보수 활성, 실제 계정 복구 미실행. 이후 완료 기록에서 실제 결과와 권한 원복을 확인해야 한다.
+
+## 운영 복구 완료 — 2026-10-31 12:21 KST
+
+12:20:54 KST 사전 확인: 최소15분 충족, 일시중지 이전 client transaction0, exact receipt/Auth effect/profile 모두 사전 snapshot과 일치. 대기 구간 비밀번호 경로 Edge 완료 로그 조회 결과0(로그만으로 종료를 단정하지 않고 DB/시간 조건과 함께 확인).
+검증된 임시 helper로 승인된 관리자 요청1건을 완료했다. 명시적 transaction 안에서 후조건 검사 후 commit했고, 별도 읽기로 재확인했다:
+- state completed, claim/lease NULL, 대상 미완료 요청0
+- 감사 정확히1건, 대상 세션0
+- Auth password version/rotated_at 불변, 실제 비밀번호 변경 없음
+- profile exact snapshot 불변: 기존 실패횟수3 및 잠금NULL 보존
+
+12:21:12 KST 세 prepare RPC의 postgres/service_role EXECUTE ACL이 원본과 동일함을 확인했다. complete 함수 ACL도 동일하다. 유지보수 종료.
+운영 migration은 승인된 complete 함수1개만 적용했다(history124/version20261031030416). 전체 DB 검증은 반복하지 않았다. API 코드 재배포/태그 발행 없음.
+노션·프런트 #271·백엔드 #543에 운영 완료와 UAT 대기를 구분해 전달한다. 사용자는 현재 새 비밀번호로 재로그인 후 다시 변경을 확인할 수 있다. 실제 사용자 성공 확인 전 #543은 열어 둔다.
