@@ -78,7 +78,7 @@ begin
     or jsonb_build_object('id',p.id,'auth_user_id',p.auth_user_id,'status',p.status,'role',p.role,
       'must_change_password',p.must_change_password,'failed_login_count',p.failed_login_count,'locked_until',p.locked_until)
       is distinct from expected_profile
-    or p.must_change_password or p.failed_login_count<>0 or p.locked_until is not null
+    or p.must_change_password or p.locked_until is not null
     or c.failure_code is not null or c.completed_at is not null
     or c.claim_digest is null or c.lease_expires_at is null
     or c.lease_expires_at>=writers_paused_at

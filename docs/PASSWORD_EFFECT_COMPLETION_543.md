@@ -88,3 +88,14 @@ migration은 원 PR proof를 재사용했고 DB 시작/재구축/SQL/경합 단�
 검사 전후: Auth users/sessions, profiles, password commands/versions, audit events 모두 0건으로 동일. 3개 prepare RPC ACL은 postgres/service_role EXECUTE로 동일. 임시 검사/복구 함수 잔존0.
 history112 fingerprint `a3471c4698cc9c5622412323d467fc2a` 동일. 이 검증은 기존 격리112에서의 좁은 복구 회귀이며 운영124 전체 동등성이나 실제 동시 경합 검증을 주장하지 않는다.
 운영 함수 migration·계정 복구·세션 종료·유지보수는 모두 NOT RUN, 별도 실행 승인 필요.
+
+## 운영 승인 후 사전 상태 보완 — 2026-10-31
+
+사용자가 함수1개 적용·비밀번호변경/초기화 일시중지·기존 요청1건 복구·대상 세션 종료 및 권한 원복을 승인했다.
+사전 상태는 동일 요청/effect이나 failed_login_count=3, locked_until=NULL이다. 기존 0 전제 helper로 복구하지 않고, profile UPDATE 없이 exact snapshot의 3을 보존하도록 보완했다. 실행 중 실패 횟수가 변하거나 잠금이 있으면 계속 거부한다.
+독립 보안 검토는 이 방식이 잠금/실패횟수 초기화가 아님을 확인했다. 기존 격리 DB에서 추가 좁은 SQL 검사15건, 최종17건 모두 PASS/ROLLBACK. 3 보존 성공·snapshot3→실제4 거부·잠금 존재 거부를 추가했다. 실제 운영 계정을 이용한 변경 시험은 하지 않았다.
+typecheck/build/Node3170 PASS. helper SHA256 `5090cf973b2f1fc235afdb288e666884525434876d5f1182e3373dc2f86285f0`.
+
+운영 migration `20261031030416/password_effect_completion` 적용, history124 및 main 함수 본문 정확 일치/ACL 보존 확인.
+12:05:41 KST 세 prepare RPC의 service_role EXECUTE 차단, owner 권한 보존. 12:20:42 이후 최소15분 및 이전 요청 종료 확인 전까지 계정 복구하지 않는다.
+이 기록 시점 유지보수 활성, 실제 계정 복구 미실행. 이후 완료 기록에서 실제 결과와 권한 원복을 확인해야 한다.

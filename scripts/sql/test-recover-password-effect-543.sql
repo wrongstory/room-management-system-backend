@@ -31,7 +31,7 @@ create temporary table recovery_cases(n integer, c jsonb,p jsonb,v jsonb);
 do $$
 declare n integer;
 begin
- for n in 1..4 loop
+ for n in 1..7 loop
   insert into auth.users(id) values(pg_temp.fixture_id(100+n));
   insert into auth.sessions(id,user_id) values(pg_temp.fixture_id(900+n),pg_temp.fixture_id(100+n));
   insert into public.profiles(id,auth_user_id,display_name,display_name_normalized,login_id,login_id_normalized,login_sequence,role,status,must_change_password)
@@ -41,6 +41,8 @@ begin
   values(pg_temp.fixture_id(n),pg_temp.fixture_id(100+n),'recover-key-'||n,repeat('a',64),repeat('e',64),private.password_change_session_digest(pg_temp.fixture_id(900+n)),'auth_pending',repeat('b',64),clock_timestamp()-interval '30 minutes',clock_timestamp()-interval '1 hour',clock_timestamp()-interval '1 hour');
   update auth.users set encrypted_password='synthetic-recovery-'||n where id=pg_temp.fixture_id(100+n);
   delete from auth.sessions where id=pg_temp.fixture_id(900+n);
+  if n>=5 then update public.profiles set failed_login_count=3 where id=pg_temp.fixture_id(n); end if;
+  if n=7 then update public.profiles set locked_until=clock_timestamp()+interval '1 hour' where id=pg_temp.fixture_id(n); end if;
   insert into recovery_cases
   select n,to_jsonb(c),jsonb_build_object('id',p.id,'auth_user_id',p.auth_user_id,'status',p.status,'role',p.role,'must_change_password',p.must_change_password,'failed_login_count',p.failed_login_count,'locked_until',p.locked_until),to_jsonb(v)
   from private.password_change_commands c join public.profiles p on p.id=c.actor_profile_id
@@ -72,5 +74,10 @@ insert into public.audit_events(actor_profile_id,event_type,entity_type,entity_i
 select pg_temp.fixture_id(2),'account.password_changed','profile',pg_temp.fixture_id(4),clock_timestamp(),jsonb_build_object('mustChangePassword',false),c->>'request_hash',private.password_change_audit_key(pg_temp.fixture_id(4),c->>'idempotency_key') from recovery_cases where n=4;
 select pg_temp.assert_throws($$select pg_temp.run_recovery(4)$$,'P0001','RECOVERY_SNAPSHOT_CHANGED','any existing audit key blocks recovery');
 select pg_temp.assert_same((select count(*) from private.password_change_commands where actor_profile_id in(pg_temp.fixture_id(2),pg_temp.fixture_id(3),pg_temp.fixture_id(4)) and state='auth_pending'),3::bigint,'negative cases preserve pending receipts');
+select pg_temp.assert_same(pg_temp.run_recovery(5),'completed','exact existing failure count allows receipt-only recovery');
+select pg_temp.assert_same((select failed_login_count from public.profiles where id=pg_temp.fixture_id(5)),3,'existing failures are never cleared');
+update public.profiles set failed_login_count=4 where id=pg_temp.fixture_id(6);
+select pg_temp.assert_throws($$select pg_temp.run_recovery(6)$$,'P0001','RECOVERY_SNAPSHOT_CHANGED','three-to-four failures invalidates snapshot');
+select pg_temp.assert_throws($$select pg_temp.run_recovery(7)$$,'P0001','RECOVERY_SNAPSHOT_CHANGED','even exact snapshot cannot unlock a locked account');
 
 rollback;
