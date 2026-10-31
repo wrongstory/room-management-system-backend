@@ -1,5 +1,24 @@
 # v1.0.0 개발·배포 준비 상태
 
+## 2026-10-31 #543 main hotfix의 dev 통합
+
+#546까지 포함한 로컬 후보 `6e0edba` 확인 뒤 main은 PR545의 `d3ecff1`로 전진했다.
+사용자 지시에 따라 [#543 비밀번호 효과 완료](PASSWORD_EFFECT_COMPLETION_543.md)를
+별도 dev PR로 백포트한다. 원문 SQL/hash와 기존141개 migration을 보존한 source142이며,
+새 head는 `password_effect_completion`이다. 기존 #534 메모와10경합 준비도 보존한다.
+manifest·upgrade 검사의 정확한 tip/hash와 developer head만 dev 순번에 맞게 통합한다.
+
+일반 dev PR은 source/application/Edge·독립 QA를 수행하고 **Full DB NOT RUN**으로 남긴다.
+보호 병합 후 로컬 release에 통합하고 main hotfix 포함·최종 지문을 다시 고정한다.
+아래 과거 source141/`6d13f13`/`6e0edba` 수치·지문을 새 통합본에 사용하지 않는다.
+PR545의 hotfix124 Full DB 성공도 별도 입력이므로 v1.0.0 proof가 아니다.
+
+이 통합은 #396의 미완성 초기화 범위를 완료하거나 릴리스에서 자동 제외하지 않는다.
+기존 제품 범위·최종 입력 동결 조건을 해소한 뒤에만 전체 DB를 유발하는 release push/PR
+생성·재실행 전에 승인받는다. 격리 전체 DB1회 승인은 기존 fresh/upgrade 재구축·fixture·
+실패 cleanup을 포함해야 한다. 운영 history/baseline·정확한 pending은 별도 확인하고
+운영 적용 직전에 다시 승인받는다. 현재 통합본의 실제 DB·배포·복구/UAT는 미완료다.
+
 ## 2026-10-31 #534 최종 DB 검증 범위 보완
 
 #534 배정 메모의 PR539와 #535 비밀번호 hotfix는 후보에 이미 포함되어 있다.
