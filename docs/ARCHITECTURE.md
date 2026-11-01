@@ -1440,3 +1440,8 @@ prepare_password_change의 execute/recover 응답 모두 저장된 effectMarker�
 확인된 초기 계정의 만료 요청만 승인된 운영 점검 후 failed로 보존하는 세션 한정
 복구 절차를 [별도 문서](PASSWORD_CHANGE_RECOVERY_535.md)에 둔다.
 일반 사용자/서비스 RPC 권한이나 자동 Auth 재실행을 추가하지 않는다. 운영 적용은 미실행이다.
+
+
+## #548 예약 지연 등록·입실 상태 읽기 후보
+
+새 테이블/업무 원장 쓰기 없이 service-role 전용 `get_room_board_arrival_projection` 읽기 RPC를 추가한다. 기존 날짜별 projection을 보존하며 LIVE의 실제 입실 상태·예약 등록 시각·예약별 준비 사유를 추가한다. [계약 및 미실행 DB gate](./LATE_RESERVATION_548.md)를 따른다.

@@ -442,7 +442,7 @@ function operationClients(calls: Array<[string, Record<string, unknown>]>) {
     admin: {
       async rpc(name: string, args: Record<string, unknown>) {
         calls.push([name, args]);
-        if (name === "get_room_board_projection") {
+        if (name === "get_room_board_arrival_projection") {
           return { data: [roomRow], error: null };
         }
         if (name === "change_room_master_data") {
@@ -1551,4 +1551,21 @@ Deno.test("room event timeline maps the bounded safe projection", async () => {
     !JSON.stringify(timeline).includes("must-not-leak"),
     "raw and unknown summary fields removed",
   );
+});
+
+Deno.test("#548 arrival facts survive Edge mapping without private payload", () => {
+  const arrival = {
+    status: "CHECKIN_PENDING",
+    checkInReady: false,
+    reasonCodes: ["CLEANING_REQUIRED"],
+    actualCheckInAt: null,
+    recordedAt: "2026-11-01T09:00:00+09:00",
+  };
+  const mapped = toRoomProjections([{
+    ...roomRow,
+    arrival: { ...arrival, privatePayload: "hidden" },
+  }]);
+  if (JSON.stringify(mapped[0]?.arrival) !== JSON.stringify(arrival)) {
+    throw new Error("ARRIVAL_MAPPING_MISMATCH");
+  }
 });

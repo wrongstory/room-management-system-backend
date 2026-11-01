@@ -1600,3 +1600,8 @@ partial unique request ID와 exact immutable command_executions 2개·scheduler 
 head는 actor/project/key UNIQUE와 불변 header, CAS version/hash를 가지며 events의 head FK/sequence PK가
 전체 이력을 보존한다. Auth/profile cascade FK는 없고 직접 table 권한은 닫혀 있다.
 실제 SQL NOT RUN이며 [영속 원장 계약](./RESET_RECEIPT_STORE.md)을 따른다.
+
+
+## #548 예약 지연 등록·입실 상태 읽기 후보
+
+새 테이블/업무 원장 쓰기 없이 service-role 전용 `get_room_board_arrival_projection` 읽기 RPC를 추가한다. 기존 날짜별 projection을 보존하며 LIVE의 실제 입실 상태·예약 등록 시각·예약별 준비 사유를 추가한다. [계약 및 미실행 DB gate](./LATE_RESERVATION_548.md)를 따른다.

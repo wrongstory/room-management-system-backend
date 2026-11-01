@@ -708,3 +708,25 @@ describe('reservation privacy and idempotency', () => {
     })).rejects.toMatchObject({ statusCode, code: message });
   });
 });
+
+
+describe('#548 late registration preserves the submitted schedule', () => {
+  it.each([
+    ['2026-11-01T15:59:00+09:00', '2026-11-01T16:00:00+09:00', '2026-11-02T11:00:00+09:00'],
+    ['2026-11-01T16:00:00+09:00', '2026-11-01T16:00:00+09:00', '2026-11-02T11:00:00+09:00'],
+    ['2026-11-01T16:01:00+09:00', '2026-11-01T16:00:00+09:00', '2026-11-02T11:00:00+09:00'],
+    ['2026-11-01T18:00:00+09:00', '2026-10-31T16:00:00+09:00', '2026-11-02T11:00:00+09:00'],
+    ['2026-11-01T18:00:00+09:00', '2026-10-31T16:00:00+09:00', '2026-11-01T11:00:00+09:00'],
+    ['2026-11-01T18:00:00+09:00', '2026-10-31T16:00:00+09:00', null]
+  ])('accepts the existing command at %s without running a global transition', async (now, checkInAt, checkOutAt) => {
+    vi.useFakeTimers(); vi.setSystemTime(new Date(now));
+    try {
+      const rpc = vi.fn().mockResolvedValue({ data: { ...commandResult, check_in_at: checkInAt, check_out_at: checkOutAt, created_at: now }, error: null });
+      const service = new SupabaseReservationService({ admin: { rpc } } as unknown as SupabaseClients, piiKey, '1', guestNamePepper);
+      const result = await service.create(actor, { roomId: commandResult.room_id, reservationType: checkOutAt === null ? 'long_stay' : 'standard', checkInAt, checkOutAt, guestCount: 2, expectedRoomVersion: 1, idempotencyKey: 'late-registration-test' });
+      expect(rpc).toHaveBeenCalledTimes(1);
+      expect(rpc).toHaveBeenCalledWith('create_reservation_v2', expect.objectContaining({ p_check_in_at: checkInAt, p_check_out_at: checkOutAt }));
+      expect(result).toMatchObject({ checkInAt, checkOutAt, actualCheckInAt: null, createdAt: now });
+    } finally { vi.useRealTimers(); }
+  });
+});
