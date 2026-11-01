@@ -12,6 +12,7 @@ const sourcePaths = [
   'src/modules/auth/auth-context.ts',
   'src/modules/rooms/room-ready-correction-contract.ts',
   'src/modules/rooms/room-arrival-contract.ts',
+  'src/modules/rooms/room-fixed-memo-contract.ts',
   'supabase/functions/_shared/http-admission.ts',
   'supabase/functions/_shared/http-admission-api.ts',
   'supabase/functions/_shared/operation-atomic-rpc.ts',

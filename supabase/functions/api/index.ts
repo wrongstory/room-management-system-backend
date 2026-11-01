@@ -1,3 +1,4 @@
+import { roomFixedMemo } from "../_shared/room-api.ts";
 import {
   installAtomicHttpAdmission,
   prepareHttpAdmission,
@@ -2058,6 +2059,19 @@ async function handleApiRequestCore(
     if (request.method === "GET" && path === "/v1/room-types") {
       const response = jsonResponse(
         { items: await listRoomTypes(request, clients, actor) },
+        200,
+        corsHeaders,
+      );
+      response.headers.set("Cache-Control", "no-store");
+      return response;
+    }
+    if (
+      (request.method === "GET" || request.method === "PUT") &&
+      /^\/v1\/rooms\/[^/]+\/fixed-memo$/.test(path)
+    ) {
+      const { roomId } = roomPathIds(path);
+      const response = jsonResponse(
+        { fixedMemo: await roomFixedMemo(request, clients, actor, roomId) },
         200,
         corsHeaders,
       );

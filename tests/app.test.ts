@@ -461,6 +461,8 @@ function services(): AppServices {
       get: vi.fn(),
       changeMasterData: vi.fn(),
       mutateOperation: vi.fn(),
+      getFixedMemo: vi.fn(),
+      setFixedMemo: vi.fn(),
       listCandles: vi.fn(),
       correctOccupancy: vi.fn(async (_actor, input) => ({
         correctionId: '71000000-0000-4000-8000-000000000001',
@@ -2692,4 +2694,22 @@ describe('application', () => {
     expect(extra.statusCode).toBe(400);
     await app.close();
   });
+});
+
+
+describe('#551 room fixed memo HTTP',()=>{
+ it.each(['admin','maid'] as const)('exposes safe envelope and admin-only write for %s',async(role)=>{
+  const appServices=services(),roomId='33000000-0000-4000-8000-000000000001';
+  appServices.auth.authenticate=vi.fn(async(accessToken:string)=>({authUserId:roomId,profileId:roomId,displayName:'합성',role,mustChangePassword:false,accessToken}));
+  const result={roomId,memo:'화요일마다 청소',version:1,updatedAt:'2026-11-01T01:00:00Z'};
+  appServices.rooms.getFixedMemo=vi.fn(async()=>result);appServices.rooms.setFixedMemo=vi.fn(async()=>result);
+  const app=await buildApp({env,services:appServices,logger:false});
+  try{
+   const url=`/v1/rooms/${roomId}/fixed-memo`,headers={authorization:'Bearer token','idempotency-key':'memo-http-001'};
+   const read=await app.inject({method:'GET',url,headers});expect(read.statusCode).toBe(200);expect(read.json()).toEqual({fixedMemo:result});expect(read.headers['cache-control']).toBe('no-store');
+   const write=await app.inject({method:'PUT',url,headers,payload:{memo:result.memo,expectedVersion:0}});expect(write.statusCode).toBe(role==='admin'?200:403);
+   if(role==='maid')expect(appServices.rooms.setFixedMemo).not.toHaveBeenCalled();
+   expect((await app.inject({method:'GET',url:url+'?actorId=spoof',headers})).statusCode).toBe(400);
+  }finally{await app.close();}
+ });
 });

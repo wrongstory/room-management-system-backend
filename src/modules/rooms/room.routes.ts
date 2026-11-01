@@ -188,6 +188,17 @@ export function createRoomRoutes(roomService: RoomService): FastifyPluginAsync {
       if (!['admin', 'maid'].includes(request.actor.role)) throw new AppError(403, 'FORBIDDEN', '촛불 조정 권한이 필요합니다.');
     }];
 
+    app.get('/:roomId/fixed-memo', {preHandler: authenticated}, async (request,reply)=> {
+      if(Object.keys(request.query as object).length) throw new AppError(400,'ROOM_FIXED_MEMO_INVALID','조회 조건을 확인해 주세요.');
+      const {roomId}=roomIdSchema.parse(request.params);
+      return reply.header('Cache-Control','no-store').send({fixedMemo:await roomService.getFixedMemo(request.actor,roomId)});
+    });
+    app.put('/:roomId/fixed-memo', {preHandler: admin}, async (request,reply)=> {
+      if(Object.keys(request.query as object).length) throw new AppError(400,'ROOM_FIXED_MEMO_INVALID','조회 조건을 확인해 주세요.');
+      const {roomId}=roomIdSchema.parse(request.params);
+      return reply.header('Cache-Control','no-store').send({fixedMemo:await roomService.setFixedMemo(request.actor,{roomId,body:request.body,idempotencyKey:idempotencyKey(request)})});
+    });
+
     app.get('/', { preHandler: admin }, async (request, reply) => {
       const query = roomListQuerySchema.parse(request.query);
       return reply.header('Cache-Control', 'no-store').send({

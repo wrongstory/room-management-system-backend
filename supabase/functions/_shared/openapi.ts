@@ -5863,6 +5863,10 @@ export const openApiDocument = {
         },
       },
     },
+    "/v1/rooms/{roomId}/fixed-memo": {
+      get: roomFixedMemoOperation(false),
+      put: roomFixedMemoOperation(true),
+    },
     "/v1/rooms/{roomId}/master-data": {
       patch: roomMutationOperation(
         "changeRoomMasterData",
@@ -12941,6 +12945,17 @@ export const openApiDocument = {
           effectiveAt: { type: "string", format: "date-time" },
         },
       },
+      RoomFixedMemo: {
+        type: "object",
+        additionalProperties: false,
+        required: ["roomId", "memo", "version", "updatedAt"],
+        properties: {
+          roomId: { type: "string", format: "uuid" },
+          memo: { type: ["string", "null"], maxLength: 500 },
+          version: { type: "integer", minimum: 0, maximum: 9007199254740991 },
+          updatedAt: { type: ["string", "null"], format: "date-time" },
+        },
+      },
       RoomArrival: {
         type: "object",
         additionalProperties: false,
@@ -15412,6 +15427,68 @@ function roomReadResponses(): Record<string, unknown> {
     "403": errorResponse,
     "404": errorResponse,
     "500": errorResponse,
+  };
+}
+
+function roomFixedMemoOperation(write: boolean): Record<string, unknown> {
+  return {
+    tags: ["Rooms"],
+    operationId: write ? "setRoomFixedMemo" : "getRoomFixedMemo",
+    summary: write ? "객실 고정 메모 수정·비우기" : "객실 고정 메모 조회",
+    description:
+      "#551 개발 후보·운영 미반영. 관리자 수정/현재 통보 배정 메이드 조회. 500 UTF-16자, null은 비우기, 독립 메모 버전 CAS. 개인정보·PIN·링크 금지. 자동 배정 없음.",
+    security: [{ bearerAuth: [] }],
+    "x-required-roles": write ? ["admin"] : ["admin", "maid"],
+    parameters: [roomIdParameter(), ...(write ? [idempotencyHeader] : [])],
+    ...(write
+      ? {
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                additionalProperties: false,
+                required: ["memo", "expectedVersion"],
+                properties: {
+                  memo: { type: ["string", "null"], maxLength: 500 },
+                  expectedVersion: {
+                    type: "integer",
+                    minimum: 0,
+                    maximum: 9007199254740990,
+                  },
+                },
+              },
+            },
+          },
+        },
+      }
+      : {}),
+    responses: {
+      "200": {
+        description: "객실 고정 메모",
+        headers: { "Cache-Control": noStoreHeader },
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              additionalProperties: false,
+              required: ["fixedMemo"],
+              properties: {
+                fixedMemo: { $ref: "#/components/schemas/RoomFixedMemo" },
+              },
+            },
+          },
+        },
+      },
+      "400": errorResponse,
+      "401": errorResponse,
+      "403": errorResponse,
+      "404": errorResponse,
+      "409": errorResponse,
+      "500": errorResponse,
+      "503": errorResponse,
+    },
   };
 }
 

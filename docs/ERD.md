@@ -1605,3 +1605,8 @@ head는 actor/project/key UNIQUE와 불변 header, CAS version/hash를 가지며
 ## #548 예약 지연 등록·입실 상태 읽기 후보
 
 새 테이블/업무 원장 쓰기 없이 service-role 전용 `get_room_board_arrival_projection` 읽기 RPC를 추가한다. 기존 날짜별 projection을 보존하며 LIVE의 실제 입실 상태·예약 등록 시각·예약별 준비 사유를 추가한다. [계약 및 미실행 DB gate](./LATE_RESERVATION_548.md)를 따른다.
+
+
+## #551 객실 고정 메모 후보
+
+`private.room_fixed_memo_revisions(room_id,revision)`은 객실별 append-only 안내 원장이다. 관리자 수정, 실제 통보된 현재 담당 메이드 조회, 별도 CAS/멱등성, room/profile RESTRICT FK와 actor index를 사용한다. 배정·일정 자동 생성 없음. API·권한·마이그레이션 미실행 경계와 #396 미분류 차단은 [상세 인계](./ROOM_FIXED_MEMO_551.md)를 따른다.

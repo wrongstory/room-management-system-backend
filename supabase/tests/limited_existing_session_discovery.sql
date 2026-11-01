@@ -35,6 +35,10 @@ insert into limited_session_caller_extensions values
   ('public.preview_room_ready_correction(uuid,uuid,uuid,text)','public.preview_room_ready_correction','fresh','v','service-only'),
   ('public.apply_room_ready_correction(uuid,uuid,uuid,bigint,text,timestamptz,timestamptz,boolean,boolean,boolean,text,text,text)','public.apply_room_ready_correction','fresh','v','service-only');
 -- END APPROVED ROOM READY SESSION EXTENSIONS
+-- #551 exact new snapshot/fresh memo signatures, no overload allowance.
+insert into limited_session_caller_extensions values
+  ('public.get_room_fixed_memo(uuid,uuid,uuid)','public.get_room_fixed_memo','snapshot','s','service-only'),
+  ('public.set_room_fixed_memo(uuid,uuid,uuid,bigint,text,text,text)','public.set_room_fixed_memo','fresh','v','service-only');
 select ok((to_regprocedure('public.preview_room_ready_correction(uuid,uuid,uuid,text)') is null
     and to_regprocedure('public.apply_room_ready_correction(uuid,uuid,uuid,bigint,text,timestamptz,timestamptz,boolean,boolean,boolean,text,text,text)') is null)
   or (to_regprocedure('public.preview_room_ready_correction(uuid,uuid,uuid,text)') is not null
@@ -63,7 +67,7 @@ select ok(coalesce((select p.prokind='f' and l.lanname='plpgsql' and p.provolati
     /length(case when e.helper_kind='snapshot' then 'private.assert_attempt_actor_session('
       else 'private.assert_attempt_actor_session_fresh(' end)=case when e.signature in (
         'public.preview_room_ready_correction(uuid,uuid,uuid,text)',
-        'public.apply_room_ready_correction(uuid,uuid,uuid,bigint,text,timestamptz,timestamptz,boolean,boolean,boolean,text,text,text)') then 2 else 1 end
+        'public.apply_room_ready_correction(uuid,uuid,uuid,bigint,text,timestamptz,timestamptz,boolean,boolean,boolean,text,text,text)') then 2 when e.signature='public.set_room_fixed_memo(uuid,uuid,uuid,bigint,text,text,text)' then 3 else 1 end
   and strpos(p.prosrc,case when e.helper_kind='snapshot'
     then 'private.assert_attempt_actor_session_fresh(' else 'private.assert_attempt_actor_session(' end)=0
   and strpos(p.prosrc,'private.assert_attempt_actor_session_at_clock(')=0

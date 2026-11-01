@@ -1,0 +1,25 @@
+import {describe,it,expect,vi} from 'vitest';
+import {readFileSync} from 'node:fs';
+import {SupabaseRoomService} from '../src/modules/rooms/room.service.js';
+import {fixedMemoRoomId,normalizeRoomFixedMemo,parseRoomFixedMemoInput,parseRoomFixedMemo} from '../src/modules/rooms/room-fixed-memo-contract.js';
+import type {Actor} from '../src/domain/actor.js';
+import type {SupabaseClients} from '../src/lib/supabase.js';
+import {httpAdmissionRoute} from '../src/modules/developer-reset/http-admission.js';
+const roomId='30000000-0000-4000-8000-000000000001',session='50000000-0000-4000-8000-000000000001';
+const actor:Actor={authUserId:'10000000-0000-4000-8000-000000000001',profileId:'20000000-0000-4000-8000-000000000001',role:'admin',displayName:'관리자',mustChangePassword:false,accessToken:`e30.${Buffer.from(JSON.stringify({session_id:session})).toString('base64url')}.signature`};
+const empty={roomId,memo:null,version:0,updatedAt:null};
+const saved={roomId,memo:'화요일마다 청소',version:1,updatedAt:'2026-11-01T01:00:00Z'};
+function service(data:unknown=saved,error:unknown=null){const rpc=vi.fn(async()=>({data,error}));return {rpc,api:new SupabaseRoomService({admin:{rpc}} as unknown as SupabaseClients)};}
+describe('room persistent memo551',()=>{
+ it('normalizes clearing and Unicode with strict independent versions',()=>{expect(parseRoomFixedMemoInput({memo:' 화요일마다 청소 ',expectedVersion:0})).toEqual({memo:'화요일마다 청소',expectedVersion:0});expect(normalizeRoomFixedMemo(' \n')).toBeNull();expect(normalizeRoomFixedMemo(null)).toBeNull();expect(normalizeRoomFixedMemo('😀'.repeat(250))).toHaveLength(500);expect(fixedMemoRoomId(roomId.toUpperCase())).toBe(roomId);});
+ it.each([undefined,{},[],{memo:'a'},{memo:'a',expectedVersion:-1},{memo:'a',expectedVersion:0.1},{memo:'a',expectedVersion:Number.MAX_SAFE_INTEGER},{memo:'a',expectedVersion:0,roomId}])('rejects malformed input %j',v=>expect(()=>parseRoomFixedMemoInput(v)).toThrow());
+ it.each(['x'.repeat(501),'😀'.repeat(251),'\ud800','\udc00','\0','x@y.example','https://example.com','010-1234-5678','PIN: 1234'])('rejects unsafe memo %j',v=>expect(()=>normalizeRoomFixedMemo(v)).toThrow());
+ it('returns only safe projection fields and empty baseline',()=>{expect(parseRoomFixedMemo({...saved,actorId:'hidden',pin:'hidden'},roomId)).toEqual(saved);expect(parseRoomFixedMemo(empty,roomId)).toEqual(empty);});
+ it.each([{...saved,roomId:'wrong'},{...saved,version:0},{...saved,version:1.5},{...saved,updatedAt:null},{...saved,memo:' untrimmed '},{}])('rejects invalid database output %j',v=>expect(()=>parseRoomFixedMemo(v,roomId)).toThrow());
+ it.each(['admin','maid'] as const)('binds %s current session on GET',async role=>{const {api,rpc}=service(empty);expect(await api.getFixedMemo({...actor,role},roomId)).toEqual(empty);expect(rpc).toHaveBeenCalledWith('get_room_fixed_memo',{p_actor_profile_id:actor.profileId,p_session_id:session,p_room_id:roomId});});
+ it('binds normalized command and independent CAS',async()=>{const {api,rpc}=service();expect(await api.setFixedMemo(actor,{roomId,body:{memo:' 화요일마다 청소 ',expectedVersion:0},idempotencyKey:'memo-key-001'})).toEqual(saved);expect(rpc).toHaveBeenCalledWith('set_room_fixed_memo',expect.objectContaining({p_memo:'화요일마다 청소',p_expected_version:0,p_session_id:session,p_request_hash:expect.stringMatching(/^[a-f0-9]{64}$/)}));});
+ it('blocks maid edits/password gate before any RPC',async()=>{const {api,rpc}=service();await expect(api.setFixedMemo({...actor,role:'maid'},{roomId,body:{memo:null,expectedVersion:0},idempotencyKey:'memo-key-001'})).rejects.toMatchObject({statusCode:403});await expect(api.getFixedMemo({...actor,mustChangePassword:true},roomId)).rejects.toMatchObject({statusCode:403});expect(rpc).not.toHaveBeenCalled();});
+ it.each([['ROOM_FIXED_MEMO_FORBIDDEN',403],['STALE_VERSION',409],['ROOM_FIXED_MEMO_INVALID',400],['PASSWORD_CHANGE_REQUIRED',403]] as const)('preserves %s database rejection',async(message,statusCode)=>{const {api}=service(null,{message,code:'P0001'});await expect(api.getFixedMemo(actor,roomId)).rejects.toMatchObject({statusCode,code:message});});
+ it('admits only the exact admin write route',()=>{expect(httpAdmissionRoute('PUT',`/v1/rooms/${roomId}/fixed-memo`)).toMatchObject({routeId:'setRoomFixedMemo',rpc:'set_room_fixed_memo',authority:'ACTIVE_SESSION'});expect(httpAdmissionRoute('GET',`/v1/rooms/${roomId}/fixed-memo`)).toBeUndefined();});
+ it('preserves immutable history, authorization after waits and no scheduling side effects',()=>{const sql=readFileSync('supabase/migrations/20261101131722_room_fixed_memo.sql','utf8');expect(sql.match(/private\.assert_attempt_actor_session_fresh\(/g)).toHaveLength(3);expect(sql).toContain('a.notified_room_id_snapshot=t.room_id');expect(sql).toContain('a.revision=t.assignment_version');expect(sql).toContain('private.pin_assignment_outbox_evidence(a.id)');expect(sql).toContain('before update or delete');expect(sql).toContain('for update');expect(sql).toContain('current_version<>p_expected_version');expect(sql).not.toMatch(/insert into public\.(cleaning_targets|cleaning_assignments|notification_outbox)/);});
+});

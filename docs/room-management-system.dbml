@@ -3254,3 +3254,17 @@ Ref: private.developer_reset_receipt_events.receipt_id > private.developer_reset
 
 // #548: read-only get_room_board_arrival_projection adds LIVE arrival facts; no table changes.
 // See docs/LATE_RESERVATION_548.md. DB verification and production application are pending approval.
+
+
+Table private.room_fixed_memo_revisions {
+  room_id uuid [not null, ref: > rooms.id]
+  revision bigint [not null]
+  memo text
+  actor_profile_id uuid [not null, ref: > profiles.id]
+  recorded_at timestamptz [not null]
+  indexes {
+    (room_id, revision) [pk]
+    actor_profile_id
+  }
+  Note: '#551 candidate only. Append-only; RLS runtime direct deny. RESTRICT FKs, scoped service-only RPCs, version CAS and receipt replay. Null revision clears but preserves history. No scheduling. Migration NOT RUN; reset classification remains fail closed.'
+}

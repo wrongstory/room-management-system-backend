@@ -1,3 +1,4 @@
+import { fixedMemoErrors, fixedMemoRoomId, parseRoomFixedMemo, parseRoomFixedMemoInput, RoomFixedMemoError, type RoomFixedMemo } from './room-fixed-memo-contract.js';
 import { parseRoomArrival, type RoomArrival } from './room-arrival-contract.js';
 import { randomInt, randomUUID } from 'node:crypto';
 import type { Actor } from '../../domain/actor.js';
@@ -439,6 +440,8 @@ export interface RoomEventsResult {
 }
 
 export interface RoomService {
+  getFixedMemo(actor: Actor, roomId: string): Promise<RoomFixedMemo>;
+  setFixedMemo(actor: Actor, input: {roomId: string; body: unknown; idempotencyKey: string}): Promise<RoomFixedMemo>;
   previewReadyCorrection(actor: Actor, input: RoomReadyPreviewRequest & { roomId: string }): Promise<RoomReadyPreview>;
   applyReadyCorrection(actor: Actor, input: RoomReadyCorrectionRequest & { roomId: string; idempotencyKey: string }): Promise<RoomReadyCorrectionResult>;
   listCandles(actor: Actor, input: { roomId?: string | undefined; cursor?: string | undefined; limit?: number | undefined }): Promise<RoomCandlePage>;
@@ -756,7 +759,14 @@ export function generateUniqueFourDigitPins(
   return [...values].map((value) => value.toString().padStart(4, '0'));
 }
 
+function fixedMemoAppError(error: unknown): unknown {
+  if(error instanceof RoomFixedMemoError) return new AppError(error.output?500:400,
+    error.output?'ROOM_FIXED_MEMO_RESPONSE_INVALID':'ROOM_FIXED_MEMO_INVALID',error.output?'객실 메모를 불러오지 못했습니다.':'객실 메모 입력을 확인해 주세요.');
+  return error;
+}
 function roomError(error: { message?: string } | null): AppError {
+  const fixed=fixedMemoErrors.find(([code])=>error?.message?.includes(code));
+  if(fixed) return new AppError(fixed[1],fixed[0],fixed[2]);
   const correctionError = roomReadyErrors.find(([code]) => error?.message?.includes(code));
   if (correctionError) return new AppError(correctionError[1], correctionError[0], correctionError[2]);
   const message = error?.message ?? '';
@@ -973,6 +983,34 @@ function roomReadySessionId(actor: Actor): string {
 }
 
 export class SupabaseRoomService implements RoomService {
+  async getFixedMemo(actor: Actor, rawRoomId: string): Promise<RoomFixedMemo> {
+    if (!['admin','maid'].includes(actor.role)) throw new AppError(403,'ROOM_FIXED_MEMO_FORBIDDEN','객실 메모 조회 권한이 없습니다.');
+    if (actor.mustChangePassword) throw new AppError(403,'PASSWORD_CHANGE_REQUIRED','비밀번호를 먼저 변경해 주세요.');
+    try {
+      const roomId=fixedMemoRoomId(rawRoomId);
+      const {data,error}=await this.clients.admin.rpc('get_room_fixed_memo', {
+        p_actor_profile_id:actor.profileId,p_session_id:verifiedSessionId(actor.accessToken),p_room_id:roomId
+      });
+      if(error) throw roomError(error);
+      return parseRoomFixedMemo(data,roomId);
+    } catch(error) { throw fixedMemoAppError(error); }
+  }
+  async setFixedMemo(actor: Actor, input: {roomId:string;body:unknown;idempotencyKey:string}): Promise<RoomFixedMemo> {
+    ensureAdmin(actor);
+    if(actor.mustChangePassword) throw new AppError(403,'PASSWORD_CHANGE_REQUIRED','비밀번호를 먼저 변경해 주세요.');
+    try {
+      const roomId=fixedMemoRoomId(input.roomId), parsed=parseRoomFixedMemoInput(input.body);
+      if(!/^[A-Za-z0-9._:-]{8,128}$/.test(input.idempotencyKey)) throw new RoomFixedMemoError();
+      const {data,error}=await this.clients.admin.rpc('set_room_fixed_memo', {
+        p_actor_profile_id:actor.profileId,p_session_id:verifiedSessionId(actor.accessToken),p_room_id:roomId,
+        p_expected_version:parsed.expectedVersion,p_memo:parsed.memo,p_idempotency_key:input.idempotencyKey,
+        p_request_hash:requestHash({roomId,...parsed})
+      });
+      if(error) throw roomError(error);
+      return parseRoomFixedMemo(data,roomId);
+    } catch(error) { throw fixedMemoAppError(error); }
+  }
+
   async previewReadyCorrection(actor: Actor, input: RoomReadyPreviewRequest & { roomId: string }): Promise<RoomReadyPreview> {
     ensureAdmin(actor);
     if (actor.mustChangePassword) throw new AppError(403, 'PASSWORD_CHANGE_REQUIRED', '비밀번호를 먼저 변경해 주세요.');
