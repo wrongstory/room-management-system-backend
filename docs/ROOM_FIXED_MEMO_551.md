@@ -27,7 +27,7 @@
 ## 검증·배포 경계
 
 - 신규 migration `20261101131722_room_fixed_memo.sql`: **작성만 완료 / 실행 NOT RUN**. source144.
-- 합성 SQL `supabase/tests/room_fixed_memo.sql` 및 세션 호출자 inventory 갱신: **실제 SQL NOT RUN**. 최종 승인된 통합 DB1회에서 권한·replay·CAS·통보 배정·clearing·세션 만료를 확인한다. 실제 동시 DB 경합 검증도 남아 있다.
+- 합성 SQL `supabase/tests/room_fixed_memo.sql` 및 세션 호출자 inventory 갱신: **실제 SQL NOT RUN**. 최종 승인된 통합 DB1회에서 권한·replay·CAS·통보 배정·clearing·세션 만료를 확인한다. `scripts/test-room-fixed-memo-concurrency.mjs`는 기존 reservation 경합 runner의 동일 임시 DB 안에서 실제 세 연결과 `pg_blocking_pids` 장벽으로 여덟 경합(두 관리자 다른 키 동일 버전, 동일 키/본문, 동일 키/다른 본문, 비우기↔수정 두 승자 순서와 과거 이력 보존, receipt 대기 중 세션 폐기, 객실 잠금 대기 중 세션 만료/폐기)을 준비했다. revision·감사·receipt의 정확한 효과 수와 무효 세션의 쓰기0을 검사한다. 전체 direct entry12·reset79는 유지하며 추가 start/reset은0이다. 모듈 작업60초·연결 종료10초, 연결3초·query7초·statement5초·lock4초·idle15초·장벽3초 상한을 사용한다. 자기 연결만 종료하고 합성 원장은 기존 임시 DB 정리 범위에서 제거한다. DB 없는 장벽/오류·종료 검사와 실제 SQL/경합 성공은 구분하며 **실제 동시 DB 경합 NOT RUN**이다.
 - 초기 독립 QA의 Edge 경로 추출 누락과 DB 비밀번호 필수 오류 안내를 보완했고 실제 HTTP dispatch 회귀를 추가했다. 최종 검사 결과는 PR/이슈 기록을 따른다.
 - source/manifest 통과는 실제 DB 통과가 아니다. 로컬/CI/운영 migration·DB재구축 실행 전 각각 사용자 승인 필요.
 - 배포 순서: 최종 릴리스 입력 확정 → 승인된 격리 DB1회 → 필수 CI/독립 QA → 승인된 운영 migration → API/Swagger → 프런트 연동·사용자 확인.

@@ -8,14 +8,19 @@ $$;
 create function pg_temp.memo_day() returns date language sql stable as $$
   select (transaction_timestamp() at time zone 'Asia/Seoul')::date
 $$;
-insert into auth.users(id) select pg_temp.memo_id(100+n) from generate_series(1,4) n;
+insert into auth.users(id) select pg_temp.memo_id(100+n) from generate_series(1,5) n;
+-- Bootstrap the synthetic singleton before business profiles; do not bypass its guard.
+set local role service_role;
+select public.bootstrap_first_developer_profile(pg_temp.memo_id(5),pg_temp.memo_id(105),
+  'memo-developer','memo-developer','0551','fixed-memo-developer-phone-hash','fixed-memo-bootstrap');
+reset role;
 insert into public.profiles(id,auth_user_id,display_name,display_name_normalized,login_id,login_id_normalized,
   login_sequence,role,status,must_change_password)
 select pg_temp.memo_id(n),pg_temp.memo_id(100+n),'메모 합성 '||n,'메모 합성 '||n,
   'fixed-memo-fixture-'||n,'fixed-memo-fixture-'||n,0,case when n<3 then 'admin' else 'maid' end::public.app_role,'active',false
 from generate_series(1,4) n;
 insert into auth.sessions(id,user_id,created_at,updated_at,not_after)
-select pg_temp.memo_id(200+n),pg_temp.memo_id(100+n),now(),now(),now()+interval '1 hour' from generate_series(1,4) n;
+select pg_temp.memo_id(200+n),pg_temp.memo_id(100+n),now(),now(),now()+interval '1 hour' from generate_series(1,5) n;
 insert into public.availability_versions(maid_profile_id,week_start,version,submitted_at)
 select pg_temp.memo_id(n),pg_temp.memo_day()-(extract(isodow from pg_temp.memo_day())::integer-1)+w*7,1,now()
 from generate_series(3,4) n cross join generate_series(0,1) w;
@@ -57,6 +62,32 @@ select public.commit_and_notify_assignments(pg_temp.memo_id(1),pg_temp.memo_day(
   'fixed-memo-notify',repeat('b',64)) from memo_impact;
 select is(public.get_room_fixed_memo(pg_temp.memo_id(3),pg_temp.memo_id(203),pg_temp.memo_room())->>'memo','매주 화요일 청소','actual notified maid reads current room memo');
 select throws_ok($$select public.get_room_fixed_memo(pg_temp.memo_id(4),pg_temp.memo_id(204),pg_temp.memo_room())$$,'42501','ROOM_FIXED_MEMO_FORBIDDEN','other maid cannot read');
+-- Source-prepared authority matrix, NOT RUN. These status changes are synthetic
+-- boundary setup, not evidence that an operational account lifecycle was exercised.
+select throws_ok($$select public.get_room_fixed_memo(pg_temp.memo_id(5),pg_temp.memo_id(205),pg_temp.memo_room())$$,'42501','ROOM_FIXED_MEMO_FORBIDDEN','developer has no business memo read authority');
+select throws_ok($$select pg_temp.memo_write(5,2,'개발자 수정','fixed-memo-developer-write')$$,'42501','ADMIN_REQUIRED','developer cannot edit business memo');
+update public.profiles set status='inactive' where id=pg_temp.memo_id(1);
+select throws_ok($$select public.get_room_fixed_memo(pg_temp.memo_id(1),pg_temp.memo_id(201),pg_temp.memo_room())$$,'42501','ROOM_FIXED_MEMO_FORBIDDEN','inactive admin cannot read memo');
+select throws_ok($$select pg_temp.memo_write(1,2,'비활성 수정','fixed-memo-inactive-admin')$$,'42501','ADMIN_REQUIRED','inactive admin cannot edit memo');
+select throws_ok($$select pg_temp.memo_write(1,0,' 화요일마다 청소 ','fixed-memo-001')$$,'42501','ADMIN_REQUIRED','inactive admin cannot replay a successful memo write');
+update public.profiles set status='active' where id=pg_temp.memo_id(1);
+update public.profiles set status='inactive' where id=pg_temp.memo_id(3);
+select throws_ok($$select public.get_room_fixed_memo(pg_temp.memo_id(3),pg_temp.memo_id(203),pg_temp.memo_room())$$,'42501','ROOM_FIXED_MEMO_FORBIDDEN','inactive notified maid cannot read memo');
+select throws_ok($$select pg_temp.memo_write(3,2,'비활성 수정','fixed-memo-inactive-maid')$$,'42501','ADMIN_REQUIRED','inactive maid cannot edit memo');
+update public.profiles set status='active' where id=pg_temp.memo_id(3);
+update public.profiles set status='upload_only' where id=pg_temp.memo_id(3);
+select throws_ok($$select public.get_room_fixed_memo(pg_temp.memo_id(3),pg_temp.memo_id(203),pg_temp.memo_room())$$,'42501','ROOM_FIXED_MEMO_FORBIDDEN','upload-only notified maid cannot read general room memo');
+select throws_ok($$select pg_temp.memo_write(3,2,'제한 수정','fixed-memo-upload-only')$$,'42501','ADMIN_REQUIRED','upload-only maid cannot edit memo');
+update public.profiles set status='active' where id=pg_temp.memo_id(3);
+update public.profiles set must_change_password=true where id in(pg_temp.memo_id(1),pg_temp.memo_id(3));
+select throws_ok($$select public.get_room_fixed_memo(pg_temp.memo_id(1),pg_temp.memo_id(201),pg_temp.memo_room())$$,'42501','PASSWORD_CHANGE_REQUIRED','temporary-password admin cannot read memo');
+select throws_ok($$select public.get_room_fixed_memo(pg_temp.memo_id(3),pg_temp.memo_id(203),pg_temp.memo_room())$$,'42501','PASSWORD_CHANGE_REQUIRED','temporary-password notified maid cannot read memo');
+select throws_ok($$select pg_temp.memo_write(1,2,'임시 비밀번호 수정','fixed-memo-password-gate')$$,'42501','PASSWORD_CHANGE_REQUIRED','temporary-password admin cannot edit memo');
+select throws_ok($$select pg_temp.memo_write(1,0,' 화요일마다 청소 ','fixed-memo-001')$$,'42501','PASSWORD_CHANGE_REQUIRED','password gate also denies a successful memo write replay');
+update public.profiles set must_change_password=false where id in(pg_temp.memo_id(1),pg_temp.memo_id(3));
+select is(public.get_room_fixed_memo(pg_temp.memo_id(3),pg_temp.memo_id(203),pg_temp.memo_room())->>'version','2','active notified maid reads again independently of prior PIN entitlement revocation');
+select is((select count(*) from private.room_fixed_memo_revisions where room_id=pg_temp.memo_room()),2::bigint,'denied authority matrix appends no memo revision');
+select is((select count(*) from private.command_executions where command_type='room.fixed_memo.set'),2::bigint,'denied authority matrix creates no command receipt');
 select is(pg_temp.memo_write(2,2,null,'fixed-memo-clear')->'memo','null'::jsonb,'clear adds a revision');
 select is((select count(*) from private.room_fixed_memo_revisions),3::bigint,'clearing preserves history');
 select throws_ok($$update private.room_fixed_memo_revisions set memo='replace'$$,'23514','ROOM_FIXED_MEMO_IMMUTABLE','history update rejected');
