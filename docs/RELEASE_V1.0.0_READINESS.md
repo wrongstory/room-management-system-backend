@@ -1,5 +1,27 @@
 # v1.0.0 개발·배포 준비 상태
 
+## 2026-11-02 격리 검증 R2 실패와 atomic fixture 보완
+
+승인된 FINAL-144-R2는 PR553/run41348857034 attempt1에서 FAIL로 종료됐다. source3c89df1,
+실제 mergea7bc6a0의 설치·122→144 checkpoint·catalog/HOLD6·template 계약은 PASS다.
+전체 catalog193관계/481FK와 별도 검토범위192/479를 관측했으며 전체 읽기/보호 계획은
+#551 미분류 원장 때문에 차단된 상태다. 전체 초기화·복구·trigger 의미의 성공을 뜻하지 않는다.
+
+TLS 읽기 전용18검사 후 atomic8 Vitest child가 실패했다. 원본 로그는 고정 오류만 남겨
+실제 첫 실패 case와 내부 통과 수를 확인할 수 없다. 후속 lint/backup/SQL·upgrade·경합과
+oracle/proof는 미실행이다. owned TLS 컨테이너 제거와 Supabase stop은 성공했고,
+Supabase volume은 보존됐다. application은 Node5780·Edge65+586+68·Python139 PASS다.
+
+DB 없는 재현에서 fixture가 같은 합성 project/request를 재사용해 supervisor의 요청 소비 및
+실패 후 project 보류 규칙과 충돌함을 확인했다. 제품 가드를 유지하고 기존8개 검사를 각각
+다른 합성 project와 정확한 인증서 SAN으로 격리한다. 현재 case의 정확한 대상만 loopback으로
+연결하고, child 오류는 제한된 보고서의 고정 case ID·상태·개수만 기록한다. 원문 오류·SQL·
+비밀값을 출력하거나 실패를 성공으로 바꾸지 않는다. 실제 R2의 첫 실패 원인으로 단정하지 않는다.
+
+보완한 fixture의 실제 DB 검증은 NOT RUN이다. R2 승인은 소모됐으며 소스 검사·독립 QA·
+보호 dev 반영 후 새 입력과 기존 PR553 동기화1회/새 run attempt1을 USER_DECISIONS.md에
+동결한다. 새 승인 전 release 추가 push·DB 재실행은 없다. 운영 적용은 이후 별도 승인이다.
+
 ## 2026-11-02 최종 격리 검증 R1 실패와 진단 보완
 
 #551은 PR552로 dev에 병합됐고, 승인된 FINAL-144-R1은 PR553/run41344850134 attempt1에 사용됐다.

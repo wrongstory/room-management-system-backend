@@ -1,5 +1,18 @@
 # #378 실행 경로 후보와 검증 경계
 
+## 2026-11-02 검증 상태
+
+운영 CLI 적용은 NOT RUN이다. 승인된 PR553/run41348857034 attempt1의 격리 TLS fixture에서
+읽기 전용18검사 이후 atomic8 child가 실패했고 내부 case 결과는 미확인이다. 실제 전체 DB
+성공·운영 승인·복구 성공을 주장하지 않는다. 자세한 결과는 [TLS 문서](MIGRATION_READONLY_POSTGRES.md)를 따른다.
+
+fixture의 반복 project/request를 case마다 분리해 검사 자체가 아래 1회 실행 가드와 충돌하지
+않게 보완한다. usedRequests/activeProjects를 지우거나 실제 실행 정책을 약화하지 않는다.
+보완한 실제 DB 검증과 운영 적용은 각각 별도 승인 대상이다. 아래 첫 NOT RUN 문단은
+2026-10-25 당시 연결 전 기록이며 이번 실행을 0회로 되돌려 표시하지 않는다.
+
+## 이전 구현 시점 상태
+
 상태: **실제 driver/CLI 구현, source·합성 검증 단계**. 이 실행 경로의 DB 연결, TLS DB fixture, migration/reset, Docker 실행은 **0회 / NOT RUN**이다. 별도 기존 history 조사에서는 서버측 hash/count 등 metadata를 읽기전용으로 조회했으며, 원문 SQL·비밀 조회와 DB 변경은 없었다(`MIGRATION_HISTORICAL_REPRESENTATION.md`). 운영 적용 완료나 #378 전체 완료를 뜻하지 않는다. 이전 정책/AST/history/read-only 문서는 해당 모듈과 당시 단계의 기록이고, 전체 실행 경로의 현재 상태는 이 문서를 따른다.
 
 ## 실제 실행 순서
