@@ -12941,10 +12941,66 @@ export const openApiDocument = {
           effectiveAt: { type: "string", format: "date-time" },
         },
       },
+      RoomArrival: {
+        type: "object",
+        additionalProperties: false,
+        description:
+          "실제 입실 처리 상태. 예약 일정상 occupied와 독립. LIVE에서만 제공하며 과거·미래 날짜 조회는 null. 지연 등록을 실제 입실/청소 승인으로 간주하지 않음.",
+        required: [
+          "status",
+          "checkInReady",
+          "reasonCodes",
+          "actualCheckInAt",
+          "recordedAt",
+        ],
+        properties: {
+          status: {
+            type: "string",
+            enum: [
+              "NONE",
+              "SCHEDULED",
+              "CHECKIN_PENDING",
+              "CHECKED_IN",
+              "ROOM_MOVE_PENDING",
+            ],
+          },
+          checkInReady: {
+            type: ["boolean", "null"],
+            description:
+              "선택한 미입실 예약의 현재 입실 준비. 미래 일자·실제 입실 후·예약 없음은 null.",
+          },
+          reasonCodes: {
+            type: ["array", "null"],
+            items: {
+              type: "string",
+              enum: [
+                "OCCUPIED",
+                "RESERVATION_CURRENT",
+                "CLEANING_REQUIRED",
+                "CANDLE_PRESENT",
+                "OPERATION_BLOCKED",
+                "ROOM_ISSUE_BLOCKED",
+                "DATA_UNCONFIRMED",
+                "PIN_MISMATCH",
+                "CHECKOUT_NOT_COMPLETED",
+                "ROOM_INACTIVE",
+              ],
+            },
+          },
+          actualCheckInAt: { type: ["string", "null"], format: "date-time" },
+          recordedAt: {
+            type: ["string", "null"],
+            format: "date-time",
+            description:
+              "예약을 서버에 실제 등록한 시각. displayCheckInAt과 별도로 보존.",
+          },
+        },
+      },
       RoomProjection: {
         type: "object",
         additionalProperties: false,
         required: [
+          "arrival",
           "id",
           "roomNumber",
           "roomTypeCode",
@@ -12983,6 +13039,11 @@ export const openApiDocument = {
           "reasonCodes",
         ],
         properties: {
+          arrival: {
+            anyOf: [{ $ref: "#/components/schemas/RoomArrival" }, {
+              type: "null",
+            }],
+          },
           id: { type: "string", format: "uuid", description: "불변 객실 ID" },
           roomNumber: {
             type: "string",

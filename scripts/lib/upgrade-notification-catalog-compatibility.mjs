@@ -20,8 +20,9 @@ function checkExpectedCount(expectedCount) {
   // Runtime event dispatch is not permission to mutate historical catalog metadata.
   // 141 only observes an existing offline resolution terminal; no family is added.
   // 142 settles a password effect using the existing account.password_changed event.
-  assert(Number.isSafeInteger(expectedCount) && expectedCount >= 95 && expectedCount <= 142,
-    'Only the audited95..142 upgrade range is supported; 112..142 add no catalog rows');
+  // 143 is an arrival read projection; it adds no event or catalog writes.
+  assert(Number.isSafeInteger(expectedCount) && expectedCount >= 95 && expectedCount <= 143,
+    'Only the audited95..143 upgrade range is supported; 112..143 add no catalog rows');
 }
 function catalogRows(value) {
   assert(Array.isArray(value), 'An existing baseline notification catalog is required');

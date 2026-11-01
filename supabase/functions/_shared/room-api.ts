@@ -1,3 +1,7 @@
+import {
+  parseRoomArrival,
+  type RoomArrival,
+} from "../../../src/modules/rooms/room-arrival-contract.ts";
 import { idempotencyKey, readJsonBody } from "./account-api.ts";
 import {
   parseRoomReadyCorrectionRequest,
@@ -116,6 +120,7 @@ interface RoomProjectionRow {
   display_check_out_at: string | null;
   display_guest_count: number | null;
   display_base_occupancy: number;
+  arrival?: unknown;
 }
 
 export interface RoomProjection {
@@ -155,11 +160,13 @@ export interface RoomProjection {
   displayCheckOutAt: string | null;
   displayGuestCount: number | null;
   displayBaseOccupancy: number;
+  arrival: RoomArrival | null;
 }
 
 /** DB RPC의 snake_case row를 Fastify와 동일한 프론트 공개 계약으로 변환한다. */
 export function toRoomProjection(row: RoomProjectionRow): RoomProjection {
   return {
+    arrival: parseRoomArrival(row.arrival),
     id: row.id,
     roomNumber: row.room_number,
     roomTypeCode: row.room_type_code,
@@ -824,7 +831,7 @@ export async function listRooms(
 ) {
   requireRoomAdmin(actor);
   const { data, error } = await clients.admin.rpc(
-    "get_room_board_projection",
+    "get_room_board_arrival_projection",
     {
       p_actor_profile_id: actor.profileId,
       p_session_id: verifiedRequestSessionId(request),
@@ -1457,7 +1464,7 @@ export async function getRoom(
   requireRoomAdmin(actor);
   const normalizedRoomId = uuidValue(roomId, "roomId");
   const { data, error } = await clients.admin.rpc(
-    "get_room_board_projection",
+    "get_room_board_arrival_projection",
     {
       p_actor_profile_id: actor.profileId,
       p_session_id: verifiedRequestSessionId(request),

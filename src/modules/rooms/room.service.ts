@@ -1,3 +1,4 @@
+import { parseRoomArrival, type RoomArrival } from './room-arrival-contract.js';
 import { randomInt, randomUUID } from 'node:crypto';
 import type { Actor } from '../../domain/actor.js';
 import { AppError } from '../../lib/app-error.js';
@@ -113,6 +114,7 @@ export interface RoomSummary {
   displayCheckOutAt: string | null;
   displayGuestCount: number | null;
   displayBaseOccupancy: number;
+  arrival: RoomArrival | null;
 }
 
 export interface ChangeRoomMasterDataInput {
@@ -505,6 +507,7 @@ interface RoomProjectionRow {
   display_check_out_at: string | null;
   display_guest_count: number | null;
   display_base_occupancy: number;
+  arrival?: unknown;
 }
 
 interface RoomTypeCatalogRow {
@@ -535,6 +538,7 @@ function toRoomTypeCatalogItem(row: RoomTypeCatalogRow): RoomTypeCatalogItem {
 
 function toRoom(row: RoomProjectionRow): RoomSummary {
   return {
+    arrival: parseRoomArrival(row.arrival),
     id: row.id,
     roomNumber: row.room_number,
     roomTypeCode: row.room_type_code,
@@ -1327,7 +1331,7 @@ export class SupabaseRoomService implements RoomService {
 
   async list(actor: Actor, input: RoomListInput = {}): Promise<RoomSummary[]> {
     ensureAdmin(actor);
-    const { data, error } = await this.clients.admin.rpc('get_room_board_projection', {
+    const { data, error } = await this.clients.admin.rpc('get_room_board_arrival_projection', {
       p_actor_profile_id: actor.profileId,
       p_session_id: verifiedSessionId(actor.accessToken),
       p_service_date: input.serviceDate ?? null,
@@ -1341,7 +1345,7 @@ export class SupabaseRoomService implements RoomService {
 
   async get(actor: Actor, roomId: string): Promise<RoomSummary> {
     ensureAdmin(actor);
-    const { data, error } = await this.clients.admin.rpc('get_room_board_projection', {
+    const { data, error } = await this.clients.admin.rpc('get_room_board_arrival_projection', {
       p_actor_profile_id: actor.profileId,
       p_session_id: verifiedSessionId(actor.accessToken),
       p_service_date: null,
