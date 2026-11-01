@@ -21,7 +21,7 @@ function checkExpectedCount(expectedCount) {
   // 141 only observes an existing offline resolution terminal; no family is added.
   // 142 settles a password effect using the existing account.password_changed event.
   // 143 is an arrival read projection; it adds no event or catalog writes.
-  // 145 adds room memo revisions but no notification families.
+  // 144 adds room memo revisions; 145 requires approval for current-week availability. Neither adds notification families.
   assert(Number.isSafeInteger(expectedCount) && expectedCount >= 95 && expectedCount <= 145,
     'Only the audited95..145 upgrade range is supported; 112..145 add no catalog rows');
 }

@@ -311,7 +311,7 @@ export function validatePostApprovalUpgradeSource(manifest, entries) {
   }
   if (validated.length >= 145) {
     assert.equal(validated[144].file, '20261101230757_current_week_availability_approval.sql');
-    assert.equal(validated[144].sha256, '7b4b70d2a506dd028aa02469369429c5971eb160769e168438cf6f8fa61aa70c', 'Only reviewed current-week approval145 tail permitted');
+    assert.equal(validated[144].sha256, '54ca721021b7347c7ac74b92ee37f27af27d9c4e3f2af657d7cc3cc69097f135', 'Only reviewed current-week approval145 tail permitted');
   }
   return { entries: validated, ledger: validated[110].canonical };
 }
