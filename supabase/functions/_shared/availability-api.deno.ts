@@ -510,13 +510,13 @@ Deno.test("availability reads use bearer RLS and preserve maid self filters", as
   );
 });
 
-Deno.test("availability change and decision commands preserve actor, CAS and idempotency", async () => {
+for (const sourceVersion of [0, 1]) Deno.test(`availability change and decision preserve actor/CAS/idempotency for source ${sourceVersion}`, async () => {
   const changeRow = {
     id: "40000000-0000-4000-8000-000000000001",
-    availability_version_id: "30000000-0000-4000-8000-000000000001",
+    availability_version_id: sourceVersion ? "30000000-0000-4000-8000-000000000001" : null,
     maid_profile_id: maid.profileId,
     week_start: "2026-08-31",
-    source_version: 1,
+    source_version: sourceVersion,
     requested_available_dates: ["2026-09-01"],
     reason_code: "PERSONAL_SCHEDULE",
     status: "pending",
@@ -546,7 +546,7 @@ Deno.test("availability change and decision commands preserve actor, CAS and ide
       weekStart: "2026-08-31",
       requestedAvailableDates: ["2026-09-01"],
       reasonCode: "PERSONAL_SCHEDULE",
-      expectedVersion: 1,
+      expectedVersion: sourceVersion,
     }),
     clients,
     maid,
@@ -557,7 +557,7 @@ Deno.test("availability change and decision commands preserve actor, CAS and ide
       {
         decision: "approved",
         reasonCode: "STAFFING_CONFIRMED",
-        expectedVersion: 1,
+        expectedVersion: sourceVersion,
       },
       "availability-decision-0001",
     ),
@@ -568,7 +568,7 @@ Deno.test("availability change and decision commands preserve actor, CAS and ide
 
   assert(calls[0][0] === "request_availability_change", "request RPC");
   assert(calls[0][1].p_actor_profile_id === maid.profileId, "maid actor");
-  assert(calls[0][1].p_expected_version === 1, "request CAS");
+  assert(calls[0][1].p_expected_version === sourceVersion, "request CAS");
   assert(calls[1][0] === "decide_availability_change", "decision RPC");
   assert(calls[1][1].p_actor_profile_id === admin.profileId, "admin actor");
   assert(
