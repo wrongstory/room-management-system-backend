@@ -37,3 +37,5 @@
 ## 2026-11-01 소스 검증 checkpoint
 
 Node 전체216파일/5,738건 PASS. Deno65+586+68 PASS, 실제 후보 포함 번들19,999,765bytes로 20,000,000 제한 PASS(여유235bytes). 다음 기능 추가 전 번들 경량화가 필요하며 제한은 완화하지 않았다. 타입·빌드·전체 manifest144·Swagger160/173·secret scan PASS. lint는 exit0이며 기존 경고가 남아 있다. 독립 QA Node35 PASS, 초기P1/P2 수정 확인; QA 환경의 단독 Deno 실행은 실행파일 부재 BLOCKED이고 주 작업의 Docker Edge 실행 PASS와 구분한다. 실제 SQL/DB/운영은 NOT RUN. 새 SQL fixture 날짜를 transaction clock으로 고정하고 승인/반려 조회 및 취소/배정종료 차단 사례를 추가했다.
+
+CI41311955977에서 application의 Python OpenAPI 개수 검사만 기존159/171로 남아 실패했다. Node·Edge·Python Qt139와 migration manifest는 통과했고 DB 실행은 전부 SKIPPED였다. Python 기대값/오류문구4곳을160/173으로 맞췄으며 독립 QA가 실제1경로/2operation 증가와 일치함을 확인했다. 보완 후 Python ephemeral codegen 전체, ruff lint/format PASS. 검증을 생략하거나 완화하지 않았다. Windows uv 초기 hardlink 설치 오류는 해당 실행의 copy 모드로 해소했다.
