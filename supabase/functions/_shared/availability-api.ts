@@ -28,7 +28,7 @@ interface AvailabilityVersionRow {
 
 interface AvailabilityChangeRequestRow {
   id: string;
-  availability_version_id: string;
+  availability_version_id: string | null;
   maid_profile_id: string;
   week_start: string;
   source_version: number;
@@ -256,6 +256,12 @@ export function availabilityDatabaseError(
   const message = error?.message ?? "";
   const mappings: Array<[string, number, string, string]> = [
     [
+      "AVAILABILITY_APPROVAL_REQUIRED",
+      409,
+      "AVAILABILITY_APPROVAL_REQUIRED",
+      "이번 주 가능일은 변경 요청 후 관리자 승인이 필요합니다.",
+    ],
+    [
       "ACTIVE_MAID_REQUIRED",
       403,
       "ACTIVE_MAID_REQUIRED",
@@ -277,7 +283,7 @@ export function availabilityDatabaseError(
       "PAST_AVAILABILITY_DATE_NOT_ALLOWED",
       409,
       "PAST_AVAILABILITY_DATE_NOT_ALLOWED",
-      "지난 날짜를 새로 근무 가능으로 변경할 수 없습니다.",
+      "지난 날짜의 근무 가능 여부는 변경할 수 없습니다.",
     ],
     [
       "ASSIGNMENT_AVAILABILITY_STALE",
@@ -572,7 +578,7 @@ export async function requestAvailabilityChange(
       p_expected_version: integerValue(
         body.expectedVersion,
         "expectedVersion",
-        1,
+        0,
       ),
       p_idempotency_key: idempotencyKey(request),
     },
@@ -617,7 +623,7 @@ export async function decideAvailabilityChange(
       p_expected_version: integerValue(
         body.expectedVersion,
         "expectedVersion",
-        1,
+        0,
       ),
       p_idempotency_key: idempotencyKey(request),
     },

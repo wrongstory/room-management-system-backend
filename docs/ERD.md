@@ -1533,3 +1533,8 @@ active-only fresh wrapper1개뿐이며, 선행 실제7/19 chain 뒤 **source 예
 ## #452 PIN 가져오기
 
 private.room_pin_revisions.source에 sheet_import를 추가한다. 신규 public table 없이 current CAS·기존 nonce/entitlement trigger를 재사용한다. 상세 계약은 [ROOM_PIN_TRANSFER.md](./ROOM_PIN_TRANSFER.md)를 따른다.
+
+
+### 2026-11-02 이번 주 가능일 승인 요청
+
+`availability_change_requests.availability_version_id`는 미제출자의 최초 요청에 한해 nullable이고 `source_version=0`과 묶인 CHECK로 제한한다. 기존 요청의 composite source FK와 메이드·주차 pending unique index는 유지한다. 최초 승인 전에는 availability version/day/candidate를 생성하지 않는다. 승인 시 새 version, 7개 day, 결정·감사·receipt를 한 transaction으로 기록한다. 현재 주 직접 submit은 차단하며 다음 주 submit은 유지한다. 지난 날짜는 양방향 변경 금지, 승인 시 활성 메이드·현재 주·CAS·통보 배정을 재검증한다. 반려는 stale/지난 주 요청도 sourceVersion에 맞게 종결할 수 있다. 이 변경은 개발 migration 후보이며 Full DB NOT RUN이다.

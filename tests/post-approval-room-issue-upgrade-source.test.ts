@@ -201,6 +201,12 @@ describe('#336 isolated110->111 source/preflight only (no DB PASS claim)', () =>
     tail.raw=Buffer.from('select 1;\n'); record.sha256=createHash('sha256').update(tail.raw).digest('hex');
     expect(()=>validatePostApprovalUpgradeSource(changedManifest,changed)).toThrow('Only the source-reviewed password-completion124 tail');
   });
+  it('pins availability125 and rejects a rehashed replacement', () => {
+    const changed=clone(entries), changedManifest=clone(manifest), tail=changed[124], record=changedManifest.migrations[124];
+    if (!tail || !record) throw new Error('EXPECTED125');
+    tail.raw=Buffer.from('select 1;\n'); record.sha256=createHash('sha256').update(tail.raw).digest('hex');
+    expect(()=>validatePostApprovalUpgradeSource(changedManifest,changed)).toThrow('Only the source-reviewed availability-approval125 tail');
+  });
   it('pins password effect123 without accepting a self-rehashed replacement', () => {
     const changed = clone(entries), changedManifest = clone(manifest);
     const tail = changed[122], record = changedManifest.migrations[122];

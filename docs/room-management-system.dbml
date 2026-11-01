@@ -208,10 +208,10 @@ Table public.availability_days {
 
 Table public.availability_change_requests {
   id uuid [pk]
-  availability_version_id uuid [not null]
+  availability_version_id uuid [note: '최초 승인 요청은 null, source_version=0; 기존 요청은 원본 version FK']
   maid_profile_id uuid [not null]
   week_start date [not null]
-  source_version int [not null]
+  source_version int [not null, note: '0 iff availability_version_id is null; otherwise > 0']
   requested_available_dates date[] [not null]
   reason_code text [not null]
   status availability_request_status [not null, default: 'pending']

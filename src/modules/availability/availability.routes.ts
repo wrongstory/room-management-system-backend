@@ -37,13 +37,13 @@ const requestChangeSchema = z.object({
   weekStart: dateSchema,
   requestedAvailableDates: availableDatesSchema,
   reasonCode: reasonCodeSchema,
-  expectedVersion: z.int().min(1)
+  expectedVersion: z.int().min(0)
 });
 const decisionParamsSchema = z.object({ requestId: z.uuid() });
 const decisionSchema = z.object({
   decision: z.enum(['approved', 'rejected']),
   reasonCode: reasonCodeSchema,
-  expectedVersion: z.int().min(1)
+  expectedVersion: z.int().min(0)
 });
 
 function idempotencyKey(request: FastifyRequest): string {

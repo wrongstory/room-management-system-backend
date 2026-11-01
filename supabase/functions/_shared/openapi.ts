@@ -2678,9 +2678,9 @@ export const openApiDocument = {
       post: {
         tags: ["Availability"],
         operationId: "submitAvailability",
-        summary: "현재·다음 주 가능일 제출 또는 변경",
+        summary: "다음 주 가능일 제출 또는 변경",
         description:
-          "비밀번호 변경을 완료한 active maid가 KST 기준 현재 주 또는 다음 주를 어느 요일이든 직접 제출·변경합니다. 현재 주의 지난 날짜는 기존 version에서 이미 available이었던 값만 보존할 수 있고 새로 available로 소급 변경할 수 없습니다. expectedVersion CAS와 Idempotency-Key로 동시 수정·중복 제출을 막습니다. 빈 availableDates는 전일 불가능을 뜻합니다.",
+          "비밀번호 변경을 완료한 active maid가 KST 기준 다음 주를 어느 요일이든 직접 제출·변경합니다. 이번 주는 change-requests와 관리자 승인이 필요하며 직접 제출은 AVAILABILITY_APPROVAL_REQUIRED(409)로 차단됩니다. expectedVersion CAS와 Idempotency-Key로 동시 수정·중복 제출을 막습니다. 빈 availableDates는 전일 불가능을 뜻합니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["maid"],
         parameters: [idempotencyHeader],
@@ -2710,7 +2710,7 @@ export const openApiDocument = {
         operationId: "requestAvailabilityChange",
         summary: "관리자 승인형 가능일 변경 요청",
         description:
-          "비밀번호 변경을 완료한 active maid가 대상 주 시작 후 현재 version의 관리자 승인형 변경을 요청합니다. 기존 가능일 원장은 보존되고 pending 요청이 append되며, 같은 주차에는 pending 요청 하나만 허용됩니다. 일반적인 현재·다음 주 수정은 submissions endpoint의 direct version 재제출을 사용합니다.",
+          "비밀번호 변경을 완료한 active maid가 KST 기준 이번 주 가능일 변경을 요청합니다. 승인 전 기존 가능일을 유지하며 같은 메이드·주차의 pending 요청은 하나만 허용됩니다. 미제출 주는 expectedVersion=0, availabilityVersionId=null로 요청하며 승인 시 최초 version이 생성됩니다. 지난 날짜 변경은 금지됩니다. 다음 주는 submissions로 직접 제출합니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["maid"],
         parameters: [idempotencyHeader],
@@ -2779,7 +2779,7 @@ export const openApiDocument = {
         operationId: "decideAvailabilityChange",
         summary: "가능일 변경 요청 승인 또는 반려",
         description:
-          "비밀번호 변경을 완료한 active business admin만 호출합니다. 승인하면 새 가능일 version을 만들고 current pointer를 이동하며, 반려하면 요청 결과만 append합니다. developer는 관리자 권한을 상속하지 않습니다.",
+          "비밀번호 변경을 완료한 active business admin만 호출합니다. 승인하면 새 가능일 version을 만들고 current pointer를 이동하며, 반려하면 요청 결과만 append합니다. 승인 시 최신 sourceVersion, KST 이번 주, 지난 날짜 변경 금지, 활성 메이드, 통보된 배정 충돌을 재검증합니다. 지난 주·오래된 version 요청도 sourceVersion이 맞으면 반려할 수 있습니다. developer는 관리자 권한을 상속하지 않습니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin"],
         parameters: [
@@ -10899,15 +10899,15 @@ export const openApiDocument = {
         properties: {
           id: { type: "string", format: "uuid" },
           availabilityVersionId: {
-            type: "string",
+            type: ["string", "null"],
             format: "uuid",
-            description: "요청이 기준으로 삼은 가능일 version ID",
+            description: "요청 기준 version ID. 최초 요청은 null",
           },
           maidProfileId: { type: "string", format: "uuid" },
           weekStart: { type: "string", format: "date" },
           sourceVersion: {
             type: "integer",
-            minimum: 1,
+            minimum: 0,
             description: "요청 생성 시점의 CAS version",
           },
           requestedAvailableDates: {
@@ -10967,7 +10967,7 @@ export const openApiDocument = {
           weekStart: {
             type: "string",
             format: "date",
-            description: "KST 기준 현재 주 또는 다음 주의 월요일",
+            description: "KST 기준 다음 주의 월요일",
           },
           availableDates: {
             type: "array",
@@ -11004,7 +11004,7 @@ export const openApiDocument = {
             type: "string",
             pattern: "^[A-Z0-9_]{2,80}$",
           },
-          expectedVersion: { type: "integer", minimum: 1 },
+          expectedVersion: { type: "integer", minimum: 0 },
         },
       },
       AvailabilityDecisionRequest: {
@@ -11022,7 +11022,7 @@ export const openApiDocument = {
           },
           expectedVersion: {
             type: "integer",
-            minimum: 1,
+            minimum: 0,
             description: "요청의 sourceVersion과 비교할 CAS 값",
           },
         },
