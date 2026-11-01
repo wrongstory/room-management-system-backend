@@ -510,73 +510,81 @@ Deno.test("availability reads use bearer RLS and preserve maid self filters", as
   );
 });
 
-for (const sourceVersion of [0, 1]) Deno.test(`availability change and decision preserve actor/CAS/idempotency for source ${sourceVersion}`, async () => {
-  const changeRow = {
-    id: "40000000-0000-4000-8000-000000000001",
-    availability_version_id: sourceVersion ? "30000000-0000-4000-8000-000000000001" : null,
-    maid_profile_id: maid.profileId,
-    week_start: "2026-08-31",
-    source_version: sourceVersion,
-    requested_available_dates: ["2026-09-01"],
-    reason_code: "PERSONAL_SCHEDULE",
-    status: "pending",
-    requested_at: "2026-08-31T00:00:00.000Z",
-    decided_by: null,
-    decided_at: null,
-    decision_reason_code: null,
-    approved_version_id: null,
-  };
-  const calls: Array<[string, Record<string, unknown>]> = [];
-  const clients = {
-    admin: {
-      async rpc(name: string, args: Record<string, unknown>) {
-        calls.push([name, args]);
-        return {
-          data: name === "decide_availability_change"
-            ? { ...changeRow, status: "approved", decided_by: admin.profileId }
-            : changeRow,
-          error: null,
-        };
+for (const sourceVersion of [0, 1]) {
+  Deno.test(`availability change and decision preserve actor/CAS/idempotency for source ${sourceVersion}`, async () => {
+    const changeRow = {
+      id: "40000000-0000-4000-8000-000000000001",
+      availability_version_id: sourceVersion
+        ? "30000000-0000-4000-8000-000000000001"
+        : null,
+      maid_profile_id: maid.profileId,
+      week_start: "2026-08-31",
+      source_version: sourceVersion,
+      requested_available_dates: ["2026-09-01"],
+      reason_code: "PERSONAL_SCHEDULE",
+      status: "pending",
+      requested_at: "2026-08-31T00:00:00.000Z",
+      decided_by: null,
+      decided_at: null,
+      decision_reason_code: null,
+      approved_version_id: null,
+    };
+    const calls: Array<[string, Record<string, unknown>]> = [];
+    const clients = {
+      admin: {
+        async rpc(name: string, args: Record<string, unknown>) {
+          calls.push([name, args]);
+          return {
+            data: name === "decide_availability_change"
+              ? {
+                ...changeRow,
+                status: "approved",
+                decided_by: admin.profileId,
+              }
+              : changeRow,
+            error: null,
+          };
+        },
       },
-    },
-  } as unknown as EdgeClients;
+    } as unknown as EdgeClients;
 
-  await requestAvailabilityChange(
-    commandRequest("/v1/availability/change-requests", {
-      weekStart: "2026-08-31",
-      requestedAvailableDates: ["2026-09-01"],
-      reasonCode: "PERSONAL_SCHEDULE",
-      expectedVersion: sourceVersion,
-    }),
-    clients,
-    maid,
-  );
-  const decided = await decideAvailabilityChange(
-    commandRequest(
-      `/v1/availability/change-requests/${changeRow.id}/decision`,
-      {
-        decision: "approved",
-        reasonCode: "STAFFING_CONFIRMED",
+    await requestAvailabilityChange(
+      commandRequest("/v1/availability/change-requests", {
+        weekStart: "2026-08-31",
+        requestedAvailableDates: ["2026-09-01"],
+        reasonCode: "PERSONAL_SCHEDULE",
         expectedVersion: sourceVersion,
-      },
-      "availability-decision-0001",
-    ),
-    clients,
-    admin,
-    changeRow.id,
-  );
+      }),
+      clients,
+      maid,
+    );
+    const decided = await decideAvailabilityChange(
+      commandRequest(
+        `/v1/availability/change-requests/${changeRow.id}/decision`,
+        {
+          decision: "approved",
+          reasonCode: "STAFFING_CONFIRMED",
+          expectedVersion: sourceVersion,
+        },
+        "availability-decision-0001",
+      ),
+      clients,
+      admin,
+      changeRow.id,
+    );
 
-  assert(calls[0][0] === "request_availability_change", "request RPC");
-  assert(calls[0][1].p_actor_profile_id === maid.profileId, "maid actor");
-  assert(calls[0][1].p_expected_version === sourceVersion, "request CAS");
-  assert(calls[1][0] === "decide_availability_change", "decision RPC");
-  assert(calls[1][1].p_actor_profile_id === admin.profileId, "admin actor");
-  assert(
-    calls[1][1].p_idempotency_key === "availability-decision-0001",
-    "decision idempotency",
-  );
-  assert(decided.status === "approved", "decision projection");
-});
+    assert(calls[0][0] === "request_availability_change", "request RPC");
+    assert(calls[0][1].p_actor_profile_id === maid.profileId, "maid actor");
+    assert(calls[0][1].p_expected_version === sourceVersion, "request CAS");
+    assert(calls[1][0] === "decide_availability_change", "decision RPC");
+    assert(calls[1][1].p_actor_profile_id === admin.profileId, "admin actor");
+    assert(
+      calls[1][1].p_idempotency_key === "availability-decision-0001",
+      "decision idempotency",
+    );
+    assert(decided.status === "approved", "decision projection");
+  });
+}
 
 Deno.test("availability candidates use an admin RLS query and camelCase projection", async () => {
   const candidateQuery = queryResult([{
