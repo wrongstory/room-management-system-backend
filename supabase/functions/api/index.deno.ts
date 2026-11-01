@@ -3172,3 +3172,69 @@ Deno.test("Web Push router keeps exact register/retire, no-store and secret-free
     "query rejected",
   );
 });
+
+Deno.test("room fixed memo exact HTTP GET/PUT routes and private errors", async () => {
+  const room = "10000000-0000-4000-8000-000000000142",
+    path = `/v1/rooms/${room}/fixed-memo`;
+  const calls: string[] = [];
+  let fail = false;
+  const dependencies: ApiHandlerDependencies = {
+    authenticateRequest: () => Promise.resolve({ ...actor, role: "admin" }),
+    createClients: () =>
+      ({
+        admin: {
+          rpc(name: string) {
+            calls.push(name);
+            return Promise.resolve({
+              data: fail ? null : {
+                roomId: room,
+                memo: "화요일마다 청소",
+                version: 1,
+                updatedAt: "2026-11-01T01:00:00Z",
+              },
+              error: fail ? { message: "STALE_VERSION: private detail" } : null,
+            });
+          },
+        },
+      }) as unknown as EdgeClients,
+  };
+  for (const method of ["GET", "PUT"]) {
+    const response = await handleApiRequest(
+      request(
+        method,
+        path,
+        method === "PUT"
+          ? { memo: "화요일마다 청소", expectedVersion: 0 }
+          : undefined,
+      ),
+      dependencies,
+    );
+    assert(
+      response.status === 200 &&
+        response.headers.get("cache-control") === "no-store",
+      "private memo HTTP success",
+    );
+    assert((await response.json()).fixedMemo.roomId === room, "memo envelope");
+  }
+  assert(
+    calls.join(",") === "get_room_fixed_memo,set_room_fixed_memo",
+    "exact memo dispatch",
+  );
+  const denied = await handleApiRequest(
+    request("PUT", path, { memo: null, expectedVersion: 1 }),
+    {
+      ...dependencies,
+      authenticateRequest: () => Promise.resolve({ ...actor, role: "maid" }),
+    },
+  );
+  assert(denied.status === 403, "maid cannot write");
+  fail = true;
+  const stale = await handleApiRequest(
+    request("PUT", path, { memo: null, expectedVersion: 0 }),
+    dependencies,
+  );
+  assert(
+    stale.status === 409 && await errorCode(stale) === "STALE_VERSION",
+    "CAS reload error",
+  );
+});
