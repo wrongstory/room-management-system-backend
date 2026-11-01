@@ -10,7 +10,7 @@
 이번 기능1개만 더한 hotfix다. 별도 PR553의 v1.0.0/초기화·사진·메모 등 미배포
 개발 기능을 포함하지 않는다. 기존 운영 이력의 timestamp 차이를 repair하거나
 전체 dev migration을 db push하지 않는다. 새 migration의 source SHA-256은
-`2fc3eac43ef780f8ea00eaf79c51e07f9384645a33b74d727f5412269cdac5f2`다.
+`54ca721021b7347c7ac74b92ee37f27af27d9c4e3f2af657d7cc3cc69097f135`다.
 
 ## 동작
 
@@ -34,3 +34,14 @@ Security Advisor를 재확인한다. 새 SQL/이력의 원자적 적용 후 함�
 이력을 읽기 검증하고 API→Swagger/프런트를 배포한다. health/OpenAPI/CORS·배포 byte와
 합성 브라우저 시나리오를 확인한다. 실제 메이드/관리자 업무 요청은 생성하지 않는다.
 완료 전 DB 성공·운영 적용·실계정 UAT를 완료로 표시하지 않는다. hotfix는 별도 PR로 dev에 반영한다.
+
+## 첫 격리 검증 결과와 수정 후보
+
+PR557/run41364004498 attempt1의 migration은 새125개 설치와 템플릿 계약 PASS 뒤
+strict lint에서 FAIL했다. 신규 helper의 미사용 p_week_start 인자1개가 원인이며
+기존 허용9경고 목록은 변경하지 않는다. 해당 인자와 두 호출/권한 signature에서만
+불필요한 date를 제거했다. 이후 backup·SQL/upgrade·clock·경합·Full DB proof는
+NOT RUN이며 Supabase stop은 성공했다. 운영 DB/API/프런트 적용0회다.
+
+수정본은 로컬 소스 검증 후 별도1회 재실행 승인을 요청한다. 승인 전 hotfix 추가 push와
+release DB 재실행은 하지 않는다. 앞선 실행의 설치 성공을 최종 DB proof로 재사용하지 않는다.
