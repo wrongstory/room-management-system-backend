@@ -67,11 +67,11 @@ describe('#336 data-only registered source OpenAPI generation', () => {
     expect(globalCodes).toContain('ASSIGNMENT_INSTRUCTION_INVALID');
     expect(globalCodes).toContain('AUTH_CONTEXT_UNAVAILABLE');
     for (const code of postApprovalOpenApiErrorCodes) expect(globalCodes).toContain(code);
-    expect(Object.keys(openApiDocument.paths)).toHaveLength(159);
+    expect(Object.keys(openApiDocument.paths)).toHaveLength(160);
     const globalOperations = Object.values(openApiDocument.paths).flatMap(item => Object.values(item))
       .filter((value): value is { operationId: string } => Boolean(value && typeof value === 'object' && 'operationId' in value));
-    expect(globalOperations).toHaveLength(171);
-    expect(new Set(globalOperations.map(value => value.operationId)).size).toBe(171);
+    expect(globalOperations).toHaveLength(173);
+    expect(new Set(globalOperations.map(value => value.operationId)).size).toBe(173);
   });
   it('retains binary MIME/size, CAS headers and independent administrator-only handover', () => {
     const values = Object.values(postApprovalOpenApiFragment.paths).flatMap(item => Object.values(item));

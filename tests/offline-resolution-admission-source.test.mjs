@@ -15,7 +15,7 @@ describe('source141 offline resolution terminal observation', () => {
     expect(generateAdmissionSql(routes, read('scripts/operation-admission.sql.in'))).toBe(original);
     expect(routes.filter(r => r.completionAdapter === 'OFFLINE_RESOLUTION_V141')).toHaveLength(1);
     expect(routes.filter(r => r.hashMode === 'NONE' && !r.completionAdapter)).toHaveLength(25);
-    expect(routes.filter(r => ['CALLER', 'SQL_AVAILABILITY'].includes(r.hashMode))).toHaveLength(66);
+    expect(routes.filter(r => ['CALLER', 'SQL_AVAILABILITY'].includes(r.hashMode))).toHaveLength(67);
   });
   it.each(['tag', 'route', 'rpc', 'aliases', 'binding', 'hash', 'authority', 'command'])('rejects %s adapter substitution', field => {
     const changed = structuredClone(routes); const r = changed.find(r => r.routeId === 'resolveOfflineQuarantine');

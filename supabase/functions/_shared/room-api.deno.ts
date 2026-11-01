@@ -19,6 +19,7 @@ import {
   resolveRoomIssue,
   roomDatabaseError,
   roomDetailIdFromPath,
+  roomFixedMemo,
   roomListServiceDate,
   roomPathIds,
   roomReadyCorrectionPath,
@@ -1568,4 +1569,72 @@ Deno.test("#548 arrival facts survive Edge mapping without private payload", () 
   if (JSON.stringify(mapped[0]?.arrival) !== JSON.stringify(arrival)) {
     throw new Error("ARRIVAL_MAPPING_MISMATCH");
   }
+});
+
+Deno.test("room fixed memo binds session, sanitizes output and enforces write role", async () => {
+  const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+  const clients = {
+    admin: {
+      rpc: (name: string, args: Record<string, unknown>) => {
+        calls.push({ name, args });
+        return Promise.resolve({
+          data: {
+            roomId,
+            memo: "화요일마다 청소",
+            version: 1,
+            updatedAt: "2026-11-01T01:00:00Z",
+            secret: "strip",
+          },
+          error: null,
+        });
+      },
+    },
+  } as unknown as EdgeClients;
+  const req = readRequest(`/v1/rooms/${roomId}/fixed-memo`);
+  const result = await roomFixedMemo(
+    req,
+    clients,
+    { ...admin, role: "maid" },
+    roomId,
+  );
+  assert(
+    result.memo === "화요일마다 청소" && !Object.hasOwn(result, "secret"),
+    "safe maid projection",
+  );
+  assert(calls[0].args.p_session_id === sessionId, "verified session bound");
+  const headers = new Headers(req.headers);
+  headers.set("content-type", "application/json");
+  headers.set("Idempotency-Key", "memo-key-001");
+  const write = () =>
+    new Request(req.url, {
+      method: "PUT",
+      headers,
+      body: JSON.stringify({ memo: " 화요일마다 청소 ", expectedVersion: 0 }),
+    });
+  await roomFixedMemo(write(), clients, admin, roomId);
+  assert(
+    calls[1].name === "set_room_fixed_memo" &&
+      calls[1].args.p_memo === "화요일마다 청소" &&
+      calls[1].args.p_expected_version === 0,
+    "normalized independent CAS",
+  );
+  const forbidden = await captureEdgeError(() =>
+    roomFixedMemo(write(), clients, { ...admin, role: "maid" }, roomId)
+  );
+  assert(
+    forbidden.status === 403 && calls.length === 2,
+    "maid edit denied before RPC",
+  );
+  const changed = await captureEdgeError(() =>
+    roomFixedMemo(
+      write(),
+      clients,
+      { ...admin, mustChangePassword: true },
+      roomId,
+    )
+  );
+  assert(
+    changed.status === 403 && calls.length === 2,
+    "password gate before RPC",
+  );
 });

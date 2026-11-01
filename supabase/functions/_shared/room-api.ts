@@ -1,4 +1,11 @@
 import {
+  fixedMemoErrors,
+  fixedMemoRoomId,
+  parseRoomFixedMemo,
+  parseRoomFixedMemoInput,
+  RoomFixedMemoError,
+} from "../../../src/modules/rooms/room-fixed-memo-contract.ts";
+import {
   parseRoomArrival,
   type RoomArrival,
 } from "../../../src/modules/rooms/room-arrival-contract.ts";
@@ -771,7 +778,7 @@ export function roomPathIds(path: string): {
   const patterns = [
     /^\/v1\/rooms\/([^/]+)\/operation-blocks\/([^/]+)\/release$/,
     /^\/v1\/rooms\/([^/]+)\/issues\/([^/]+)\/resolve$/,
-    /^\/v1\/rooms\/([^/]+)\/(?:master-data|operation-blocks|occupancy-corrections|display-status-overrides|candles|issues|pin-sync-events)$/,
+    /^\/v1\/rooms\/([^/]+)\/(?:fixed-memo|master-data|operation-blocks|occupancy-corrections|display-status-overrides|candles|issues|pin-sync-events)$/,
   ];
   const match = patterns[0].exec(path);
   if (match) {
@@ -2017,4 +2024,71 @@ export async function recordRoomPinSync(
       payload: { syncStatus: body.syncStatus, pinVersion },
     },
   );
+}
+
+export async function roomFixedMemo(
+  request: Request,
+  clients: EdgeClients,
+  actor: EdgeActor,
+  rawRoomId: string,
+) {
+  const write = request.method === "PUT";
+  if (write) requireRoomAdmin(actor);
+  else if (!["admin", "maid"].includes(actor.role)) {
+    throw new EdgeError(
+      403,
+      "ROOM_FIXED_MEMO_FORBIDDEN",
+      "객실 메모 조회 권한이 없습니다.",
+    );
+  }
+  if (actor.mustChangePassword) {
+    throw new EdgeError(
+      403,
+      "PASSWORD_CHANGE_REQUIRED",
+      "비밀번호를 먼저 변경해 주세요.",
+    );
+  }
+  try {
+    if (new URL(request.url).search) throw new RoomFixedMemoError();
+    const roomId = fixedMemoRoomId(rawRoomId);
+    const args: Record<string, unknown> = {
+      p_actor_profile_id: actor.profileId,
+      p_session_id: verifiedRequestSessionId(request),
+      p_room_id: roomId,
+    };
+    if (write) {
+      const parsed = parseRoomFixedMemoInput(await readJsonBody(request));
+      Object.assign(args, {
+        p_expected_version: parsed.expectedVersion,
+        p_memo: parsed.memo,
+        p_idempotency_key: idempotencyKey(request),
+        p_request_hash: await requestHash({ roomId, ...parsed }),
+      });
+    }
+    const { data, error } = await clients.admin.rpc(
+      write ? "set_room_fixed_memo" : "get_room_fixed_memo",
+      args,
+    );
+    if (error) {
+      const fixed = fixedMemoErrors.find(([code]) =>
+        error.message?.includes(code)
+      );
+      if (fixed) throw new EdgeError(fixed[1], fixed[0], fixed[2]);
+      throw roomDatabaseError(error);
+    }
+    return parseRoomFixedMemo(data, roomId);
+  } catch (error) {
+    if (error instanceof RoomFixedMemoError) {
+      throw new EdgeError(
+        error.output ? 500 : 400,
+        error.output
+          ? "ROOM_FIXED_MEMO_RESPONSE_INVALID"
+          : "ROOM_FIXED_MEMO_INVALID",
+        error.output
+          ? "객실 메모를 불러오지 못했습니다."
+          : "객실 메모 입력을 확인해 주세요.",
+      );
+    }
+    throw error;
+  }
 }
