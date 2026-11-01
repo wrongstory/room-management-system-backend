@@ -1,5 +1,26 @@
 # #378 실제 PostgreSQL 읽기 전용 adapter — 구현 후보
 
+## 2026-11-02 실제 R2 결과와 fixture 격리 보완
+
+PR553/run41348857034 attempt1에서 읽기 전용 TLS18검사는 PASS였고, 이어 실행한 atomic8
+Vitest child는 FAIL했다. 부모의 고정 오류 때문에 내부 첫 실패 case와 통과 수는 미확인이다.
+owned tmpfs TLS 컨테이너 제거는 확인됐으며 전체 DB 성공 proof는 없다. 아래 과거 TLS19
+성공이나 writer 연결 전 NOT RUN 기록을 이번 atomic 검증 성공으로 사용하지 않는다.
+
+순수 메모리 재현에서 fixture의 동일 project/request 재사용이 supervisor의 중복 요청 소비 및
+실패 후 project 보류 규칙과 충돌함을 확인했다. 기존8개 case마다 고유한 합성 project를 부여하고
+인증서에는 그 정확한 DNS SAN만 추가한다. mock transport는 현재 case의 정확한 hostname/
+5432/postgres/role/application name만 수용해 owned fixture의 loopback 포트로 연결한다.
+실제 원격 프로젝트나 production TLS 정책을 바꾸지 않는다. supervisor의 process-wide 가드도
+초기화하거나 우회하지 않는다. 기존 잘못된 CA/SAN·원자성·rollback·독립 readback 검사는 유지한다.
+
+atomic child 진단은 크기를 제한한 JSON 보고서의 알려진8개 case ID·상태·개수만 허용한다.
+원문 오류·assertion diff·stack·stdout/stderr·SQL·자격증명은 출력하지 않는다. 보고서가 없거나
+잘못됐으면 고정 오류로 거부하고 child 실패를 성공으로 바꾸지 않는다. 실제 R2 첫 실패 원인은
+확정하지 않으며, 이 보완본의 실제 TLS/atomic DB 실행은 새 최종 입력 승인 전 NOT RUN이다.
+
+아래 내용은 이전 개발·검증 단계의 기록이다.
+
 > **2026-10-25 실행 연결 보완**
 
 현재 runtime 경계는 [MIGRATION_EXECUTION_RUNTIME.md](./MIGRATION_EXECUTION_RUNTIME.md)를 따른다. 기존 read-only entry는 유지하고, 입력/TLS 검증과 transaction-local history collector를 별도 atomic driver에서 재사용한다. 아래 이전 단계의 driver 경계와 과거 TLS fixture 결과를 새 writer의 실제 DB 검증으로 승격하지 않는다. 이번 연결·TLS fixture는 0회 / NOT RUN이다.

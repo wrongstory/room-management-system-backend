@@ -8,20 +8,16 @@ import { readFileSync, realpathSync } from 'node:fs';
 import { relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, beforeEach, describe, it, vi } from 'vitest';
+import { ATOMIC_FIXTURE_SUITE_NAME, atomicFixtureTarget, mapAtomicFixtureConnection } from './atomic-fixture-targets.mjs';
 
 const memory = vi.hoisted(() => ({ input: null, bundle: null, bytes: null, plan: null,
-  fault: '', clients: [], sentStatements: 0, sentHistory: 0, sentCommits: 0 }));
-const project = 'aaaaaaaaaaaaaaaaaaaa';
-const hostname = `db.${project}.supabase.co`;
+  target: null, fault: '', clients: [], sentStatements: 0, sentHistory: 0, sentCommits: 0 }));
 vi.mock('pg', async original => {
   const actual = await original();
   class Client extends actual.Client {
     constructor(config) {
       // No fallback to a hosted address, even for an incorrect caller config.
-      if (!memory.input || config.host !== 'db.aaaaaaaaaaaaaaaaaaaa.supabase.co' ||
-          config.port !== 5432 || config.database !== 'postgres' || config.user !== 'postgres' ||
-          !config.application_name?.startsWith('rms_mig_')) throw new Error('FIXTURE_TRANSPORT_REJECTED');
-      super({ ...config, host: '127.0.0.1', port: memory.input.port });
+      super(mapAtomicFixtureConnection(config, memory.target, memory.input?.port));
       memory.clients.push(this);
     }
     async query(input) {
@@ -99,7 +95,7 @@ beforeAll(async () => {
 });
 beforeEach(async () => {
   for (const client of memory.clients) await client.end().catch(() => {});
-  Object.assign(memory, { fault: '', clients: [], sentStatements: 0, sentHistory: 0, sentCommits: 0 });
+  Object.assign(memory, { target: null, fault: '', clients: [], sentStatements: 0, sentHistory: 0, sentCommits: 0 });
   await query('TRUNCATE rms_atomic_fixture.effects, supabase_migrations.schema_migrations');
   await query('INSERT INTO supabase_migrations.schema_migrations(version,name,statements) VALUES ($1,$2,$3::text[])',
     ['20260101000000', 'fixture_baseline', ['SELECT 1']]);
@@ -108,8 +104,14 @@ afterAll(async () => {
   for (const client of memory.clients) await client.end().catch(() => {});
   if (admin) await admin.end();
   memory.input = null;
+  memory.target = null;
 });
-async function prepared(sql = `${write};`) {
+async function prepared(caseId, sql = `${write};`) {
+  // Each independent fault scenario has its own project/request identity. The
+  // real supervisor's consumed-request and failed-project guards stay intact.
+  const target = atomicFixtureTarget(caseId);
+  memory.target = target;
+  const project = target.project;
   const baseline = createMigrationHistoryModel({ version: '20260101000000', name: 'fixture_baseline', sqlBytes: Buffer.from('SELECT 1;'), sourceBinding: null });
   const beforeHistory = createExpectedMigrationHistorySnapshot({ models: [baseline] });
   const source = { projectRef: project, sourceRef: 'refs/heads/main', headSha1: 'a'.repeat(40), treeSha1: 'b'.repeat(40),
@@ -139,7 +141,7 @@ async function prepared(sql = `${write};`) {
       application: 'PASS', migration: 'FULL_DB_PASS', independentReview: 'PASS' },
     validationFingerprint: 'd'.repeat(64), recoveryEvidenceSha256: 'e'.repeat(64) });
   return { request, bundle, historyModels: [model], coverage: [{ version: model.version, before: coverage, after: coverage }],
-    connection: { target: { scope: 'SUPABASE', mode: 'direct', projectRef: project, host: hostname, port: 5432, database: 'postgres', role: 'postgres' },
+    connection: { target: { scope: 'SUPABASE', mode: 'direct', projectRef: project, host: target.host, port: 5432, database: 'postgres', role: 'postgres' },
       credential: { password: memory.input.password }, caPem: memory.input.caPem } };
 }
 async function execute(value) {
@@ -152,42 +154,44 @@ async function expectCounts(effect, history) {
   assert.equal((await query('SELECT count(*)::text FROM rms_atomic_fixture.effects')).rows[0][0], String(effect));
   assert.equal((await query("SELECT count(*)::text FROM supabase_migrations.schema_migrations WHERE version='20260102000000'")).rows[0][0], String(history));
 }
-describe('actual isolated atomic PG17 writer and independent committed readback', () => {
-  it('commits exact SQL and history once and verifies the real state', async () => {
-    const result = await execute(await prepared());
+describe(ATOMIC_FIXTURE_SUITE_NAME, () => {
+  it(atomicFixtureTarget('commit').title, async () => {
+    const result = await execute(await prepared('commit'));
     assert.equal(result.classification, 'APPLIED'); assert.equal(result.appliedCount, 1);
     assert.equal(memory.sentStatements, 1); assert.equal(memory.sentHistory, 1); assert.equal(memory.sentCommits, 1);
     await expectCounts(1, 1);
   });
-  it.each(['history-loss', 'before-commit'])('rolls back real SQL after transport loss: %s', async fault => {
-    const value = await prepared(); memory.fault = fault;
-    const result = await execute(value);
-    assert.equal(result.classification, 'NOT_APPLIED'); assert.equal(result.appliedCount, 0);
-    assert.equal(memory.sentStatements, 1); await expectCounts(0, 0);
-  });
-  it('reconciles an acknowledged-server COMMIT whose response is hidden', async () => {
-    const value = await prepared(); memory.fault = 'after-commit';
+  for (const fault of ['history-loss', 'before-commit']) {
+    it(atomicFixtureTarget(fault).title, async () => {
+      const value = await prepared(fault); memory.fault = fault;
+      const result = await execute(value);
+      assert.equal(result.classification, 'NOT_APPLIED'); assert.equal(result.appliedCount, 0);
+      assert.equal(memory.sentStatements, 1); await expectCounts(0, 0);
+    });
+  }
+  it(atomicFixtureTarget('after-commit').title, async () => {
+    const value = await prepared('after-commit'); memory.fault = 'after-commit';
     const result = await execute(value);
     assert.equal(result.classification, 'APPLIED'); assert.equal(memory.sentStatements, 1); assert.equal(memory.sentCommits, 1);
     await expectCounts(1, 1);
   });
-  it('rolls back a real constraint failure without recording history', async () => {
-    const result = await execute(await prepared(`${write}; ${write};`));
+  it(atomicFixtureTarget('constraint').title, async () => {
+    const result = await execute(await prepared('constraint', `${write}; ${write};`));
     assert.equal(result.classification, 'NOT_APPLIED'); assert.equal(memory.sentHistory, 0); await expectCounts(0, 0);
   });
-  it('keeps UNKNOWN when committed readback is unavailable; it never retries SQL', async () => {
-    const value = await prepared(); memory.fault = 'readback-loss';
+  it(atomicFixtureTarget('readback-loss').title, async () => {
+    const value = await prepared('readback-loss'); memory.fault = 'readback-loss';
     const result = await execute(value);
     assert.equal(result.classification, 'UNKNOWN'); assert.equal(memory.sentStatements, 1); await expectCounts(1, 1);
   });
-  it('rejects an actual untrusted TLS peer before SQL', async () => {
-    const value = await prepared(); value.connection.caPem = memory.input.untrustedCaPem;
+  it(atomicFixtureTarget('wrong-ca').title, async () => {
+    const value = await prepared('wrong-ca'); value.connection.caPem = memory.input.untrustedCaPem;
     const result = await execute(value);
     assert.notEqual(result.classification, 'APPLIED'); assert.equal(memory.sentStatements, 0); await expectCounts(0, 0);
   });
-  it('respects a real held project advisory lock before SQL', async () => {
-    const value = await prepared();
-    const lock = BigInt.asIntN(64, BigInt(`0x${sha(Buffer.from(project)).slice(0, 16)}`)).toString();
+  it(atomicFixtureTarget('advisory-lock').title, async () => {
+    const value = await prepared('advisory-lock');
+    const lock = BigInt.asIntN(64, BigInt(`0x${sha(Buffer.from(value.bundle.modelSource.projectRef)).slice(0, 16)}`)).toString();
     await query('SELECT pg_advisory_lock($1::bigint)', [lock]);
     try {
       const result = await execute(value);

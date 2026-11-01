@@ -6,6 +6,7 @@ import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createDecodedMigrationHistorySnapshot } from './lib/migration-history-codec.mjs';
 import { comparePostgresHistoryObservation, isOwnedPostgresHistoryObservation, observePostgresMigrationHistory } from './lib/migration-readonly-postgres.mjs';
+import { runAtomicFixtureChild } from './lib/migration-atomic-report.mjs';
 
 assert.equal(process.argv.length, 2);
 const root = realpathSync(fileURLToPath(new URL('..', import.meta.url)));
@@ -21,6 +22,7 @@ const owner = randomUUID();
 const fixturePassword = randomBytes(24).toString('hex'); // Synthetic disposable role only. Never emitted.
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
 const ownedSources = ['scripts/lib/migration-readonly-postgres.mjs','scripts/lib/migration-atomic-postgres.mjs',
+  'scripts/lib/migration-atomic-report.mjs','scripts/fixtures/migration-readonly/atomic-fixture-targets.mjs',
   'scripts/fixtures/migration-readonly/atomic-pg.fixture.mjs','scripts/fixtures/migration-readonly/atomic-vitest.config.mjs',
   'tests/migration-readonly-postgres.test.ts','docs/MIGRATION_READONLY_POSTGRES.md','package.json','package-lock.json'];
 const sources = new Map(ownedSources.map(path => [path, sha(readFileSync(join(root, path)))]));
@@ -157,12 +159,11 @@ try {
   const atomicReport = join(task,'atomic-report.json');
   writeFileSync(atomicInput, JSON.stringify({ port: target.port, password: fixturePassword, caPem,
     untrustedCaPem: readFileSync(join(task,'untrusted.crt'),'utf8') }), { flag:'wx', mode:0o600 });
-  run(process.execPath, [join(root,'node_modules','vitest','vitest.mjs'),'run','--config',
+  const atomic = runAtomicFixtureChild({ file:process.execPath, args:[join(root,'node_modules','vitest','vitest.mjs'),'run','--config',
     join(fixtures,'atomic-vitest.config.mjs'),'--reporter=json','--outputFile',atomicReport],
-  { cwd:root, timeout:90000, env:{ ...process.env, RMS_ATOMIC_FIXTURE_PATH:atomicInput } });
-  const atomic = JSON.parse(readFileSync(atomicReport,'utf8'));
+    options:{ cwd:root, timeout:90000, env:{ ...process.env, RMS_ATOMIC_FIXTURE_PATH:atomicInput } }, reportPath:atomicReport, emit });
   check('actual isolated atomic PG17: eight writer/history/TLS/rollback/readback cases',
-    atomic.success===true && atomic.numTotalTests===8 && atomic.numPassedTests===8 && atomic.numPendingTests===0);
+    atomic.status==='PASSED' && atomic.total===8 && atomic.passed===8 && atomic.pending===0);
   check('actual atomic sessions closed after faults',sql(`SELECT count(*) FROM pg_stat_activity WHERE application_name LIKE 'rms_mig_%';`).trim()==='0');
   verifyOwner();
   crypto(['x509','-req','-in','server.csr','-CA','ca.crt','-CAkey','ca.key','-CAcreateserial','-sha256','-days','2','-out','wrong-server.crt','-extfile',join(fixtures,'pg378-fixture-wrong-san.ext')]);
