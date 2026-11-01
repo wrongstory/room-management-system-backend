@@ -24,9 +24,11 @@
 
 새 private table은 #396 초기화 manifest의 미분류 차단 대상이다. 실제 초기화가 후속·비활성인 현재 정책을 유지하며 임의 삭제/보존 분류나 기존 이력 삭제는 하지 않는다. 초기화 완성 시 새 원장 보존·참조 계획을 검토해야 한다.
 
+#396 최종 진단은 전체 catalog에서 이 미분류 차단이 유지됨을 검증하고, 기존 관계만의 사진 HOLD 검사를 별도 지문으로 분리한다. 새 원장을 전체 읽기/보호 계획에 포함했다고 표시하지 않는다. table 구조와 guard의 이름·활성 상태·digest 확인은 trigger 본문/실제 불변성 검증을 대신하지 않는다. [검증 범위와 실패 이력](RESET_FINAL_CATALOG_VALIDATION.md)을 따른다.
+
 ## 검증·배포 경계
 
-- 신규 migration `20261101131722_room_fixed_memo.sql`: **작성만 완료 / 실행 NOT RUN**. source144.
+- 신규 migration `20261101131722_room_fixed_memo.sql`: 원본 보존, source144. 2026-11-02 승인된 CI41344850134의 격리 source122→144 설치 단계는 SUCCESS였으나 후속 #396 진단이 실패했다. **전체 DB 검증 FAIL / 실제 #551 SQL·경합·운영 적용 NOT RUN**이다. 실패 뒤 재실행 승인은 별도로 필요하다.
 - 합성 SQL `supabase/tests/room_fixed_memo.sql` 및 세션 호출자 inventory 갱신: **실제 SQL NOT RUN**. 최종 승인된 통합 DB1회에서 권한·replay·CAS·통보 배정·clearing·세션 만료를 확인한다. `scripts/test-room-fixed-memo-concurrency.mjs`는 기존 reservation 경합 runner의 동일 임시 DB 안에서 실제 세 연결과 `pg_blocking_pids` 장벽으로 여덟 경합(두 관리자 다른 키 동일 버전, 동일 키/본문, 동일 키/다른 본문, 비우기↔수정 두 승자 순서와 과거 이력 보존, receipt 대기 중 세션 폐기, 객실 잠금 대기 중 세션 만료/폐기)을 준비했다. revision·감사·receipt의 정확한 효과 수와 무효 세션의 쓰기0을 검사한다. 전체 direct entry12·reset79는 유지하며 추가 start/reset은0이다. 모듈 작업60초·연결 종료10초, 연결3초·query7초·statement5초·lock4초·idle15초·장벽3초 상한을 사용한다. 자기 연결만 종료하고 합성 원장은 기존 임시 DB 정리 범위에서 제거한다. DB 없는 장벽/오류·종료 검사와 실제 SQL/경합 성공은 구분하며 **실제 동시 DB 경합 NOT RUN**이다.
 - 초기 독립 QA의 Edge 경로 추출 누락과 DB 비밀번호 필수 오류 안내를 보완했고 실제 HTTP dispatch 회귀를 추가했다. 최종 검사 결과는 PR/이슈 기록을 따른다.
 - source/manifest 통과는 실제 DB 통과가 아니다. 로컬/CI/운영 migration·DB재구축 실행 전 각각 사용자 승인 필요.

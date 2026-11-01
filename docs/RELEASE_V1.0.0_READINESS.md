@@ -1,5 +1,20 @@
 # v1.0.0 개발·배포 준비 상태
 
+## 2026-11-02 최종 격리 검증 R1 실패와 진단 보완
+
+#551은 PR552로 dev에 병합됐고, 승인된 FINAL-144-R1은 PR553/run41344850134 attempt1에 사용됐다.
+source122→144 설치/checkpoint와 application은 PASS지만 catalog harness는 FAIL이다. 후속 실제
+SQL·RLS·경합과 oracle/proof는 NOT RUN이다. Supabase stop 성공과 Docker volume 보존을 구분한다.
+
+DB 없는 재현에서 의도적으로 미분류인 메모 원장을 전체 읽기 계획에 넣는 검사 불일치를 확인했다.
+로그가 내부 오류를 숨겼으므로 실행 당시 최초 거부 지점은 확정하지 않는다. 보완 검사는 전체 catalog의
+정확한 #551 미분류 차단을 확인하고, 별도 지문으로 묶은 기존 분류 범위에서 읽기 계획/합성 사진 HOLD
+6개 검사를 유지한다. migration·삭제/보존 정책·제품 실행 코드와 후속 SQL·경합 검사는 바꾸지 않는다.
+
+보완의 소스 검사·독립 QA·dev 반영 뒤 새 후보를 동결한다. 기존 PR553의 추가 push가 유발하는
+새 전체 DB 검증은 별도 승인 전 NOT RUN이며, R1 승인·실패 결과를 재사용하지 않는다.
+현재 main 병합·운영 migration·API/Swagger 배포는 대기한다. 정확한 입력/실행안은 USER_DECISIONS.md를 따른다.
+
 ## 2026-11-02 객실 고정 메모 포함 결정
 
 사용자가 #551/PR552를 검토·병합 후 이번 v1.0.0에 포함하도록 선택했다. #548 지연 예약·입실
@@ -81,6 +96,8 @@ DB 성공 증거를 대신하지 않는다. 변경된 통합 입력은 이전 �
 확인한다. 나머지25개 OPAQUE 경로와 전체 reset 실행 차단은 유지한다.
 [최종 catalog 검사](RESET_FINAL_CATALOG_VALIDATION.md)는 승인된 최종 DB job에서만 실제 schema를
 기존 read-plan·사진 HOLD 부모 보호 검사와 연결하며, 행은 메모리 합성값만 사용한다.
+이141개 준비 이력과 달리 현행144개 진단은 전체 catalog의 미분류 차단과 기존 분류 범위의
+read-plan/HOLD를 구분한다. 상단의 현행 범위와 별도 승인 경계를 우선한다.
 Node212파일/5,662 tests·typecheck/build·manifest141·공개 계약·template-client와
 Edge583/65/68 검사 PASS다. 배포 후보 bundle19,997,042 bytes는 기존20,000,000 상한 안이다.
 실제 SQL/PLpgSQL·DB 경합·보호/복구·전체 초기화·운영 적용은 NOT RUN이다.

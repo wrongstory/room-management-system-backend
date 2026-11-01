@@ -67,7 +67,7 @@ main 검사는 exact main SHA를 merge_commit_sha로 가진 단 하나의 merged
 ## 기존 전체 검사 유지
 
 fresh source122 reset → hash-only checkpoint → exact pending 전체 tip 적용 →
-실제 catalog와 합성 행의 reset read-plan/사진 HOLD 부모 보호 검사 →
+전체 catalog의 #551 미분류 차단 확인·별도로 바인딩한 기존 분류 범위의 read-plan/합성 사진 HOLD 부모 보호 검사 →
 template contract → exact lint baseline → 합성 backup dry-run →
 전체 db:test/upgrade → static warning upgrade → KST clock → concurrency → cleanup.
 그 밖의 명령과 timeout 40분을 유지하며 테스트 삭제/skip/continue-on-error를 추가하지 않는다.
@@ -76,6 +76,9 @@ template contract → exact lint baseline → 합성 backup dry-run →
 [catalog 연결 검사](RESET_FINAL_CATALOG_VALIDATION.md)는 같은 실행의 hash-only checkpoint와
 입력 지문이 일치할 때 고정된 catalog 조회만 수행한다. 업무 행 조회·생성한 read-plan SQL 실행·
 보호 데이터 복사/복구·실제 초기화는 수행하지 않으며 전체 reset 실행 권한을 부여하지 않는다.
+새 메모 원장의 삭제·보존 정책은 정하지 않는다. 전체 read-plan/보호 계획은 계속 거부되어야 하며,
+전체와 파생 검사 범위의 지문·관계 수를 구분한다. 예상 밖 미분류 관계·누락·분리 경계를 넘는 FK는
+실패한다. 이는 #14의 #396 진단 범위 결정에 따른 검사 정합성 보완이고 전체 초기화 검증 성공이 아니다.
 
 H1의 [checkpoint 경로](MIGRATION_BASELINE_METADATA.md)는 최초 `db:verify`의 fresh 전체
 적용을 prefix122와 나머지 exact source tip으로 분할한다. 기존110→111 실험/전체 검증은

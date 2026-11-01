@@ -9,6 +9,12 @@
 2026-11-02 사용자가 #551 객실 고정 메모도 검토·병합 후 이번 배포에 포함하도록 선택했다.
 이는 DB 실행 승인이 아니다. #548을 포함했던 이전143개 계획은 대체하고 최신 통합 입력으로 다시 동결한다.
 
+그 뒤 정확한 FINAL-144-R1 승인을 받아 PR553/run41344850134 attempt1을 실행했다. 설치·checkpoint와
+application은 통과했지만 catalog harness가 실패해 후속 SQL·경합·proof는 실행되지 않았다.
+Supabase stop은 성공했고 Docker volume은 보존됐으며 전체 잔여 자원0을 주장하지 않는다.
+이 승인1회는 소모됐다. 진단 보완 후 새 입력을 동결하고, 기존 PR553의 동기화 push가 만드는
+새 격리 run/attempt1을 별도로 승인받는다. 실패 run 재실행·부분 재개·운영 적용 권한은 없다.
+
 | 이번 v1에 유지 | 운영사 인계 전 후속 #396 |
 | --- | --- |
 | 개발자 전용 읽기 미리보기·보존 영향 진단 | 실제 행/필드별 보존·삭제 및 FK/논리 참조 계획 확정 |
@@ -31,22 +37,25 @@ OPAQUE는 초기화 전 종료 증거가 부족한 경로이며 일반 기능25�
 - 보호된 dev 병합·로컬 release 통합 후 정확한 source/tree/dev/main과 비서술 입력 개수·공식 지문을
   단일 USER_DECISIONS.md와 불변 입력 목록에 기록한다. 이 문서의 개발 출발점을 최종 실행 SHA로 쓰지 않는다.
 
-이 문서 변경은 Markdown 서술만으로 기존 gate의 입력에서 제외되지만 source/tree SHA는 달라진다.
-문서 통합 뒤 최종 candidate SHA·tree·원격 dev/main 조상·manifest/SQL/입력 지문을 재대조해
+Markdown 서술은 기존 gate 입력에서 제외되지만 이번 catalog harness/회귀 검사 보완은
+검증 입력을 변경한다. 통합 뒤 최종 candidate SHA·tree·원격 dev/main 조상·manifest/SQL/입력 지문을 재대조해
 실행 승인안에 기록한다. 실제 PR의 GitHub merge SHA 지문도 같아야 한다. 변경·차이·오류를
 예상값으로 덮지 않는다. 과거141/142/143개 계획, 사전검증 시도, hotfix124 성공은 이 입력의 proof가 아니다.
 
 ## 격리 CI 최종1회 계획 (승인 전 NOT RUN)
 
 대상은 `release/v1.0.0 → main`의 GitHub Actions `quality`가 만드는 임시 격리 DB다.
-운영/복구 Supabase와 연결하지 않는다. release 첫 push/PR은 사전 승인 경계이며 PR 생성이
-전체 DB를 유발한다. 그 전에 최종 SHA·입력·대상·아래 재구축/fixture/정리 범위를 명시해 **1회 승인**을 받는다.
+운영/복구 Supabase와 연결하지 않는다. release PR 생성·push·재실행은 사전 승인 경계다.
+현재는 기존 PR553의 정확한 동기화 push가 새 전체 DB 검증을 유발한다. 그 전에 최종 SHA·입력·대상·
+아래 재구축/fixture/정리 범위를 명시해 **새1회 승인**을 받는다. 입력이 달라지면 다시 승인받는다.
 
 1. 실제 PR 입력 지문과 workflow/gate를 고정하고 기존 required application/migration을 유지한다.
 2. manifest 검사 후 기존 Supabase 시작·source122 fresh reset·hash-only checkpoint·정확한
    최신 tip까지 적용한다. prefix122는 검증 기준이지 현재 운영 설치 상태라는 가정이 아니다.
-3. 같은 run/attempt/source의 실제 catalog로 read-plan과 메모리 합성 사진 HOLD 부모 보호를 검사한다.
-   합성 행을 실제 업무 데이터·전체 초기화·복구 증거로 표시하지 않는다.
+3. 같은 run/attempt/source의 전체 catalog에서 #551 미분류 원장의 정확한 구조와 전체 read-plan/보호 계획의
+   명시적 차단을 확인한다. 별도 지문으로 묶은 기존 분류 범위에서 read-plan과 합성 사진 HOLD 부모 보호
+   6개 검사를 유지한다. 예상 밖 관계·누락·경계를 넘는 FK는 실패하며 메모 원장의 삭제·보존 정책은 정하지 않는다.
+   전체와 파생 검사 범위를 구분하고 합성 행을 실제 업무 데이터·전체 초기화·복구 증거로 표시하지 않는다.
 4. 템플릿 계약, 고정 PostgreSQL TLS/원자 fixture, 정확한 lint baseline, 합성 백업 dry-run을 수행한다.
 5. 기존 전체 upgrade·pgTAP/SQL/RLS, static warning upgrade, KST clock, 동시 요청 검사를 수행한다.
    #534 메모의 저장/생략/명시 초기화/승계/권한/이력과10경합, #532 실제 상태 정정,
