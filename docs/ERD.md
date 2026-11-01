@@ -1610,3 +1610,8 @@ head는 actor/project/key UNIQUE와 불변 header, CAS version/hash를 가지며
 ## #551 객실 고정 메모 후보
 
 `private.room_fixed_memo_revisions(room_id,revision)`은 객실별 append-only 안내 원장이다. 관리자 수정, 실제 통보된 현재 담당 메이드 조회, 별도 CAS/멱등성, room/profile RESTRICT FK와 actor index를 사용한다. 배정·일정 자동 생성 없음. API·권한·마이그레이션 미실행 경계와 #396 미분류 차단은 [상세 인계](./ROOM_FIXED_MEMO_551.md)를 따른다.
+
+
+### 2026-11-02 이번 주 가능일 승인 요청
+
+`availability_change_requests.availability_version_id`는 미제출자의 최초 요청에 한해 nullable이고 `source_version=0`과 묶인 CHECK로 제한한다. 기존 요청의 composite source FK와 메이드·주차 pending unique index는 유지한다. 최초 승인 전에는 availability version/day/candidate를 생성하지 않는다. 승인 시 새 version, 7개 day, 결정·감사·receipt를 한 transaction으로 기록한다. 현재 주 직접 submit은 차단하며 다음 주 submit은 유지한다. 지난 날짜는 양방향 변경 금지, 승인 시 활성 메이드·현재 주·CAS·통보 배정을 재검증한다. 반려는 stale/지난 주 요청도 sourceVersion에 맞게 종결할 수 있다. 이 변경은 개발 migration 후보이며 Full DB NOT RUN이다.

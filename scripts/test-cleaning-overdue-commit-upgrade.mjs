@@ -23,8 +23,10 @@ const commit = (target, fingerprint, key, version = 1) => `select private.commit
   '${id(1)}','2038-06-07','${fingerprint}',
   '[{"cleaningTargetId":"${id(1000 + target)}","expectedAssignmentVersion":2,"expectedAvailabilityVersion":${version}}]',
   '${key}',repeat('a',64),'2038-06-07 08:00+09');`;
-const submit = (maid, key, version = 1) => `select private.submit_weekly_availability_at(
-  '${id(maid)}','2038-06-07',array['2038-06-08'::date],${version},'${key}','2038-06-07 08:00+09');`;
+const submit = (maid, key, version = 1, dates = "array['2038-06-08'::date]") => `select private.decide_availability_change_at(
+  '${id(1)}',(private.request_availability_change_at('${id(maid)}','2038-06-07',${dates},'WORK_SCHEDULE',${version},'${key}-request','2038-06-07 08:00+09')).id,
+  'approved','ADMIN_APPROVED',${version},'${key}','2038-06-07 08:00+09');`;
+
 const startSql = (input) => {
   const child = spawn('docker', psqlArgs, { stdio: ['pipe', 'pipe', 'pipe'] });
   let stdout = '';
@@ -109,8 +111,7 @@ try {
 
     // Availability wins on an independent old draft/maid: commit waits for the
     // same current-week lock, then rejects the now-changed impact and writes zero.
-    sql(`select private.submit_weekly_availability_at('${id(4)}','2038-06-07',
-      array['2038-06-07'::date,'2038-06-08'::date],1,'overdue-race-setup-availability','2038-06-07 08:00+09');`);
+    sql(submit(4, 'overdue-race-setup-availability', 1, "array['2038-06-07'::date,'2038-06-08'::date]"));
     const secondImpact = impact();
     const second = startSql(`set application_name='overdue_availability_first'; begin;
       ${submit(4, 'overdue-race-availability-first', 2)} select pg_sleep(5); commit;`);
