@@ -8696,6 +8696,8 @@ export const openApiDocument = {
             "PIN_ACCESS_REQUIRED",
             "SENSITIVE_TEXT_NOT_ALLOWED",
             "PIN_MATERIAL_NOT_ALLOWED",
+            "ROOM_TYPE_CLEANING_FEE_INVALID",
+            "ROOM_TYPE_CLEANING_FEE_RESPONSE_INVALID",
             "ROOM_COMMAND_FAILED",
             "ORIGIN_NOT_ALLOWED",
             "ROUTE_NOT_FOUND",

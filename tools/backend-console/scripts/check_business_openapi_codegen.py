@@ -166,16 +166,18 @@ def check_post_approval_contract(document: dict[str, Any]) -> None:
         raise RuntimeError("#336 원본 바이너리 MIME/5MiB 계약이 잘못됐습니다.")
     codes = document["components"]["schemas"]["ErrorCode"]["enum"]
     if (
-        len(codes) != 354
-        or len(set(codes)) != 354
+        len(codes) != 356
+        or len(set(codes)) != 356
         or "POST_APPROVAL_ROOM_ISSUE_EVIDENCE_RETRY_REQUIRED" not in codes
         or "AUTH_CONTEXT_UNAVAILABLE" not in codes
         or "AVAILABILITY_APPROVAL_REQUIRED" not in codes
         or "ASSIGNMENT_INSTRUCTION_INVALID" not in codes
+        or "ROOM_TYPE_CLEANING_FEE_INVALID" not in codes
+        or "ROOM_TYPE_CLEANING_FEE_RESPONSE_INVALID" not in codes
     ):
         raise RuntimeError(
             "#442/#532/#534 공통 safe error code union은 "
-            "인증·객실 정정·배정 메모·가능일 승인 오류를 포함한 정확354개여야 합니다."
+            "인증·객실 정정·배정 메모·가능일 승인 오류를 포함한 정확356개여야 합니다."
         )
 
 
@@ -629,6 +631,27 @@ print('Python photo operation codegen: eight state/retention roundtrips PASS')
     )
 
 
+def check_room_type_fee_roundtrip(destination: Path) -> None:
+    source = """\
+import sys
+import httpx
+sys.path.insert(0, sys.argv[1])
+from generated.client import Client
+from generated.api.rooms.set_room_type_cleaning_fee import _parse_response
+client = Client(base_url='https://example.invalid')
+for status, code in [(400, 'ROOM_TYPE_CLEANING_FEE_INVALID'),
+                     (500, 'ROOM_TYPE_CLEANING_FEE_RESPONSE_INVALID')]:
+    body = {'error': {'code': code, 'message': 'synthetic'}, 'requestId': 'fee577-test'}
+    parsed = _parse_response(client=client, response=httpx.Response(status, json=body))
+    if parsed is None or parsed.to_dict() != body:
+        raise RuntimeError('#577 generated typed fee error response failed roundtrip')
+print('Python room-type fee codegen: actual HTTP400/500 typed error parsing PASS')
+"""
+    subprocess.run(  # noqa: S603
+        [sys.executable, "-c", source, str(destination)], check=True
+    )
+
+
 def main() -> None:
     console_root = Path(__file__).resolve().parents[1]
     repository_root = console_root.parents[1]
@@ -647,8 +670,8 @@ def main() -> None:
     if document.get("info", {}).get("version") != "0.6.0":
         raise RuntimeError("전체 source OpenAPI version이 0.6.0이 아닙니다.")
     paths = document.get("paths")
-    if not isinstance(paths, dict) or len(paths) != 160:
-        raise RuntimeError("전체 source OpenAPI path 수가 160가 아닙니다.")
+    if not isinstance(paths, dict) or len(paths) != 161:
+        raise RuntimeError("전체 source OpenAPI path 수가 161이 아닙니다.")
     methods = {"get", "post", "put", "patch", "delete"}
     operation_count = sum(
         1
@@ -657,8 +680,8 @@ def main() -> None:
         for method in path_item
         if method in methods
     )
-    if operation_count != 173:
-        raise RuntimeError("전체 source OpenAPI operation 수가 173이 아닙니다.")
+    if operation_count != 174:
+        raise RuntimeError("전체 source OpenAPI operation 수가 174가 아닙니다.")
     schemas = document.get("components", {}).get("schemas", {})
     check_post_approval_contract(document)
     check_room_ready_contract(document)
@@ -1047,6 +1070,7 @@ def main() -> None:
                 raise RuntimeError(f"사진 템플릿 게시 codegen 필드가 누락됐습니다: {field}")
         check_template_permutation_roundtrip(npm, repository_root, destination)
         check_reset_preview_roundtrip(repository_root, destination)
+        check_room_type_fee_roundtrip(destination)
         check_room_ready_roundtrip(destination)
         check_assignment_instruction_roundtrip(destination, document)
         batch_roundtrip = """

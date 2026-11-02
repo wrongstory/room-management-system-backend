@@ -1,3 +1,4 @@
+import {openApiDocument} from '../supabase/functions/_shared/openapi.js';
 import {describe,it,expect,vi} from 'vitest';
 import {readFileSync} from 'node:fs';
 import {createRequire} from 'node:module';
@@ -31,4 +32,5 @@ describe('admin room type cleaning fee577',()=>{
  it('admits only the exact admin write route',()=>{expect(httpAdmissionRoute('PUT',`/v1/room-types/${id}/cleaning-fee`)).toMatchObject({routeId:'setRoomTypeCleaningFee',rpc:'set_room_type_cleaning_fee'});expect(httpAdmissionRoute('PATCH',`/v1/room-types/${id}/cleaning-fee`)).toBeUndefined();});
  it.each([15,17])('parses the append migration with PostgreSQL %i grammar only',async version=>{const parser=createRequire(import.meta.url)(`@pgsql/parser/v${version}`);expect((await parser.parse(readFileSync('supabase/migrations/20261102111756_room_type_cleaning_fee.sql','utf8'))).stmts.length).toBeGreaterThan(5);});
  it('rechecks after receipt/lock waits and never writes target/earning/payment history',()=>{const sql=readFileSync('supabase/migrations/20261102111756_room_type_cleaning_fee.sql','utf8');expect(sql.match(/private.assert_attempt_actor_session_fresh\(/g)).toHaveLength(3);expect(sql).toContain("hashtextextended('room-management:reservation-command',0)");expect(sql).toContain('for update');expect(sql).toContain('item.version<>p_expected_version');expect(sql).toContain('private.complete_command');expect(sql).not.toMatch(/(?:update|delete from|insert into) public\.(?:cleaning_targets|earnings|payroll_items|payroll_cycles)/i);});
+ it.each(['ROOM_TYPE_CLEANING_FEE_INVALID','ROOM_TYPE_CLEANING_FEE_RESPONSE_INVALID'])('documents typed client error %s',code=>{expect(openApiDocument.components.schemas.ErrorCode.enum).toContain(code);});
 });
