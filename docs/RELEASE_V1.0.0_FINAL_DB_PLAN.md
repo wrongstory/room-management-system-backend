@@ -1,5 +1,33 @@
 # v1.0.0 최종 DB 검증 계획 — 객실 고정 메모 포함
 
+## 최신147 입력 준비와 추가 회귀 범위
+
+#558은 dev 병합 및 DB 없는 CI/독립 QA를 마쳤다. #559의 후속147과 기존 검사3곳의
+현재/다음 주 정책 정합성 보완을 통합한 뒤 최종 입력을 고정한다. 기존146개 migration 원문을
+보존하고 source147 목록을 운영 pending 건수로 해석하지 않는다.
+
+새 SQL2파일은 canonical receipt·권한/snapshot/만료 확인과 내부 helper의 신구 동등성을
+transaction 안에서 검증한 뒤 rollback한다. helper 회귀는 고정 psql fixture와147 재적용을
+같은 transaction에서 사용하며 별도 DB 시작/reset을 추가하지 않는다. 기존 경합 검사의
+요일 분기·과거 날짜 보존·정확한 업무 오류 판정을 보완하고 연결 수·대상 날짜·제한은 유지한다.
+
+최종 승인 문서는 USER_DECISIONS.md 하나다. 로컬/CI DB 실행·release push·운영 적용은
+별도 정확 승인 전 NOT RUN이며 과거 R3 실패 또는 feature source CI를 전체 DB 성공으로 쓰지 않는다.
+
+
+## 2026-11-02 현재 — D03-L A 승인, 새 통합 입력 준비
+
+FINAL-144-R3/run41353299781은 TLS/atomic21 PASS 후 strict lint에서 FAIL했고 승인은 소모됐다.
+사용자가 #558의 정확 clock10 정책과 소스 보완을 승인했다. 과거 compatibility9는 보존한다.
+현재 승인 범위는 DB 없는 검증·독립 QA·개발 통합·다음 실행안 준비다. DB 재실행과 release
+push 및 운영 migration은 승인되지 않았다. 아래144개 계획은 이전 입력의 범위 기록이다.
+
+최신 dev PR556과 #558/#559 보완을 통합한 후 정확한 migration/SQL/검증 파일 목록과
+후보·tree·입력 지문·bundle을 다시 계산한다. 새 실행안은 USER_DECISIONS.md에 확정하며,
+기존 R1/R2/R3 실패나 다른 입력의 성공을 재사용하지 않는다. 실제 수정 후 lint·SQL·RLS·
+경합과 canonical receipt byte 동등성은 새 승인 전 NOT RUN이다.
+
+
 ## 상태와 확정 범위 (2026-11-02)
 
 사용자 결정: “#396은 진단·안전장치만 v1.0.0에 포함하고 실제 초기화는 운영사 인계 전

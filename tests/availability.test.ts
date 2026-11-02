@@ -35,6 +35,7 @@ function clients(): SupabaseClients {
 
 describe('availability service authorization and errors', () => {
   it('maps stale and idempotency database contracts to HTTP conflicts', () => {
+    expect(availabilityDatabaseError({ message: 'AVAILABILITY_APPROVAL_REQUIRED' })).toMatchObject({ statusCode: 409, code: 'AVAILABILITY_APPROVAL_REQUIRED' });
     expect(availabilityDatabaseError({ message: 'STALE_VERSION' })).toMatchObject({
       statusCode: 409,
       code: 'STALE_VERSION'

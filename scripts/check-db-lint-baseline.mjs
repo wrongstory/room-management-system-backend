@@ -3,8 +3,8 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
-  CATALOG_SQL, LOCAL_DB_CONTAINER, PROCESS_MAX_BUFFER, PROCESS_TIMEOUT_MS,
-  STRICT_LINT_ARGS, SUPABASE_CLI_VERSION, validateLintBaseline, validateLocalContainer,
+  CATALOG_SQL, FINAL_CATALOG_SQL, LOCAL_DB_CONTAINER, PROCESS_MAX_BUFFER, PROCESS_TIMEOUT_MS,
+  STRICT_LINT_ARGS, SUPABASE_CLI_VERSION, validateFinalLintBaseline, validateLintBaseline, validateLocalContainer,
   validateLocalDockerEndpoint, validateLocalProjectConfig, validateProcessResult,
 } from './db-lint-baseline.mjs';
 
@@ -13,7 +13,7 @@ const reject = (message) => { throw new Error(`DB lint baseline rejected: ${mess
 
 // Dependencies are injectable only to test orchestration without Docker or DB.
 // The command line has no URL, target, schema or baseline overrides.
-export function runLocalBaselineCheck({
+function runLocalCheck(catalogSql, validate, label, {
   spawnSyncImpl = spawnSync, readFileSyncImpl = readFileSync, env = process.env,
   stdout = process.stdout, stderr = process.stderr, args = process.argv.slice(2),
 } = {}) {
@@ -58,10 +58,19 @@ export function runLocalBaselineCheck({
   const observedStrict = lint.error || lint.signal || lint.status == null ? 'EXECUTION FAILURE' : lint.status === 0 ? 'PASS' : 'FAIL';
   stdout.write(`Original strict lint observed: ${observedStrict}, exit ${lint.status ?? 'unavailable'}. Baseline acceptance requires FAIL, exit 1.\n`);
   // Catalog access uses the local named container and a read-only transaction.
-  const catalog = run('docker', ['--context', 'default', 'exec', LOCAL_DB_CONTAINER, 'psql', '-X', '-qAt', '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', 'postgres', '-c', CATALOG_SQL], 'installed function catalog');
-  const accepted = validateLintBaseline({ lint, catalog });
-  stdout.write(`DB lint baseline: PASS (${accepted.acceptedWarningCount} exact approved compatibility warnings; ${accepted.catalogFunctionCount} exact installed fingerprints). Original strict lint remains ${accepted.rawStrictResult}, exit ${accepted.rawStrictExitCode}.\n`);
+  const catalog = run('docker', ['--context', 'default', 'exec', LOCAL_DB_CONTAINER, 'psql', '-X', '-qAt', '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', 'postgres', '-c', catalogSql], 'installed function catalog');
+  const accepted = validate({ lint, catalog });
+  stdout.write(`DB lint baseline: PASS (${label}; ${accepted.acceptedWarningCount} exact approved warnings; ${accepted.catalogFunctionCount} exact installed fingerprints). Original strict lint remains ${accepted.rawStrictResult}, exit ${accepted.rawStrictExitCode}.\n`);
   return accepted;
+}
+
+// Fixed entry points, never an argv/env choice or an inventory-based fallback.
+export function runLocalBaselineCheck(options) {
+  return runLocalCheck(FINAL_CATALOG_SQL, validateFinalLintBaseline, '#373 compatibility9 + #558 clock10', options);
+}
+
+export function runLocalHistoricalCompatibilityCheck(options) {
+  return runLocalCheck(CATALOG_SQL, validateLintBaseline, '#373 historical100-to-101 compatibility9 only', options);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {

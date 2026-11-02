@@ -2,17 +2,17 @@
   "schemaVersion": 1,
   "release": "dev",
   "hashAlgorithm": "sha256-lf-utf8",
-  "totalCount": 144,
+  "totalCount": 147,
   "baseline": {
     "count": 78,
     "head": "reservation_bookability_optional_guest_count"
   },
   "pending": {
-    "count": 66,
+    "count": 69,
     "first": "assignment_unavailability_reassignment",
-    "head": "room_fixed_memo"
+    "head": "availability_guard_unused_parameter"
   },
-  "head": "room_fixed_memo",
+  "head": "availability_guard_unused_parameter",
   "migrations": [
     {
       "order": 1,
@@ -733,6 +733,21 @@
       "order": 144,
       "name": "room_fixed_memo",
       "sha256": "2b1f16198d6b2a16ccf83901e65a7e9b2d99fc439d446d25d49c97be41725eec"
+    },
+    {
+      "order": 145,
+      "name": "current_week_availability_approval",
+      "sha256": "7b4b70d2a506dd028aa02469369429c5971eb160769e168438cf6f8fa61aa70c"
+    },
+    {
+      "order": 146,
+      "name": "db_lint_source_corrections",
+      "sha256": "b7f6834b471877e8a209116e669c566320bd2d67894952947abb351149377282"
+    },
+    {
+      "order": 147,
+      "name": "availability_guard_unused_parameter",
+      "sha256": "a3d9e37ce45ebe1f1f6b5ad68e63feb79b401ffb4eb26c389520e9c18aec7d3f"
     }
   ]
 }
