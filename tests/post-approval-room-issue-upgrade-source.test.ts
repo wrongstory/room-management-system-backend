@@ -195,8 +195,34 @@ const localInput = { args: [], env: {}, config, endpoint: JSON.stringify('unix:/
     project: 'room-management-system-backend', ports: { '5432/tcp': [{ HostIp: '127.0.0.1', HostPort: '54322' }] } }) };
 
 describe('#336 isolated110->111 source/preflight only (no DB PASS claim)', () => {
+  it('accepts the preserved146 prefix and exact reviewed147 extension', () => {
+    expect(source.entries[146]?.file).toBe('20261101235415_availability_guard_unused_parameter.sql');
+    expect(source.entries[146]?.sha256).toBe('a3d9e37ce45ebe1f1f6b5ad68e63feb79b401ffb4eb26c389520e9c18aec7d3f');
+    const historical = clone(manifest) as typeof manifest & { head: string; pending: { head: string; count: number } };
+    historical.totalCount = 146;
+    historical.head = 'db_lint_source_corrections';
+    historical.pending.head = historical.head;
+    historical.pending.count = 146 - 78;
+    historical.migrations = historical.migrations.slice(0, 146);
+    expect(validatePostApprovalUpgradeSource(historical, entries.slice(0, 146)).entries)
+      .toEqual(source.entries.slice(0, 146));
+    expect(execFileSync).not.toHaveBeenCalled();
+  });
+  it('rejects self-rehashed147 helper replacements and timestamp renames', () => {
+    const changed = clone(entries), changedManifest = clone(manifest);
+    const tail = changed[146], record = changedManifest.migrations[146];
+    if (!tail || !record) throw new Error('EXPECTED147_TAIL');
+    tail.raw = Buffer.from('select 1;\n');
+    record.sha256 = createHash('sha256').update(tail.raw).digest('hex');
+    expect(() => validatePostApprovalUpgradeSource(changedManifest, changed)).toThrow('Only reviewed availability-guard147 tail');
+    const renamed = clone(entries), renamedTail = renamed[146];
+    if (!renamedTail) throw new Error('EXPECTED147_TAIL');
+    renamedTail.file = renamedTail.file.replace('20261101235415_', '20261101235416_');
+    expect(() => validatePostApprovalUpgradeSource(manifest, renamed)).toThrow();
+  });
+
   it('accepts the unchanged historical145 prefix and exact reviewed146 extension', () => {
-    expect(source.entries).toHaveLength(146);
+    expect(source.entries).toHaveLength(147);
     expect(source.entries[145]?.file).toBe('20261101235131_db_lint_source_corrections.sql');
     expect(source.entries[145]?.sha256).toBe('b7f6834b471877e8a209116e669c566320bd2d67894952947abb351149377282');
     const historical = clone(manifest) as typeof manifest & { head: string; pending: { head: string; count: number } };
