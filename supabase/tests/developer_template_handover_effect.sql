@@ -10,11 +10,19 @@ select public.bootstrap_first_developer_profile(pg_temp.s1_id(11),pg_temp.s1_id(
   's1-developer','s1-developer','0136','s1-test-phone','s1-test-bootstrap');
 reset role;
 insert into auth.sessions(id,user_id,created_at,not_after) values(pg_temp.s1_id(21),pg_temp.s1_id(1),clock_timestamp(),null);
-insert into public.room_types(id,code,name,base_cleaning_fee,default_duration_minutes,default_guest_count,max_guest_count)
-  values(pg_temp.s1_id(31),'standard','Synthetic S1',1,30,2,2);
+-- The canonical room type already exists. Do not fabricate a fifth code or
+-- retire baseline publications to force the selected-publication contract.
+create temp table s1_room_type as select id from public.room_types where code='standard';
+select is((select count(*) from s1_room_type),1::bigint,'exact canonical standard type exists');
+select is((select count(*) from public.cleaning_template_versions),0::bigint,'fresh S1 fixture starts with no templates');
+select is((select count(*) from private.photo_template_slots),0::bigint,'fresh S1 fixture starts with no materialized slots');
+create temp table s1_room_types_before as select jsonb_agg(to_jsonb(t) order by id) snapshot from public.room_types t;
 insert into public.cleaning_template_versions(id,room_type_id,cleaning_kind,version,status,duration_minutes,photo_slots,created_by,created_at,published_at)
-  values(pg_temp.s1_id(41),pg_temp.s1_id(31),'checkout',9,'published',null,private.flat_cleaning_photo_slots(),pg_temp.s1_id(11),
+  values(pg_temp.s1_id(41),(select id from s1_room_type),'checkout',9,'published',null,private.flat_cleaning_photo_slots(),pg_temp.s1_id(11),
     '2001-01-01 00:00:00.123456+00','2001-01-02 00:00:00+00');
+create temp table s1_source_before as select
+  (select jsonb_agg(to_jsonb(t) order by id) from public.cleaning_template_versions t) templates,
+  (select jsonb_agg(to_jsonb(t) order by id) from private.photo_template_slots t) slots;
 insert into private.developer_operation_control(target_ref,policy_hash,reauth_ttl_seconds,lifecycle,maintenance)
   values(repeat('a',20),repeat('f',64),300,'PROVISIONING','REQUESTED');
 insert into private.developer_operation_reauth(id,nonce_hash,actor_profile_id,auth_user_id,session_digest,password_version,
@@ -33,7 +41,7 @@ insert into s1_input(payload) select jsonb_build_object('format','reset-template
   'templates',jsonb_build_array(jsonb_build_object('sourceId',pg_temp.s1_id(41),'newId',pg_temp.s1_id(42),
     'version',10,'maximumVersion',9,'expectedCurrentVersion',9,'plannedAt','2026-01-01T00:00:00.000Z','createdBy',pg_temp.s1_id(11),
     'reason','OPERATIONAL_HANDOVER_INITIALIZATION',
-    'content',jsonb_build_object('roomTypeId',pg_temp.s1_id(31),'cleaningKind','checkout','durationMinutes',null,'slots',private.flat_cleaning_photo_slots()))));
+    'content',jsonb_build_object('roomTypeId',(select id from s1_room_type),'cleaningKind','checkout','durationMinutes',null,'slots',private.flat_cleaning_photo_slots()))));
 update s1_input set binding=jsonb_build_object('actorProfileId',pg_temp.s1_id(11),'authUserId',pg_temp.s1_id(1),
   'sessionDigest',private.operation_secret_digest(pg_temp.s1_id(21)::text),
   'passwordVersionDigest',private.operation_secret_digest(public.get_auth_password_version(pg_temp.s1_id(1))),
@@ -75,9 +83,11 @@ select throws_ok($q$select private.assert_reset_template_handover_rows(jsonb_set
 select throws_ok($q$select public.apply_developer_template_handover('PRECHECK',pg_temp.s1_id(11),pg_temp.s1_id(1),pg_temp.s1_id(21)::text,repeat('9',64),
   binding,header,jsonb_set(payload,'{templates,0,newId}',to_jsonb(pg_temp.s1_id(99))),0,private.reset_receipt_hash(header)) from s1_input$q$,
   '22023','RESET_TEMPLATE_HANDOVER_COMMAND_CHANGED','payload transport mutation cannot replace approved postcondition');
-update public.profiles set must_change_password=true where id=pg_temp.s1_id(11);
+select throws_ok($q$update public.profiles set must_change_password=true where id=pg_temp.s1_id(11)$q$,
+  '23514','DEVELOPER_ACCOUNT_PROTECTED','developer password-state protection is enforced');
+update public.profiles set locked_until=clock_timestamp()+interval '5 minutes' where id=pg_temp.s1_id(11);
 select throws_ok($q$select pg_temp.s1_call('PRECHECK')$q$,'42501','OPERATION_ACTOR_REJECTED','latest actor status checked');
-update public.profiles set must_change_password=false where id=pg_temp.s1_id(11);
+update public.profiles set locked_until=null where id=pg_temp.s1_id(11);
 select public.store_developer_reset_receipt('CREATE',pg_temp.s1_id(11),pg_temp.s1_id(1),pg_temp.s1_id(21)::text,
   binding,header,0,private.reset_receipt_hash(header),null) from s1_input;
 update s1_input set entry=jsonb_build_object('sequence',1,'at',floor(extract(epoch from clock_timestamp())*1000)::bigint,
@@ -109,13 +119,19 @@ drop trigger s1_test_audit_failure on public.audit_events;
 create function pg_temp.s1_fail_after_publication() returns trigger language plpgsql as $$
 begin
   if new.id=pg_temp.s1_id(42) and new.status='published' then
-    update public.profiles set must_change_password=true where id=pg_temp.s1_id(11);
+    update public.profiles set locked_until=clock_timestamp()+interval '5 minutes' where id=pg_temp.s1_id(11);
   end if; return new;
 end $$;
 create trigger s1_test_failure after update on public.cleaning_template_versions for each row execute function pg_temp.s1_fail_after_publication();
 select throws_ok($q$select pg_temp.s1_call('APPLY',1,(select entry->>'hash' from s1_input))$q$,
   '42501','OPERATION_ACTOR_REJECTED','post-publication identity failure rolls back entire S1 transaction');
 select is((select count(*) from public.cleaning_template_versions),1::bigint,'failed effect leaves no draft or publication');
+select is((select jsonb_agg(to_jsonb(t) order by id) from public.cleaning_template_versions t),
+  (select templates from s1_source_before),'failed publication preserves every template column');
+select is((select jsonb_agg(to_jsonb(t) order by id) from private.photo_template_slots t),
+  (select slots from s1_source_before),'failed publication preserves every slot column');
+select is((select locked_until from public.profiles where id=pg_temp.s1_id(11)),null::timestamptz,
+  'failed publication rolls back injected developer lock');
 select is((select status from public.cleaning_template_versions where id=pg_temp.s1_id(41)),'published','old published status rolls back');
 select is((select count(*) from private.photo_template_slots),3::bigint,'failed materialized slots roll back');
 select is((select count(*) from public.audit_events where event_type='cleaning_template.operational_handover'),0::bigint,'failed effect provenance audit also rolls back');
@@ -128,6 +144,12 @@ select is(result->>'status','APPLIED','atomic draft/validate/publication observe
 select is(result->>'executionEnabled','false','effect evidence is not reset authority') from s1_input;
 select is((select status from public.cleaning_template_versions where id=pg_temp.s1_id(41)),'retired','normal prior publication retired');
 select is((select status from public.cleaning_template_versions where id=pg_temp.s1_id(42)),'published','new validated draft published');
+select is((select count(*) from public.cleaning_template_versions),2::bigint,'exactly one new version is registered');
+select is((select count(*) from private.photo_template_slots),6::bigint,'original three slots and three new slots remain');
+select is((select to_jsonb(t)-'status' from public.cleaning_template_versions t where id=pg_temp.s1_id(41)),
+  (select (templates->0)-'status' from s1_source_before),'retirement changes no other historical template field');
+select is((select jsonb_agg(to_jsonb(t) order by id) from public.room_types t),
+  (select snapshot from s1_room_types_before),'S1 preserves every canonical room type field');
 select is((select created_at from public.cleaning_template_versions where id=pg_temp.s1_id(41)),'2001-01-01 00:00:00.123456+00'::timestamptz,'historical actual creation unchanged');
 select isnt((select created_at from public.cleaning_template_versions where id=pg_temp.s1_id(42)),
   (select (payload#>>'{templates,0,plannedAt}')::timestamptz from s1_input),'actual registration never copies planning time');

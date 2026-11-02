@@ -122,11 +122,15 @@ update auth.sessions set not_after=clock_timestamp()-interval '1 minute' where i
 select throws_ok($q$select pg_temp.offline_admission_complete(6)$q$,'42501','OPERATION_IDENTITY_REJECTED',
   'an existing terminal does not bypass an expired session');
 update auth.sessions set not_after=null where id=pg_temp.offline_admission_id(21);
-create temp table offline_password_before as select encrypted_password from auth.users where id=pg_temp.offline_admission_id(1);
-update auth.users set encrypted_password='synthetic-password-version-change' where id=pg_temp.offline_admission_id(1);
-select throws_ok($q$select pg_temp.offline_admission_complete(6)$q$,'42501','OPERATION_COMPLETION_UNVERIFIED',
+-- The expected exception rolls password AND shadow-version rotation back in
+-- pgTAP's subtransaction. Restoring only encrypted_password rotates it again.
+select throws_ok($q$do $password_case$ begin
+  update auth.users set encrypted_password='synthetic-password-version-change'
+    where id=pg_temp.offline_admission_id(1);
+  perform pg_temp.offline_admission_complete(6);
+  raise exception using errcode='P9999',message='EXPECTED_PASSWORD_PROVENANCE_REJECTION';
+end $password_case$;$q$,'42501','OPERATION_COMPLETION_UNVERIFIED',
   'a changed Auth password version invalidates the original admission');
-update auth.users set encrypted_password=(select encrypted_password from offline_password_before) where id=pg_temp.offline_admission_id(1);
 update private.developer_operation_control set maintenance='REQUESTED',version=version+1;
 select throws_ok($q$select pg_temp.offline_admission_acquire(7)$q$,'42501','OPERATION_ADMISSION_REJECTED','maintenance blocks a new admission');
 select lives_ok($q$select pg_temp.offline_admission_complete(1)$q$,'exact terminal remains observable after maintenance starts');

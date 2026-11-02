@@ -26,11 +26,19 @@ select pg_temp.lid(1000+n),r.id,'additional','manual_room_request','late-issue-f
   (clock_timestamp() at time zone 'Asia/Seoul')::date-10,(clock_timestamp() at time zone 'Asia/Seoul')::date-10,
   clock_timestamp()-interval '10 days','approved',1,'{}',10000,'{}',pg_temp.lid(1)
 from (select id,row_number() over(order by room_number)::integer n from public.rooms) r where n in(1,2);
-insert into public.cleaning_assignments(id,cleaning_target_id,maid_profile_id,sequence_number,revision,is_current,
-  notified_at,ended_at,changed_by,service_date)
+-- Replica-mode history fixture: explicit NULL bypasses only the internal
+-- inheritance default, while CHECK constraints remain enabled. Unknown JSON
+-- memo key is ignored by the pre140 row type used by historical consumers.
+with assignment_fixture_rows(id,cleaning_target_id,maid_profile_id,sequence_number,revision,is_current,
+  notified_at,ended_at,changed_by,service_date) as (
 select pg_temp.lid(2000+n),pg_temp.lid(1000+n),pg_temp.lid(2),n,1,false,
   clock_timestamp()-interval '10 days',clock_timestamp()-interval '9 days',pg_temp.lid(1),
-  (clock_timestamp() at time zone 'Asia/Seoul')::date-10 from generate_series(1,2) n;
+  (clock_timestamp() at time zone 'Asia/Seoul')::date-10 from generate_series(1,2) n
+)
+insert into public.cleaning_assignments
+select (jsonb_populate_record(null::public.cleaning_assignments,
+  to_jsonb(assignment_fixture_rows)||jsonb_build_object('instruction_memo',null,'created_at',now()))).*
+from assignment_fixture_rows;
 update public.cleaning_assignments a set notified_room_id_snapshot=t.room_id,notified_room_number_snapshot=r.room_number
 from public.cleaning_targets t join public.rooms r on r.id=t.room_id where t.id=a.cleaning_target_id and a.id in(pg_temp.lid(2001),pg_temp.lid(2002));
 insert into public.cleaning_attempts(id,cleaning_target_id,assignment_id,maid_profile_id,attempt_number,status,
@@ -733,10 +741,18 @@ select is(private.submission_projection(pg_temp.lid(4002)),(select old_dto from 
 select is((select expires_at-retention_starts_at from private.photo_retention_records where object_id=pg_temp.lid(5402)),interval '168 hours','old approval expiry not extended by new domain');
 -- Synthetic historical assignment construction only; restore all guards before exercising access.
 set local session_replication_role=replica;
-insert into public.cleaning_assignments(id,cleaning_target_id,maid_profile_id,sequence_number,revision,is_current,
-  notified_at,ended_at,changed_by,service_date)
+-- Replica-mode history fixture: explicit NULL bypasses only the internal
+-- inheritance default, while CHECK constraints remain enabled. Unknown JSON
+-- memo key is ignored by the pre140 row type used by historical consumers.
+with assignment_fixture_rows(id,cleaning_target_id,maid_profile_id,sequence_number,revision,is_current,
+  notified_at,ended_at,changed_by,service_date) as (
 values(pg_temp.lid(8800),pg_temp.lid(1002),pg_temp.lid(3),9,2,false,null,
-  clock_timestamp()-interval '9 days',pg_temp.lid(1),(clock_timestamp() at time zone 'Asia/Seoul')::date-10);
+  clock_timestamp()-interval '9 days',pg_temp.lid(1),(clock_timestamp() at time zone 'Asia/Seoul')::date-10)
+)
+insert into public.cleaning_assignments
+select (jsonb_populate_record(null::public.cleaning_assignments,
+  to_jsonb(assignment_fixture_rows)||jsonb_build_object('instruction_memo',null,'created_at',now()))).*
+from assignment_fixture_rows;
 set local session_replication_role=origin;
 select throws_ok($$select public.get_post_approval_room_issue_source(pg_temp.lid(3),pg_temp.lid(203),pg_temp.lid(4002))$$,
   '42501','POST_APPROVAL_ROOM_ISSUE_ACCESS_REQUIRED','unnotified assignment does not authorize historical access');

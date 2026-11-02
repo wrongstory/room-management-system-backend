@@ -544,10 +544,11 @@ select throws_ok(
 -- inserting mutually consistent historical rows. The command itself runs with
 -- all triggers enabled and must roll back without moving either reservation.
 set local session_replication_role = replica;
-insert into public.cleaning_assignments (
-  id, cleaning_target_id, maid_profile_id, sequence_number, revision,
-  is_current, service_date, notified_at, changed_by
-)
+-- Replica-mode history fixture: explicit NULL bypasses only the internal
+-- inheritance default, while CHECK constraints remain enabled. Unknown JSON
+-- memo key is ignored by the pre140 row type used by historical consumers.
+with assignment_fixture_rows(id, cleaning_target_id, maid_profile_id, sequence_number, revision,
+  is_current, service_date, notified_at, changed_by) as (
 select '87400000-0000-4000-8000-000000000001', target.id,
   '87100000-0000-4000-8000-000000000002', 1, 1, true,
   target.effective_service_date, null,
@@ -556,7 +557,12 @@ from room_move_fixtures fixture
 join public.reservations reservation on reservation.id = fixture.reservation_id
 join public.checkout_cleaning_obligations obligation on obligation.id = reservation.checkout_obligation_id
 join public.cleaning_targets target on target.id = obligation.planned_cleaning_target_id
-where fixture.label = 'workflow';
+where fixture.label = 'workflow'
+)
+insert into public.cleaning_assignments
+select (jsonb_populate_record(null::public.cleaning_assignments,
+  to_jsonb(assignment_fixture_rows)||jsonb_build_object('instruction_memo',null,'created_at',now()))).*
+from assignment_fixture_rows;
 insert into public.cleaning_attempts (
   id, cleaning_target_id, assignment_id, maid_profile_id, attempt_number,
   status, assignment_revision, template_snapshot, room_snapshot
@@ -567,10 +573,11 @@ select '87500000-0000-4000-8000-000000000001', assignment.cleaning_target_id,
 from public.cleaning_assignments assignment
 where assignment.id = '87400000-0000-4000-8000-000000000001';
 
-insert into public.cleaning_assignments (
-  id, cleaning_target_id, maid_profile_id, sequence_number, revision,
-  is_current, service_date, notified_at, changed_by
-)
+-- Replica-mode history fixture: explicit NULL bypasses only the internal
+-- inheritance default, while CHECK constraints remain enabled. Unknown JSON
+-- memo key is ignored by the pre140 row type used by historical consumers.
+with assignment_fixture_rows(id, cleaning_target_id, maid_profile_id, sequence_number, revision,
+  is_current, service_date, notified_at, changed_by) as (
 select '87400000-0000-4000-8000-000000000002', target.id,
   '87100000-0000-4000-8000-000000000002', 1, 1, true,
   target.effective_service_date, null,
@@ -579,7 +586,12 @@ from room_move_fixtures fixture
 join public.reservations reservation on reservation.id = fixture.reservation_id
 join public.checkout_cleaning_obligations obligation on obligation.id = reservation.checkout_obligation_id
 join public.cleaning_targets target on target.id = obligation.planned_cleaning_target_id
-where fixture.label = 'pin';
+where fixture.label = 'pin'
+)
+insert into public.cleaning_assignments
+select (jsonb_populate_record(null::public.cleaning_assignments,
+  to_jsonb(assignment_fixture_rows)||jsonb_build_object('instruction_memo',null,'created_at',now()))).*
+from assignment_fixture_rows;
 insert into public.cleaning_attempts (
   id, cleaning_target_id, assignment_id, maid_profile_id, attempt_number,
   status, assignment_revision, template_snapshot, room_snapshot
