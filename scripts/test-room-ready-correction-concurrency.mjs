@@ -47,7 +47,7 @@ create function pg_temp.cid(n integer) returns uuid language sql immutable as $$
  when 902 then '${manualCancelId(202)}'::uuid
  else ('53210000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid end $$;
 insert into public.rooms(id,room_number,room_type_id,elevator_zone,data_status)
- select pg_temp.cid(1000+n),(9550+n)::text,rt.id,'A','verified'
+ select pg_temp.cid(1000+n),(950+n)::text,rt.id,'A','verified'
  from public.room_types rt cross join generate_series(1,7) n where rt.code='standard' and rt.active;
 insert into public.cleaning_template_versions(id,room_type_id,cleaning_kind,version,status,duration_minutes,photo_slots,created_by)
  select pg_temp.cid(200),id,'additional',9,'retired',1,private.flat_cleaning_photo_slots(),pg_temp.cid(1)
