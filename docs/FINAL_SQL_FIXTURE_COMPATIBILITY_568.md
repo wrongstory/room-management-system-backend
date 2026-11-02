@@ -1,5 +1,28 @@
 # #568 최종147 SQL fixture 정합성
 
+## R5 실제 결과와 최종 소스 지문 보완
+
+승인된 FINAL-147-R5 후보1c5751f의 run41393708726 attempt1은 FAIL이다.
+28개 upgrade는 모두 PASS이고, 최종 SQL118파일/6482개 중 단1개 assertion이 실패했다.
+`db_static_warning_remediation.sql`의 첫 검사(81개 중1개)이며 나머지117파일은 PASS다.
+이전13개 실패 파일 중12개는 전체 PASS이고, photo batch의 실제44개/plan도 PASS다.
+후속 static-warning upgrade/KST/직접경합12/proof는 NOT RUN·artifact0이다.
+Stop은 PASS이며 Supabase volume은 보존됐다. 전체 잔여0 census나 추가 DB 실행은 없다.
+
+실패한 검사는 함수 `public.list_cleaning_inspections_page(uuid,uuid,timestamptz,uuid,integer)`의
+최종 본문을 과거101의 MD5 `a8138f7f69f796fc0dd1d8d7d8b72569`와 비교했다.
+승인된 #532의 migration138이 취소된 청소를 검수 대기에서 제외하는 WHERE 필터를
+같은 함수에 추가하므로, 최종 정본은 `69f85dd6e4dc95fd1b17973e7fe8e5cc`다.
+원본 pagination 함수 →101 미사용 변수 제거 →138 정확한 필터 치환을 소스에서 재현해
+각 단계의 지문과 실제 관측값을 대조했다. 최종 SQL 검사만 새 정확값과 설명으로 정정한다.
+이 변경은 함수나 migration의 변경이 아니며 다른 본문을 허용하는 예외도 추가하지 않는다.
+
+역사적100→101의 별도 runner는 기존 LF/CRLF 정본·정확지문·15개 무단변경 거부를
+그대로 유지한다. DB 없는 회귀 검사는 원문 migration에서 최종 본문을 재구성하고,
+최종 SQL과 역사적 runner가 서로 다른 정확한 정본을 검사하는지 확인한다.
+아래는 R4 후 보완 당시의 분석/검증 이력이며 실제 R5 결과는 이 절이 우선한다.
+이번 추가 보완 입력의 실제 DB 재검증은 NOT RUN이다. 새 실행은 별도 승인받는다.
+
 FINAL-147-R4의 실제 run41380296381 attempt1은 28개 upgrade PASS 후 최종SQL에서 실패했다.
 118파일·6017 TAP관측 중13파일 불성공: SQL중단9, assertion실패파일3/10건,
 단독plan불일치1이다. 앞20/21 메모·일정 보완은 실제 PASS였다.
