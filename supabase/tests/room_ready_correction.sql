@@ -85,8 +85,9 @@ select throws_ok($$select * from public.list_developer_audit_events(pg_temp.read
   '42501','DEVELOPER_REQUIRED','administrator cannot use developer audit endpoint');
 
 -- Reproduce the reported checkout obligation with no next stay, then try a new booking.
+create temp table ready_booking_clock as select date_trunc('minute',clock_timestamp()) at_time;
 select public.create_reservation(pg_temp.ready_id(1),pg_temp.ready_id(50),pg_temp.ready_id(10),
-  clock_timestamp()-interval '1 day',clock_timestamp()+interval '1 day',1,null,
+  (select at_time from ready_booking_clock)-interval '1 day',(select at_time from ready_booking_clock)+interval '1 day',1,null,
   (select state_version from public.rooms where id=pg_temp.ready_id(10)),'old-stay',repeat('d',64));
 update public.reservations set actual_check_in_at=check_in_at where id=pg_temp.ready_id(50);
 select public.manual_checkout_reservation(pg_temp.ready_id(1),pg_temp.ready_id(50),
@@ -112,7 +113,7 @@ select is((select due_at from public.cleaning_targets where id=(select (value#>>
   null::timestamptz,'checkout has no next-reservation due time');
 create function pg_temp.ready_next_booking() returns jsonb language sql as $$
   select public.create_reservation(pg_temp.ready_id(1),pg_temp.ready_id(51),pg_temp.ready_id(10),
-    clock_timestamp()+interval '1 hour',clock_timestamp()+interval '2 days',1,null,
+    (select at_time from ready_booking_clock)+interval '1 hour',(select at_time from ready_booking_clock)+interval '2 days',1,null,
     (select state_version from public.rooms where id=pg_temp.ready_id(10)),'next-stay',repeat('e',64))
 $$;
 select throws_ok($$select pg_temp.ready_next_booking()$$,'23514','CLEANING_DUE_REPLAN_REQUIRED','original next-booking conflict reproduced');

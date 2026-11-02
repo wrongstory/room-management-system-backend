@@ -29,8 +29,8 @@ insert into auth.sessions(id,user_id,created_at,not_after)
   values(pg_temp.operation_id(22),pg_temp.operation_id(1),clock_timestamp(),null);
 select throws_ok($q$select pg_temp.verify_operation(pg_temp.operation_id(22),(select receipt->>'nonce' from challenge))$q$,
   '42501','OPERATION_REAUTH_REJECTED','fresh session without password AMR rejected');
-insert into auth.mfa_amr_claims(session_id,created_at,updated_at,authentication_method)
-  values(pg_temp.operation_id(22),clock_timestamp(),clock_timestamp(),'password');
+insert into auth.mfa_amr_claims(id,session_id,created_at,updated_at,authentication_method)
+  values(pg_temp.operation_id(32),pg_temp.operation_id(22),clock_timestamp(),clock_timestamp(),'password');
 select throws_ok($q$select pg_temp.verify_operation(pg_temp.operation_id(22),repeat('b',64))$q$,
   '42501','OPERATION_REAUTH_REJECTED','nonce substitution rejected');
 select lives_ok($q$select pg_temp.verify_operation(pg_temp.operation_id(22),(select receipt->>'nonce' from challenge))$q$,

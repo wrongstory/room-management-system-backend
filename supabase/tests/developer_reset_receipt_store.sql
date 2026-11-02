@@ -78,10 +78,12 @@ select throws_ok($q$select private.validate_reset_receipt(binding,header,jsonb_b
 select throws_ok($q$select public.store_developer_reset_receipt('READ',pg_temp.receipt_id(11),pg_temp.receipt_id(1),pg_temp.receipt_id(22)::text,
   binding,header,0,private.reset_receipt_hash(header),null) from receipt_input$q$,
   '42501','OPERATION_ACTOR_REJECTED','absent Auth session rejected');
-update public.profiles set must_change_password=true where id=pg_temp.receipt_id(11);
+select throws_ok($q$update public.profiles set must_change_password=true where id=pg_temp.receipt_id(11)$q$,
+  '23514','DEVELOPER_ACCOUNT_PROTECTED','developer password-state protection is enforced');
+update public.profiles set locked_until=clock_timestamp()+interval '5 minutes' where id=pg_temp.receipt_id(11);
 select throws_ok($q$select pg_temp.receipt_call('READ')$q$,
-  '42501','OPERATION_ACTOR_REJECTED','latest developer password gate rechecked');
-update public.profiles set must_change_password=false where id=pg_temp.receipt_id(11);
+  '42501','OPERATION_ACTOR_REJECTED','latest developer lock gate rechecked');
+update public.profiles set locked_until=null where id=pg_temp.receipt_id(11);
 create temp table original_password_version as select password_version from private.auth_password_versions where auth_user_id=pg_temp.receipt_id(1);
 update private.auth_password_versions set password_version=repeat('0',64) where auth_user_id=pg_temp.receipt_id(1);
 select throws_ok($q$select pg_temp.receipt_call('READ')$q$,
@@ -89,7 +91,7 @@ select throws_ok($q$select pg_temp.receipt_call('READ')$q$,
 update private.auth_password_versions set password_version=(select password_version from original_password_version) where auth_user_id=pg_temp.receipt_id(1);
 -- Inject an identity change between the before/after checks; the whole CREATE must rollback.
 create function pg_temp.invalidate_receipt_actor() returns trigger language plpgsql as $$
-begin update public.profiles set must_change_password=true where id=pg_temp.receipt_id(11); return new; end $$;
+begin update public.profiles set locked_until=clock_timestamp()+interval '5 minutes' where id=pg_temp.receipt_id(11); return new; end $$;
 create trigger receipt_test_auth_change after insert on private.developer_reset_receipt_heads
 for each row execute function pg_temp.invalidate_receipt_actor();
 create temp table original_receipt_input as select * from receipt_input;
@@ -98,7 +100,7 @@ update receipt_input set header=header||jsonb_build_object('commandHash',private
 select throws_ok($q$select pg_temp.receipt_call('CREATE')$q$,
   '42501','OPERATION_ACTOR_REJECTED','post-write identity change rolls back head and all effects');
 select is((select count(*) from private.developer_reset_receipt_heads),1::bigint,'failed post-auth creates no new head');
-select is((select must_change_password from public.profiles where id=pg_temp.receipt_id(11)),false,'failed transaction also rolls back injected identity change');
+select is((select locked_until from public.profiles where id=pg_temp.receipt_id(11)),null::timestamptz,'failed transaction also rolls back injected identity change');
 drop trigger receipt_test_auth_change on private.developer_reset_receipt_heads;
 update receipt_input set header=(select header from original_receipt_input);
 delete from auth.sessions where id=pg_temp.receipt_id(21);
