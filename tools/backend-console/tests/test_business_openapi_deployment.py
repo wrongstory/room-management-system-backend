@@ -153,13 +153,14 @@ def test_rejects_room_ready_contract_drift(document: dict[str, Any], mutation: s
 
 
 @pytest.mark.parametrize("mutation", ["missing", "duplicate", "replacement"])
-def test_rejects_auth_error_code_drift(document: dict[str, Any], mutation: str) -> None:
+@pytest.mark.parametrize("code", ["AUTH_CONTEXT_UNAVAILABLE", "AVAILABILITY_APPROVAL_REQUIRED"])
+def test_rejects_auth_error_code_drift(document: dict[str, Any], mutation: str, code: str) -> None:
     candidate = copy.deepcopy(document)
     codes = candidate["components"]["schemas"]["ErrorCode"]["enum"]
     if mutation == "duplicate":
-        codes.append("AUTH_CONTEXT_UNAVAILABLE")
+        codes.append(code)
     else:
-        codes.remove("AUTH_CONTEXT_UNAVAILABLE")
+        codes.remove(code)
         if mutation == "replacement":
             codes.append("UNREVIEWED_ERROR")
     with pytest.raises(RuntimeError, match="#442"):

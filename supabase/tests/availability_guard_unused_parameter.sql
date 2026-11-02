@@ -103,7 +103,8 @@ select
   (select count(*) from public.availability_days) as days,
   (select count(*) from public.availability_change_requests) as requests,
   (select count(*) from public.audit_events) as audits;
-\ir ../migrations/20261101235415_availability_guard_unused_parameter.sql
+-- supabase test db mounts only this directory. The source-only include test pins this copy.
+\ir availability_guard_unused_parameter_migration.psql
 
 select ok(to_regprocedure('private.assert_availability_past_unchanged(uuid,date,date[],timestamptz)') is null,
   'old private four-argument identity is removed');
