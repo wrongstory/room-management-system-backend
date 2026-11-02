@@ -12,7 +12,7 @@ alter table public.availability_change_requests
   );
 
 create function private.assert_availability_past_unchanged(
-  p_version_id uuid, p_dates date[], p_command_at timestamptz
+  p_version_id uuid, p_week_start date, p_dates date[], p_command_at timestamptz
 ) returns void language plpgsql set search_path = pg_catalog as $$
 begin
   if p_version_id is null and exists (select 1 from unnest(p_dates) d where d < (p_command_at at time zone 'Asia/Seoul')::date) then
@@ -28,7 +28,7 @@ begin
   end if;
 end;
 $$;
-revoke all on function private.assert_availability_past_unchanged(uuid,date[],timestamptz) from public, anon, authenticated;
+revoke all on function private.assert_availability_past_unchanged(uuid,date,date[],timestamptz) from public, anon, authenticated;
 
 create or replace function private.submit_weekly_availability_at(
   p_actor_profile_id uuid,
@@ -260,7 +260,7 @@ begin
     raise exception using errcode = '40001', message = 'STALE_VERSION';
   end if;
 
-  perform private.assert_availability_past_unchanged(v_current.id, v_dates, p_command_at);
+  perform private.assert_availability_past_unchanged(v_current.id, p_week_start, v_dates, p_command_at);
 
   insert into public.availability_change_requests (
     availability_version_id, maid_profile_id, week_start, source_version,
@@ -398,7 +398,7 @@ begin
     if v_request.week_start <> date_trunc('week', p_command_at at time zone 'Asia/Seoul')::date then
       raise exception using errcode = '22023', message = 'AVAILABILITY_WEEK_OUT_OF_RANGE';
     end if;
-    perform private.assert_availability_past_unchanged(v_current.id, v_request.requested_available_dates, p_command_at);
+    perform private.assert_availability_past_unchanged(v_current.id, v_request.week_start, v_request.requested_available_dates, p_command_at);
     update public.availability_versions
     set status = 'superseded', is_current = false
     where id = v_current.id;
@@ -520,6 +520,3 @@ begin
     'reasonCode',p_args->>'p_reason_code','expectedVersion',v_version));
 end;
 $$;
-
--- Keep the internal hash helper private even when installed on the production-only branch.
-revoke all on function private.operation_availability_hash(text,uuid,jsonb) from public, anon, authenticated;

@@ -30,6 +30,7 @@ import { configureRoomPinForConcurrency, testRoomPinConcurrency } from './test-r
 import { testRoomPinSheetFullResyncConcurrency } from './test-room-pin-sheet-full-resync-concurrency.mjs';
 import { testRoomPinSheetSyncConcurrency } from './test-room-pin-sheet-sync-concurrency.mjs';
 import { testWebPushConcurrency } from './test-web-push-concurrency.mjs';
+import { availabilityRaceWriteMode, isExpectedAvailabilityCommitCollision } from './lib/availability-race-fixture.mjs';
 
 const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx';
 const status = JSON.parse(execFileSync(
@@ -884,22 +885,24 @@ assert(
 );
 
 const changeRequestId = randomUUID();
-const { error: changeRequestError } = await client
-  .from('availability_change_requests')
-  .insert({
-    id: changeRequestId,
-    availability_version_id: availabilityVersionId,
-    maid_profile_id: logicalAccountId,
-    week_start: assignmentCommitWeekStartText,
-    source_version: 1,
-    requested_available_dates: availabilityDates.filter(
-      (date) => date !== assignmentCommitServiceDate
-    ),
-    reason_code: 'CONCURRENCY_UNAVAILABLE',
-    status: 'pending',
-    requested_at: new Date().toISOString()
-  });
-assert(!changeRequestError, `availability change fixture failed: ${changeRequestError?.message}`);
+const availabilityWriteMode = availabilityRaceWriteMode(assignmentCommitWeekStartText, new Date());
+const requestedAvailabilityDates = availabilityDates.filter((date) => date !== assignmentCommitServiceDate);
+if (availabilityWriteMode === 'approve_current_week') {
+  const { error: changeRequestError } = await client
+    .from('availability_change_requests')
+    .insert({
+      id: changeRequestId,
+      availability_version_id: availabilityVersionId,
+      maid_profile_id: logicalAccountId,
+      week_start: assignmentCommitWeekStartText,
+      source_version: 1,
+      requested_available_dates: requestedAvailabilityDates,
+      reason_code: 'CONCURRENCY_UNAVAILABLE',
+      status: 'pending',
+      requested_at: new Date().toISOString()
+    });
+  assert(!changeRequestError, `availability change fixture failed: ${changeRequestError?.message}`);
+}
 const { data: availabilityRaceImpact, error: availabilityRaceImpactError } = await client.rpc(
   'get_assignment_commit_impact',
   { p_actor_profile_id: actorProfileId, p_service_date: assignmentCommitServiceDate }
@@ -908,6 +911,8 @@ assert(
   !availabilityRaceImpactError && availabilityRaceImpact,
   'availability race preflight must succeed'
 );
+assert(availabilityWriteMode === availabilityRaceWriteMode(assignmentCommitWeekStartText, new Date()),
+  'availability fixture week must not change between preparation and the race');
 const availabilityRace = await Promise.all([
   client.rpc('commit_and_notify_assignments', {
     p_actor_profile_id: actorProfileId,
@@ -921,13 +926,19 @@ const availabilityRace = await Promise.all([
     p_idempotency_key: `assignment-availability-commit-${randomUUID()}`,
     p_request_hash: 'f'.repeat(64)
   }),
-  client.rpc('decide_availability_change', {
+  availabilityWriteMode === 'approve_current_week' ? client.rpc('decide_availability_change', {
     p_actor_profile_id: actorProfileId,
     p_change_request_id: changeRequestId,
     p_decision: 'approved',
     p_reason_code: 'CONCURRENCY_APPROVED',
     p_expected_version: 1,
     p_idempotency_key: `assignment-availability-decision-${randomUUID()}`
+  }) : client.rpc('submit_weekly_availability', {
+    p_actor_profile_id: logicalAccountId,
+    p_week_start: assignmentCommitWeekStartText,
+    p_available_dates: requestedAvailabilityDates,
+    p_expected_version: 1,
+    p_idempotency_key: `assignment-availability-submit-${randomUUID()}`
   })
 ]);
 assert(
@@ -938,6 +949,8 @@ assert(
   availabilityRace.filter((result) => result.error).length === 1,
   'availability versus commit race must reject exactly one stale loser'
 );
+assert(isExpectedAvailabilityCommitCollision(availabilityRace),
+  'availability writer must hit the notified-assignment guard; date or policy errors are not collision evidence');
 
 // Future checkout planning races use public commands, not synthetic materialization.
 const { data: planningRooms, error: planningRoomsError } = await client.from('rooms')

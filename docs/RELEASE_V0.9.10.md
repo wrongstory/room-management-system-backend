@@ -4,44 +4,41 @@
 
 2026-11-02 사용자는 메이드도 이번 주 근무가능일을 수정 요청하되 관리자 승인을
 받도록 결정했고, 구현·dev 병합 뒤 DB 검증과 운영 반영 진행을 명시적으로 승인했다.
-이번 승인 대상은 이 기능의 격리 CI 최종 DB 검증과 운영 DB/API/프런트 반영이다.
+첫 격리 검사 실패 뒤 미사용 인자를 제거한 수정본의 전체 DB 검증1회 재실행도 승인했다.
+이번 실행은 기존 fresh/upgrade/경합/정리를 포함하는 CI run1회이며 운영 반영은
+앞서 승인한 이번 기능 범위로 제한한다. 실제 업무 요청·다른 v1 기능 배포는 포함하지 않는다.
 
-운영 기준 main `d3ecff164d99eba8837d14d302ca213e4be17353`의 기존124개 migration에
-이번 기능1개만 더한 hotfix다. 별도 PR553의 v1.0.0/초기화·사진·메모 등 미배포
-개발 기능을 포함하지 않는다. 기존 운영 이력의 timestamp 차이를 repair하거나
-전체 dev migration을 db push하지 않는다. 새 migration의 source SHA-256은
-`54ca721021b7347c7ac74b92ee37f27af27d9c4e3f2af657d7cc3cc69097f135`다.
+재실행 준비 중 개발팀의 #559/commit1370c6a가 병합된 것을 확인했다. 그 수정은 같은
+미사용 인자를 후속 migration으로 제거하고 기존 SQL/경합 fixture의 승인 정책을 정합화한다.
+운영/개발 이력의 원문이 갈라지지 않도록 별도 직접 수정본0d6f4d8 대신 검토·병합된
+원문 두 파일과 관련 fixture를 그대로 사용한다. 제품 정책/업무 함수의 최종 의미는 같다.
 
-## 동작
+운영 main `d3ecff164d99eba8837d14d302ca213e4be17353`의 기존124개 원문을 보존하고
+이번 기능과 미사용 인자 수정2개를 더한126개 hotfix다. source 순번과 운영 실행 timestamp를
+혼동하거나 기존 이력을 repair하지 않는다. 별도 PR553의 v1.0.0 미배포 기능은 포함하지 않는다.
 
-- 이번 주 직접 제출은409 `AVAILABILITY_APPROVAL_REQUIRED`, 변경 요청 후 관리자 승인으로 반영한다.
-- 최초 미제출 주도 sourceVersion0으로 요청할 수 있다. 승인 전 기존 가능일/배정 후보는 유지한다.
-- 지난 날짜 변경, 메이드 자기 승인, 오래된 CAS, 통보 배정 충돌은 차단한다.
-- 다음 주 직접 제출은 유지한다. 기존 이력·감사·멱등성 및 RLS를 보존한다.
-- 운영 branch에는 HTTP admission helper가 없으므로 같은 SQL이 helper를 생성하더라도
-  PUBLIC/anon/authenticated의 실행 권한을 명시적으로 회수한다. 업무 endpoint를 추가로 열지 않는다.
+| source | SHA-256 |
+| --- | --- |
+| 20261101230757_current_week_availability_approval.sql | 7b4b70d2a506dd028aa02469369429c5971eb160769e168438cf6f8fa61aa70c |
+| 20261101235415_availability_guard_unused_parameter.sql | a3d9e37ce45ebe1f1f6b5ad68e63feb79b401ffb4eb26c389520e9c18aec7d3f |
 
-## 검증과 반영 순서
+## 동작과 검증
 
-로컬 타입/빌드/전체 Node3172검사(새 검사 기대문구1건 수정 후 해당 파일 재검사),
-availability Edge33검사, lint/secret/OpenAPI/manifest125 검사를 통과했다.
-실제 SQL/upgrade/경합은 hotfix→main PR의 기존 quality 전체 DB job에서1회 검증한다.
-그 성공과 exact input proof, 필수 application/migration 및 보호 병합을 확인하기 전
-운영 migration은 실행하지 않는다. 실패 시 증거를 보존하고 재실행 여부를 별도 보고한다.
+이번 주 직접 제출은409 AVAILABILITY_APPROVAL_REQUIRED로 차단하고 관리자 승인으로 반영한다.
+최초 미제출 주도 sourceVersion0으로 요청하며 승인 전 기존 가능일/배정 후보를 유지한다.
+지난 날짜 변경, 메이드 자기 승인, 오래된 CAS, 통보 배정 충돌을 차단한다. 다음 주 직접 제출과
+기존 이력·감사·멱등성·RLS를 보존한다. #559의 fixture는 현재 주 승인/다음 주 직접 제출,
+과거 가능일 보존, 정확한 배정 충돌 오류를 실제 경합 검증에 반영하며 기존 검사를 생략하지 않는다.
 
-main 병합 뒤 동일 입력 proof 재사용을 확인하고 운영124개 이력/새 pending1개와
-Security Advisor를 재확인한다. 새 SQL/이력의 원자적 적용 후 함수 정의·제약·권한·
-이력을 읽기 검증하고 API→Swagger/프런트를 배포한다. health/OpenAPI/CORS·배포 byte와
-합성 브라우저 시나리오를 확인한다. 실제 메이드/관리자 업무 요청은 생성하지 않는다.
-완료 전 DB 성공·운영 적용·실계정 UAT를 완료로 표시하지 않는다. hotfix는 별도 PR로 dev에 반영한다.
+PR557/run41364004498 attempt1은125개 설치·템플릿 계약 PASS 뒤 strict lint에서
+미사용 p_week_start 경고로 FAIL했다. 후속 backup·SQL/upgrade·clock·경합·Full DB proof는
+NOT RUN이며 Supabase stop은 성공했다. 기존 허용 경고·workflow·gate는 변경하지 않는다.
 
-## 첫 격리 검증 결과와 수정 후보
+새126개 최종 입력의 required application/migration과 Full DB proof를 확인하고 보호 병합한다.
+main에서는 같은 입력 증거만 확인하며 전체 DB를 반복하지 않는다. 운영124개 이력·pending2개와
+Security Advisor를 대조한 뒤 새 SQL/이력만 적용하고 함수·제약·권한을 읽기 검증한다.
+API→Swagger/프런트 배포 뒤 health/OpenAPI/CORS·정적 byte 및 합성 브라우저를 확인한다.
+실제 메이드/관리자 업무 UAT는 실행하지 않는다. 성공 증거 전에는 운영 적용·Full DB PASS로 표시하지 않는다.
 
-PR557/run41364004498 attempt1의 migration은 새125개 설치와 템플릿 계약 PASS 뒤
-strict lint에서 FAIL했다. 신규 helper의 미사용 p_week_start 인자1개가 원인이며
-기존 허용9경고 목록은 변경하지 않는다. 해당 인자와 두 호출/권한 signature에서만
-불필요한 date를 제거했다. 이후 backup·SQL/upgrade·clock·경합·Full DB proof는
-NOT RUN이며 Supabase stop은 성공했다. 운영 DB/API/프런트 적용0회다.
-
-수정본은 로컬 소스 검증 후 별도1회 재실행 승인을 요청한다. 승인 전 hotfix 추가 push와
-release DB 재실행은 하지 않는다. 앞선 실행의 설치 성공을 최종 DB proof로 재사용하지 않는다.
+개발 소스는 이미 #559의 동일 원문/fixture이므로 중복 수정 PR560은 대체 종료한다.
+main hotfix 병합 뒤에는 별도 dev PR로 병합 이력과 이 배포 기록을 통합한다.
