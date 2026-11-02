@@ -28,6 +28,26 @@ export function manualCancelFixture() {
 
 const safeSqlStates = new Set(['23514','23505','23503','23502','22023','42501','55000',
   'P0001','P0002','40001','40P01','57014','42P01','42703','42883','42601','22P02','53300','08006','57P01']);
+const raceCodes = new Set(['ROOM_READY_PREVIEW_STALE','ROOM_READY_CORRECTION_BLOCKED','IDEMPOTENCY_KEY_REUSED',
+  'INSPECTION_INVALID_TRANSITION','PHOTO_ACCESS_REQUIRED','CAPABILITY_ACCESS_REQUIRED','STALE_VERSION',
+  'CLEANING_REQUEST_CANCEL_CONFLICT','ASSIGNMENT_VERSION_CONFLICT','PASSWORD_CHANGE_REQUIRED',
+  'SESSION_REVOKED','PIN_REVEAL_AUTHORIZATION_CHANGED']);
+const readyRaces = new Set(['ready_room_cas','ready_approval_first','ready_correction_first','ready_upload_first','ready_upload_after']);
+const raceDiagnostics = new Set(['EXACT_HEADER','TRUNCATED','AMBIGUOUS','UNRECOGNIZED']);
+const raceStderrLimit = 8192;
+
+export function manualCancelRaceErrorSummary(chunks, truncated = false) {
+  const unknown = diagnostic => ({ code: null, sqlState: null, diagnostic });
+  if (truncated) return unknown('TRUNCATED');
+  if (!Array.isArray(chunks) || !chunks.every(Buffer.isBuffer)) return unknown('UNRECOGNIZED');
+  if (chunks.reduce((total, chunk) => total + chunk.length, 0) > raceStderrLimit) return unknown('TRUNCATED');
+  const headers = Buffer.concat(chunks).toString('utf8').split(/\r?\n/)
+    .filter(line => /^(?:psql:(?:stdin|<stdin>):[0-9]{1,6}:[ \t]*)?(?:ERROR|FATAL):[ \t]/.test(line));
+  if (headers.length > 1) return unknown('AMBIGUOUS');
+  const match = headers[0]?.match(/^(?:psql:(?:stdin|<stdin>):[0-9]{1,6}:[ \t]*)?(?:ERROR|FATAL):[ \t]+([0-9A-Z]{5}):[ \t]+([A-Z][A-Z0-9_]*)[ \t]*$/);
+  if (!match || !safeSqlStates.has(match[1]) || !raceCodes.has(match[2])) return unknown('UNRECOGNIZED');
+  return { code: match[2], sqlState: match[1], diagnostic: 'EXACT_HEADER' };
+}
 export function manualCancelSqlState(stderr) {
   const state = typeof stderr === 'string'
     ? stderr.match(/^(?:psql:[^\r\n]*:\s*)?(?:ERROR|FATAL):[ \t]+([0-9A-Z]{5})[ \t]*\r?$/m)?.[1] : null;
@@ -54,7 +74,14 @@ export function manualCancelFailureSummary(error, phase) {
     sourceLine: manualLine ? Number(manualLine) : null,
     readySourceLine: readyLine ? Number(readyLine) : null,
     sqlState: safeSqlStates.has(error?.sqlState) ? error.sqlState : null,
-    ...(error?.summary ? { rpc: safeRpcResultSummary({ status: error.summary.status, error: { code: error.summary.code } }) } : {}) };
+    ...(error?.summary ? { rpc: safeRpcResultSummary({ status: error.summary.status, error: { code: error.summary.code } }) } : {}),
+    ...(readyRaces.has(error?.readyRace?.name) ? { race: {
+      name: error.readyRace.name,
+      exitCode: Number.isInteger(error.readyRace.exitCode) && error.readyRace.exitCode >= -1 && error.readyRace.exitCode <= 255 ? error.readyRace.exitCode : null,
+      expectedCode: raceCodes.has(error.readyRace.expectedCode) ? error.readyRace.expectedCode : null,
+      observedCode: raceCodes.has(error.readyRace.observedCode) ? error.readyRace.observedCode : null,
+      diagnostic: raceDiagnostics.has(error.readyRace.diagnostic) ? error.readyRace.diagnostic : null
+    } } : {}) };
 }
 
 const cancelSql = (n, key) => `select public.cancel_manual_cleaning_request_with_session(
@@ -68,17 +95,20 @@ const finalizeSql = (n, lease, key) => `select public.finalize_room_pin_reveal('
 
 function contender(input, name) {
   assert(/^[a-z_]+$/.test(name), 'Source-controlled local race application name');
-  const child = spawn('docker', psqlArgs, { stdio: ['pipe', 'pipe', 'pipe'] });
+  const child = spawn('docker', [...psqlArgs, '-v', 'VERBOSITY=verbose'], { stdio: ['pipe', 'pipe', 'pipe'] });
   let output = '';
-  let code = null;
+  let stderrChunks = [], stderrBytes = 0, stderrTruncated = false;
   const done = new Promise((resolve) => {
-    child.once('error', () => resolve({ exitCode: -1, code: null }));
+    child.once('error', () => resolve({ exitCode: -1, code: null, sqlState: null, diagnostic: 'UNRECOGNIZED' }));
     child.stdout.on('data', (chunk) => { output += chunk; });
     child.stderr.on('data', (chunk) => {
-      const matched = chunk.toString().match(/(?:ROOM_READY_PREVIEW_STALE|ROOM_READY_CORRECTION_BLOCKED|IDEMPOTENCY_KEY_REUSED|INSPECTION_INVALID_TRANSITION|PHOTO_ACCESS_REQUIRED|STALE_VERSION|CLEANING_REQUEST_CANCEL_CONFLICT|ASSIGNMENT_VERSION_CONFLICT|PASSWORD_CHANGE_REQUIRED|SESSION_REVOKED|PIN_REVEAL_AUTHORIZATION_CHANGED)/);
-      if (matched) code = matched[0];
+      if (stderrTruncated) return;
+      stderrBytes += chunk.length;
+      if (stderrBytes > raceStderrLimit) { stderrTruncated = true; stderrChunks = []; }
+      else stderrChunks.push(chunk);
     });
-    child.once('close', (exitCode) => resolve({ exitCode, code, output: output.trim() }));
+    child.once('close', (exitCode) => resolve({ exitCode,
+      ...manualCancelRaceErrorSummary(stderrChunks, stderrTruncated), output: output.trim() }));
   });
   child.stdin.end(`set application_name='${name}'; set statement_timeout='30s'; ${input}`);
   return { child, done, output: () => output };
