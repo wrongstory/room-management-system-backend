@@ -46,6 +46,14 @@ const commandResult = {
 };
 
 describe('reservation privacy and idempotency', () => {
+  it('explains cleaning replan conflict without leaking the database error', async () => {
+    const rpc = vi.fn().mockResolvedValue({ data: null, error: { message: 'CLEANING_DUE_REPLAN_REQUIRED: private database detail' } });
+    const service = new SupabaseReservationService({ admin: { rpc } } as unknown as SupabaseClients, piiKey, '1', guestNamePepper);
+    await expect(service.create(actor, { roomId: commandResult.room_id, reservationType: 'standard', checkInAt: commandResult.check_in_at,
+      checkOutAt: commandResult.check_out_at, guestCount: 2, expectedRoomVersion: 1, idempotencyKey: 'replan-test-1' }))
+      .rejects.toMatchObject({ statusCode: 409, code: 'CLEANING_DUE_REPLAN_REQUIRED',
+        message: '이전 청소의 배정 일정이 새 예약과 충돌합니다. 객실 상태 변경에서 청소를 확인·취소하거나 배정 일정을 다시 조정해 주세요.' });
+  });
   it('validates guest-name raw and normalized lengths before encryption', () => {
     expect(normalizeGuestName('가'.repeat(80))).toBe('가'.repeat(80));
     expect(() => normalizeGuestName('가'.repeat(81))).toThrowError(
@@ -698,5 +706,27 @@ describe('reservation privacy and idempotency', () => {
       reasonCode: 'ADMIN_REQUEST',
       idempotencyKey: `manual-cleaning-${message.toLowerCase()}`
     })).rejects.toMatchObject({ statusCode, code: message });
+  });
+});
+
+
+describe('#548 late registration preserves the submitted schedule', () => {
+  it.each([
+    ['2026-11-01T15:59:00+09:00', '2026-11-01T16:00:00+09:00', '2026-11-02T11:00:00+09:00'],
+    ['2026-11-01T16:00:00+09:00', '2026-11-01T16:00:00+09:00', '2026-11-02T11:00:00+09:00'],
+    ['2026-11-01T16:01:00+09:00', '2026-11-01T16:00:00+09:00', '2026-11-02T11:00:00+09:00'],
+    ['2026-11-01T18:00:00+09:00', '2026-10-31T16:00:00+09:00', '2026-11-02T11:00:00+09:00'],
+    ['2026-11-01T18:00:00+09:00', '2026-10-31T16:00:00+09:00', '2026-11-01T11:00:00+09:00'],
+    ['2026-11-01T18:00:00+09:00', '2026-10-31T16:00:00+09:00', null]
+  ])('accepts the existing command at %s without running a global transition', async (now, checkInAt, checkOutAt) => {
+    vi.useFakeTimers(); vi.setSystemTime(new Date(now));
+    try {
+      const rpc = vi.fn().mockResolvedValue({ data: { ...commandResult, check_in_at: checkInAt, check_out_at: checkOutAt, created_at: now }, error: null });
+      const service = new SupabaseReservationService({ admin: { rpc } } as unknown as SupabaseClients, piiKey, '1', guestNamePepper);
+      const result = await service.create(actor, { roomId: commandResult.room_id, reservationType: checkOutAt === null ? 'long_stay' : 'standard', checkInAt, checkOutAt, guestCount: 2, expectedRoomVersion: 1, idempotencyKey: 'late-registration-test' });
+      expect(rpc).toHaveBeenCalledTimes(1);
+      expect(rpc).toHaveBeenCalledWith('create_reservation_v2', expect.objectContaining({ p_check_in_at: checkInAt, p_check_out_at: checkOutAt }));
+      expect(result).toMatchObject({ checkInAt, checkOutAt, actualCheckInAt: null, createdAt: now });
+    } finally { vi.useRealTimers(); }
   });
 });

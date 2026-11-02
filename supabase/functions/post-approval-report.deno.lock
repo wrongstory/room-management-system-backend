@@ -3,7 +3,7 @@
   "specifiers": {
     "npm:@supabase/supabase-js@2.112.4": "2.112.4",
     "npm:@types/node@*": "22.5.4",
-    "npm:zod@4.4.3": "4.4.3"
+    "npm:zod@4.6.6": "4.6.6"
   },
   "npm": {
     "@supabase/auth-js@2.112.4": {
@@ -66,8 +66,8 @@
     "undici-types@6.19.8": {
       "integrity": "sha512-ve2KP6f/JnbPBFyobGHuerC9g1FYGn/F8n1LWTwNxCEzd6IfqTwUQcNXgEtmmQ6DlRrC1hrSrBnCZPokRrDHjw=="
     },
-    "zod@4.4.3": {
-      "integrity": "sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ=="
+    "zod@4.6.6": {
+      "integrity": "sha512-4UmzQUF5fxvfcYHlbjBmejU+w+hbDnWFx4aS8kBx7nPBHcO2SqPbpAG8snbdg+Xse4pRefR98hgjFgIMCI/UhA=="
     }
   },
   "workspace": {

@@ -47,8 +47,8 @@ describe('GitHub Actions runtime pins', () => {
       }
     }
 
-    expect(checkoutUses).toBe(4);
-    expect(setupNodeUses).toBe(3);
+    expect(checkoutUses).toBe(6);
+    expect(setupNodeUses).toBe(5);
     expect(setupPythonUses).toBe(2);
   });
 
@@ -68,5 +68,22 @@ describe('GitHub Actions runtime pins', () => {
     expect(swaggerPages).toBeDefined();
     expect(swaggerPages).toContain('node-version: 22');
     expect(swaggerPages).toContain('package-manager-cache: false');
+  });
+  it('keeps reservation backup opt-in, main-only and out of PR/artifact workflows', async () => {
+    const source = (await workflows()).find(w => w.name === 'reservation-backup.yml')?.source;
+    expect(source).toBeDefined();
+    expect(source).toContain("github.ref == 'refs/heads/main' && vars.RESERVATION_BACKUP_ENABLED == 'true'");
+    expect(source).toContain('environment: reservation-backup');
+    expect(source).toContain('cancel-in-progress: false');
+    expect(source).toContain('contents: read');
+    expect(source).not.toMatch(/^\s+(pull_request|pull_request_target|push):/m);
+    expect(source).not.toContain('upload-artifact');
+    expect(source).not.toMatch(/db:reset|migration up|db push/);
+    const alertJob = source?.split('\n  alert:')[1];
+    expect(alertJob).toContain('needs: backup');
+    expect(alertJob).toContain('issues: write');
+    expect(alertJob).toContain("needs.backup.result != 'success'");
+    expect(alertJob).not.toContain('secrets.RESERVATION_BACKUP');
+    expect(alertJob).not.toContain('environment: reservation-backup');
   });
 });

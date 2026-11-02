@@ -54,7 +54,7 @@ jobs:
   migration:
     name: migration
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
@@ -71,10 +71,38 @@ jobs:
       - run: npm run db:manifest:verify
       - run: npm run db:start:ci
         if: steps.db_gate.outputs.full == 'true'
-      - run: npm run db:verify
+      - name: Fresh exact source with prefix122 hash-only checkpoint
         if: steps.db_gate.outputs.full == 'true'
+        env:
+          RMS_FINAL_DB_GATE_MODE: ${{ steps.db_gate.outputs.mode }}
+          RMS_FINAL_DB_INPUT_SHA256: ${{ steps.db_gate.outputs.fingerprint }}
+        run: node scripts/test-migration-baseline-checkpoint.mjs
+      - name: Exercise installed reset catalog and synthetic photo HOLD graph (#396)
+        if: steps.db_gate.outputs.full == 'true'
+        timeout-minutes: 1
+        env:
+          RMS_FINAL_DB_GATE_MODE: ${{ steps.db_gate.outputs.mode }}
+          RMS_FINAL_DB_INPUT_SHA256: ${{ steps.db_gate.outputs.fingerprint }}
+        run: npm run db:test:reset-final-catalog
       - run: npm run db:test:template-contract
         if: steps.db_gate.outputs.full == 'true'
+      - name: Prepare exact isolated PG17 TLS fixture image (#378)
+        if: steps.db_gate.outputs.full == 'true'
+        timeout-minutes: 3
+        run: |
+          fixture_image='public.ecr.aws/supabase/postgres@sha256:6942962433a569e87f228b4d4ab7e11db5deca64e43babb3a038443ad6c4f1bb'
+          if ! docker image inspect "$fixture_image" >/dev/null 2>&1; then
+            for attempt in 1 2 3; do
+              if docker pull "$fixture_image"; then break; fi
+              if [ "$attempt" -eq 3 ]; then exit 1; fi
+              sleep "$((attempt * 5))"
+            done
+          fi
+          docker image inspect "$fixture_image" --format '{{json .RepoDigests}}'
+      - name: Verify isolated read-only and atomic PostgreSQL TLS (#378)
+        if: steps.db_gate.outputs.full == 'true'
+        timeout-minutes: 3
+        run: npm run db:test:migration-readonly-tls
       - name: Strict lint with exact compatibility baseline (#363, Decision #373)
         if: steps.db_gate.outputs.full == 'true'
         run: npm run db:lint:baseline
@@ -91,6 +119,14 @@ jobs:
       - name: Stop local Supabase
         if: always() && steps.db_gate.outputs.full == 'true'
         run: npm run db:stop
+      - name: Preserve source122 oracle after all Full DB checks and cleanup
+        if: success() && steps.db_gate.outputs.full == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: baseline122-oracle-${{ github.sha }}
+          path: .tmp/baseline122-oracle.json
+          if-no-files-found: error
+          include-hidden-files: true
       - name: Full DB proof ${{ steps.db_gate.outputs.fingerprint }}
         if: success() && steps.db_gate.outputs.full == 'true'
         run: echo "Full DB validation PASS; proof is bound to the tested merge tree inputs."

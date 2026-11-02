@@ -14,7 +14,8 @@ for (const [source, destination] of files) {
   const body = (await readText(source)).replace(
     /(from\s+["']\.\/[a-z-]+)\.js(["'])/g,
     '$1.ts$2'
-  );
+  ).replaceAll('../developer-reset/worker-admission.js', './worker-admission.ts')
+    .replaceAll('../developer-reset/pin-worker-admission.js', './pin-worker-admission.ts');
   const generated = `// Generated from ${source}. DO NOT EDIT.\n${body}`;
   if (process.argv.includes('--check')) {
     if (await readText(destination) !== generated) throw new Error(`Room PIN Sheet generated source drift: ${source}`);

@@ -2,6 +2,266 @@ import {
   postApprovalOpenApiErrorCodes,
   postApprovalOpenApiFragment,
 } from "./post-approval-openapi.js";
+// #532 source candidate. Runtime publication follows the separately approved release.
+const {
+  roomReadyCorrectionErrorCodes,
+  roomReadyCorrectionPaths,
+  roomReadyCorrectionSchemas,
+} = (() => {
+  const uuid = { type: "string", format: "uuid" };
+  const nullableUuid = { type: ["string", "null"], format: "uuid" };
+  const version = { type: "integer", minimum: 1, maximum: 9007199254740991 };
+  const timestamp = {
+    type: "string",
+    format: "date-time",
+    description:
+      "초·UTC offset을 포함한 실제 달력의 RFC 3339 시각. 소수 초는 최대 6자리.",
+  };
+  const uuidArray = {
+    type: "array",
+    maxItems: 100,
+    uniqueItems: true,
+    items: uuid,
+  };
+  const base = {
+    targetStatus: { const: "READY" },
+    reasonCode: { const: "ADMIN_ROOM_READY_CORRECTION" },
+  };
+  const proof = {
+    impactFingerprint: {
+      type: "string",
+      pattern: "^[0-9a-f]{64}$",
+      minLength: 64,
+      maxLength: 64,
+    },
+    evaluatedAt: timestamp,
+    expiresAt: timestamp,
+  };
+  const identity = {
+    roomId: uuid,
+    targetStatus: { const: "READY" },
+    roomStateVersion: version,
+  };
+  function object(properties: Record<string, unknown>) {
+    return {
+      type: "object",
+      additionalProperties: false,
+      required: Object.keys(properties),
+      properties,
+    };
+  }
+
+  const roomReadyCorrectionErrorCodes = [
+    "ROOM_READY_CORRECTION_INVALID_INPUT",
+    "ROOM_READY_CONFIRMATION_REQUIRED",
+    "ROOM_READY_EARNING_ACKNOWLEDGEMENT_REQUIRED",
+    "ROOM_READY_CANDLE_CONFIRMATION_REQUIRED",
+    "ROOM_READY_PREVIEW_STALE",
+    "ROOM_READY_CORRECTION_BLOCKED",
+    "ROOM_READY_CORRECTION_LIMIT_EXCEEDED",
+    "ROOM_READY_CORRECTION_REQUIRED",
+    "ROOM_READY_CORRECTION_RESPONSE_INVALID",
+    "CLEANING_DUE_REPLAN_REQUIRED",
+  ];
+  const roomReadyCorrectionSchemas = {
+    RoomReadyPreviewRequest: object(base),
+    RoomReadyCorrectionRequest: object({
+      ...base,
+      expectedRoomVersion: version,
+      ...proof,
+      confirmed: { const: true },
+      acknowledgeNoNewEarnings: {
+        type: "boolean",
+        description:
+          "시작·현장 완료·미승인 제출을 취소하면 새 수당이 적립되지 않는다는 별도 확인. 기존 확정 수당은 유지. 먼저 검수 승인을 권고합니다.",
+      },
+      confirmPhysicalCandleRemoval: {
+        type: "boolean",
+        description:
+          "현재 촛불이 남아 있으면 실제 회수 확인 true 필수. 물리적 회수를 자동 실행하지 않습니다.",
+      },
+    }),
+    RoomReadyPreview: object({
+      ...identity,
+      canApply: { type: "boolean" },
+      blockingReasons: {
+        type: "array",
+        uniqueItems: true,
+        items: {
+          type: "string",
+          enum: [
+            "ROOM_INACTIVE",
+            "ROOM_TYPE_INACTIVE",
+            "DATA_UNCONFIRMED",
+            "OCCUPIED",
+            "RESERVATION_CURRENT",
+            "CHECKOUT_NOT_COMPLETED",
+            "UNSUPPORTED_CLEANING_CHAIN",
+            "PHOTO_UPLOAD_IN_PROGRESS",
+            "ASSIGNMENT_CHANGE_PENDING",
+            "LIMIT_EXCEEDED",
+          ],
+        },
+      },
+      requiresConfirmation: { const: true },
+      requiresEarningAcknowledgement: { type: "boolean" },
+      effects: object({
+        cleaningTargets: {
+          type: "array",
+          maxItems: 100,
+          items: object({
+            cleaningTargetId: uuid,
+            assignmentId: nullableUuid,
+            attemptId: nullableUuid,
+            attemptStatus: {
+              type: ["string", "null"],
+              enum: [
+                null,
+                "scheduled",
+                "in_progress",
+                "field_completed",
+                "upload_pending",
+                "submitted",
+                "approved",
+                "rejected",
+                "interrupted",
+                "superseded",
+              ],
+            },
+            hasSubmission: { type: "boolean" },
+            fieldCompleted: { type: "boolean" },
+          }),
+        },
+        operationBlockIds: uuidArray,
+        roomIssueIds: uuidArray,
+        candleCount: { type: "integer", minimum: 0, maximum: 2147483647 },
+        displayStatusOverride: {
+          type: ["string", "null"],
+          enum: [
+            null,
+            "BLOCKED",
+            "OCCUPIED",
+            "ARRIVAL_PENDING",
+            "RESERVATION_PRESENT",
+            "CLEANING_REQUIRED",
+            "READY",
+          ],
+        },
+      }),
+      warnings: {
+        type: "array",
+        uniqueItems: true,
+        items: {
+          type: "string",
+          enum: [
+            "CANCEL_WITHOUT_NEW_EARNINGS",
+            "APPROVE_BEFORE_CANCEL_TO_PRESERVE_EARNINGS",
+            "PHYSICAL_CANDLE_REMOVAL_REQUIRED",
+          ],
+        },
+      },
+      ...proof,
+    }),
+    RoomReadyCorrectionResult: object({
+      ...identity,
+      recordedAt: timestamp,
+      cancelledCleaningTargetIds: uuidArray,
+      releasedOperationBlockIds: uuidArray,
+      resolvedRoomIssueIds: uuidArray,
+      candlesCleared: { type: "boolean" },
+    }),
+  };
+  const noStore = {
+    "Cache-Control": { schema: { type: "string", const: "no-store" } },
+  };
+  const error = {
+    description:
+      "안전한 error.code·message·requestId만 반환합니다. 상태 변경 시 미리보기부터 다시 확인하며 내부 DB 오류는 노출하지 않습니다.",
+    headers: noStore,
+    content: {
+      "application/json": {
+        schema: { $ref: "#/components/schemas/ErrorEnvelope" },
+      },
+    },
+  };
+  function operation(preview: boolean) {
+    const request = preview
+      ? "RoomReadyPreviewRequest"
+      : "RoomReadyCorrectionRequest";
+    const response = preview ? "RoomReadyPreview" : "RoomReadyCorrectionResult";
+    const responseKey = preview ? "preview" : "correction";
+    return {
+      tags: ["Rooms"],
+      operationId: preview
+        ? "previewRoomReadyCorrection"
+        : "applyRoomReadyCorrection",
+      summary: preview
+        ? "객실 준비 완료 변경 영향 조회 (미배포 후보)"
+        : "확인한 객실 상태를 실제 준비 완료로 변경 (미배포 후보)",
+      description:
+        (preview
+          ? "읽기 전용 5분 미리보기입니다. 청소 취소·중단, 운영 차단·이슈 해제, 촛불 회수 영향과 별도 수당 확인을 팝업으로 안내하세요. 예약·실제 점유는 일괄 종료하지 않으며 차단되면 기존 예약 취소/체크아웃 화면으로 안내합니다. canApply=false이면 확정 금지."
+          : "미리보기의 정확한 fingerprint/version/evaluatedAt/expiresAt을 다시 보내 명시 확인한 범위만 원자 변경합니다. 현장 완료·미승인 제출 취소는 새 수당 미적립 별도 동의가 필요하므로 먼저 검수 승인하도록 권고하세요. 과거 이력·사진·기존 확정 수당을 삭제하지 않으며 예약/실제 점유·PIN은 변경하지 않습니다. 같은 key/본문 재시도는 만료 검사보다 완료 receipt를 먼저 반환합니다. stale이면 최신 영향으로 다시 확인해야 합니다.") +
+        " 비밀번호 변경을 완료한 활성 업무 관리자와 유효한 세션만 허용합니다. #532 source 계약이며 현재 운영 제공을 뜻하지 않습니다. 성공 후 객실·선택 날짜 projection·배정/진행·예약·bookability를 재조회하세요.",
+      security: [{ bearerAuth: [] }],
+      "x-required-roles": ["admin"],
+      "x-release-status": "candidate",
+      parameters: [
+        { name: "roomId", in: "path", required: true, schema: uuid },
+        ...(preview ? [] : [{
+          name: "Idempotency-Key",
+          in: "header",
+          required: true,
+          schema: {
+            type: "string",
+            minLength: 8,
+            maxLength: 128,
+            pattern: "^[A-Za-z0-9._:-]{8,128}$",
+          },
+        }]),
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: { $ref: `#/components/schemas/${request}` },
+          },
+        },
+      },
+      responses: {
+        "200": {
+          description: preview
+            ? "변경 영향. 차단 상태도 200/canApply=false로 안내합니다."
+            : "확인한 변경 결과 또는 같은 요청의 완료 receipt",
+          headers: noStore,
+          content: {
+            "application/json": {
+              schema: object({
+                [responseKey]: { $ref: `#/components/schemas/${response}` },
+              }),
+            },
+          },
+        },
+        "400": error,
+        "401": error,
+        "403": error,
+        "404": error,
+        "409": error,
+        "500": error,
+        "503": error,
+      },
+    };
+  }
+  const roomReadyCorrectionPaths = {
+    "/v1/rooms/{roomId}/ready-correction/preview": { post: operation(true) },
+    "/v1/rooms/{roomId}/ready-correction": { post: operation(false) },
+  };
+  return {
+    roomReadyCorrectionErrorCodes,
+    roomReadyCorrectionPaths,
+    roomReadyCorrectionSchemas,
+  };
+})();
 
 // #331: display-only remittance contracts, never actual payout commands.
 const integer = { type: "integer", minimum: 0, maximum: 9007199254740991 };
@@ -965,6 +1225,7 @@ export const openApiDocument = {
     },
   ],
   paths: {
+    ...roomReadyCorrectionPaths,
     ...postApprovalOpenApiFragment.paths,
     "/v1/rooms/pins/export": {
       get: {
@@ -1613,6 +1874,78 @@ export const openApiDocument = {
         },
       },
     },
+    "/v1/attempts/{attemptId}/photo-slots/{slotId}/upload-batches": {
+      post: {
+        ...photoOperation(
+          "admitAttemptPhotoCollectionBatch",
+          "같은 사진 묶음의 두 업로드 원자 예약",
+          "PhotoUploadBatchAdmission",
+        ),
+        description:
+          "정확히 두 개의 서로 다른 item/key를 하나의 transaction에서 예약합니다. 두 binary 업로드는 기존 photos/{photoItemId}/upload에 같은 item key와 원래 collection revision으로 전송합니다. 최대 두 전송만 허용하며 일반 20장/선택 10장·item CAS·권한·quota는 유지합니다. 예약은 사진 저장/제출 성공이 아닙니다. 실패/응답 유실은 동일 key/입력으로만 재시도합니다. 새 binary/멀티파트 형식이나 사진 삭제 권한은 추가하지 않습니다.",
+        parameters: [
+          photoPathId("attemptId"),
+          photoPathId("slotId"),
+          idempotencyHeader,
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                additionalProperties: false,
+                required: [
+                  "assignmentId",
+                  "assignmentRevision",
+                  "expectedCollectionRevision",
+                  "items",
+                ],
+                properties: {
+                  assignmentId: { type: "string", format: "uuid" },
+                  assignmentRevision: {
+                    type: "integer",
+                    minimum: 1,
+                    maximum: 9007199254740990,
+                  },
+                  expectedCollectionRevision: {
+                    type: "integer",
+                    minimum: 0,
+                    maximum: 9007199254740988,
+                  },
+                  items: {
+                    type: "array",
+                    minItems: 2,
+                    maxItems: 2,
+                    items: {
+                      type: "object",
+                      additionalProperties: false,
+                      required: [
+                        "photoItemId",
+                        "expectedItemRevision",
+                        "idempotencyKey",
+                      ],
+                      properties: {
+                        photoItemId: { type: "string", format: "uuid" },
+                        expectedItemRevision: {
+                          type: "integer",
+                          minimum: 0,
+                          maximum: 9007199254740990,
+                        },
+                        idempotencyKey: {
+                          type: "string",
+                          pattern: "^[A-Za-z0-9._:-]{8,128}$",
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
     "/v1/attempts/{attemptId}/photo-slots/{slotId}/photos/{photoItemId}/upload":
       {
         post: {
@@ -1804,6 +2137,41 @@ export const openApiDocument = {
             content: {
               "image/jpeg": { schema: { type: "string", format: "binary" } },
               "image/webp": { schema: { type: "string", format: "binary" } },
+            },
+          },
+        },
+      },
+    },
+    "/v1/photos/{photoId}/thumbnail": {
+      get: {
+        ...photoOperation(
+          "getPhotoThumbnail",
+          "동일 사진 권한의 비공개 목록 미리보기",
+          "PhotoUploadOperation",
+          ["admin", "maid"],
+        ),
+        parameters: [photoPathId("photoId")],
+        description:
+          "개발 후보입니다. 원본 content와 같은 active admin/본인 현재 회차 maid·live session·보존 조건을 전후 재검증합니다. 기존 Drive 객체의 자동 미리보기만 서버에서 읽으며 새 객체/보존 clock/공개 URL/캐시를 만들지 않습니다. 원본을 매번 decode하지 않습니다. 미리보기 미생성·checksum 부재·지원하지 않는 provider 응답은 PHOTO_THUMBNAIL_UNAVAILABLE(503)이며 클라이언트가 기존 content를 별도 요청할 수 있습니다. 원본 자동 전송·업로드 재시도·Range·query는 지원하지 않습니다.",
+        responses: {
+          ...photoOperation("unused", "unused", "PhotoUploadOperation")
+            .responses,
+          "200": {
+            description:
+              "최대64KiB/가로세로512px JPEG 미리보기. 실제 provider 생성 여부와 성능은 운영 검증 전입니다.",
+            headers: {
+              "Cache-Control": noStoreHeader,
+              "X-Content-Type-Options": { schema: { const: "nosniff" } },
+              "Content-Disposition": {
+                schema: { const: 'inline; filename="thumbnail.jpg"' },
+              },
+              "Server-Timing": {
+                schema: { type: "string" },
+                description: "고정 숫자 구간만 반환; URL/locator/token 없음",
+              },
+            },
+            content: {
+              "image/jpeg": { schema: { type: "string", format: "binary" } },
             },
           },
         },
@@ -2077,6 +2445,27 @@ export const openApiDocument = {
     "/v1/accounts/{profileId}/password-reset": accountMutationPath(
       "resetAccountPassword",
     ),
+    "/v1/developer/reset/preview": {
+      get: {
+        tags: ["Developer"],
+        operationId: "getDeveloperResetPreview",
+        summary: "초기화 후보 영향 읽기 전용 조회",
+        description:
+          "active developer/session을 수집 전후 재검증합니다. 한 statement snapshot에서 테이블별 최대 10,001행의 독립 건수와 역할별 행 후보·실제 FK 참조 영향을 집계합니다. diagnosticComplete는 inventory 수집 완전성뿐이며 rowImpact는 별도 수집 완전성/지원 FK 결과를 표시합니다. 동일 건수의 행 교체·내용 drift·논리 JSON 참조·삭제 순서·실행 승인·복구는 증명하지 않습니다. 후보 건수는 확정 삭제 건수가 아니며 실행은 항상 false입니다. 신규 migration과 API 배포 전에는 운영 사용 불가입니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["developer"],
+        responses: {
+          "200": developerResponse("읽기 전용 후보 영향", "preview", {
+            $ref: "#/components/schemas/DeveloperResetPreview",
+          }),
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "429": errorResponse,
+          "503": errorResponse,
+        },
+      },
+    },
     "/v1/developer/room-catalog": {
       get: {
         tags: ["Developer"],
@@ -2461,7 +2850,7 @@ export const openApiDocument = {
             in: "query",
             schema: {
               type: "array",
-              maxItems: 74,
+              maxItems: 75,
               items: { $ref: "#/components/schemas/DeveloperAuditEventType" },
             },
             style: "form",
@@ -2678,9 +3067,9 @@ export const openApiDocument = {
       post: {
         tags: ["Availability"],
         operationId: "submitAvailability",
-        summary: "현재·다음 주 가능일 제출 또는 변경",
+        summary: "다음 주 가능일 제출 또는 변경",
         description:
-          "비밀번호 변경을 완료한 active maid가 KST 기준 현재 주 또는 다음 주를 어느 요일이든 직접 제출·변경합니다. 현재 주의 지난 날짜는 기존 version에서 이미 available이었던 값만 보존할 수 있고 새로 available로 소급 변경할 수 없습니다. expectedVersion CAS와 Idempotency-Key로 동시 수정·중복 제출을 막습니다. 빈 availableDates는 전일 불가능을 뜻합니다.",
+          "비밀번호 변경을 완료한 active maid가 KST 기준 다음 주를 어느 요일이든 직접 제출·변경합니다. 이번 주는 change-requests와 관리자 승인이 필요하며 직접 제출은 AVAILABILITY_APPROVAL_REQUIRED(409)로 차단됩니다. expectedVersion CAS와 Idempotency-Key로 동시 수정·중복 제출을 막습니다. 빈 availableDates는 전일 불가능을 뜻합니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["maid"],
         parameters: [idempotencyHeader],
@@ -2710,7 +3099,7 @@ export const openApiDocument = {
         operationId: "requestAvailabilityChange",
         summary: "관리자 승인형 가능일 변경 요청",
         description:
-          "비밀번호 변경을 완료한 active maid가 대상 주 시작 후 현재 version의 관리자 승인형 변경을 요청합니다. 기존 가능일 원장은 보존되고 pending 요청이 append되며, 같은 주차에는 pending 요청 하나만 허용됩니다. 일반적인 현재·다음 주 수정은 submissions endpoint의 direct version 재제출을 사용합니다.",
+          "비밀번호 변경을 완료한 active maid가 KST 기준 이번 주 가능일 변경을 요청합니다. 승인 전 기존 가능일을 유지하며 같은 메이드·주차의 pending 요청은 하나만 허용됩니다. 미제출 주는 expectedVersion=0, availabilityVersionId=null로 요청하며 승인 시 최초 version이 생성됩니다. 지난 날짜 변경은 금지됩니다. 다음 주는 submissions로 직접 제출합니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["maid"],
         parameters: [idempotencyHeader],
@@ -2779,7 +3168,7 @@ export const openApiDocument = {
         operationId: "decideAvailabilityChange",
         summary: "가능일 변경 요청 승인 또는 반려",
         description:
-          "비밀번호 변경을 완료한 active business admin만 호출합니다. 승인하면 새 가능일 version을 만들고 current pointer를 이동하며, 반려하면 요청 결과만 append합니다. developer는 관리자 권한을 상속하지 않습니다.",
+          "비밀번호 변경을 완료한 active business admin만 호출합니다. 승인하면 새 가능일 version을 만들고 current pointer를 이동하며, 반려하면 요청 결과만 append합니다. 승인 시 최신 sourceVersion, KST 이번 주, 지난 날짜 변경 금지, 활성 메이드, 통보된 배정 충돌을 재검증합니다. 지난 주·오래된 version 요청도 sourceVersion이 맞으면 반려할 수 있습니다. developer는 관리자 권한을 상속하지 않습니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin"],
         parameters: [
@@ -5346,6 +5735,101 @@ export const openApiDocument = {
         },
       },
     },
+    "/v1/room-types/{roomTypeId}/cleaning-fee": {
+      put: {
+        tags: ["Rooms"],
+        operationId: "setRoomTypeCleaningFee",
+        summary: "객실 타입별 기본 청소 단가 변경",
+        description:
+          "#577 개발 후보. 변경 후 카탈로그 단가로 생성하는 일반 청소에만 적용. 이미 생성된 미래 청소·진행 청소·확정 수당·재청소 승계금액은 변경하지 않습니다. 금액은 정수 원화이며 폭탄방 동액 보너스 합계의 DB integer 범위를 보호합니다. 현재 타입 version과 적용범위 확인이 필요합니다. 성공·재전송 뒤 GET /v1/room-types를 다시 조회하세요.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin"],
+        parameters: [{
+          name: "roomTypeId",
+          in: "path",
+          required: true,
+          schema: { type: "string", format: "uuid" },
+        }, idempotencyHeader],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                additionalProperties: false,
+                required: [
+                  "baseCleaningFee",
+                  "expectedVersion",
+                  "confirmFutureTargetsOnly",
+                ],
+                properties: {
+                  baseCleaningFee: {
+                    type: "integer",
+                    minimum: 0,
+                    maximum: 1073741823,
+                  },
+                  expectedVersion: {
+                    type: "integer",
+                    minimum: 1,
+                    maximum: 9007199254740990,
+                  },
+                  confirmFutureTargetsOnly: { type: "boolean", const: true },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          "200": {
+            description:
+              "확정 결과 또는 동일 요청의 기존 receipt. 현재 목록을 다시 조회합니다.",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["roomType"],
+                  properties: {
+                    roomType: {
+                      type: "object",
+                      additionalProperties: false,
+                      required: [
+                        "roomTypeId",
+                        "baseCleaningFee",
+                        "version",
+                        "effectiveFor",
+                      ],
+                      properties: {
+                        roomTypeId: { type: "string", format: "uuid" },
+                        baseCleaningFee: {
+                          type: "integer",
+                          minimum: 0,
+                          maximum: 1073741823,
+                        },
+                        version: {
+                          type: "integer",
+                          minimum: 1,
+                          maximum: 9007199254740991,
+                        },
+                        effectiveFor: {
+                          type: "string",
+                          const: "NEW_TARGETS_ONLY",
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "404": errorResponse,
+          "409": errorResponse,
+          "500": errorResponse,
+        },
+      },
+    },
     "/v1/room-types": {
       get: {
         tags: ["Rooms"],
@@ -5473,6 +5957,10 @@ export const openApiDocument = {
           "500": errorResponse,
         },
       },
+    },
+    "/v1/rooms/{roomId}/fixed-memo": {
+      get: roomFixedMemoOperation(false),
+      put: roomFixedMemoOperation(true),
     },
     "/v1/rooms/{roomId}/master-data": {
       patch: roomMutationOperation(
@@ -5980,6 +6468,7 @@ export const openApiDocument = {
       },
     },
     schemas: {
+      ...roomReadyCorrectionSchemas,
       ...payrollRemittanceSchemas,
       CheckoutIncidentReportRequest: {
         type: "object",
@@ -6990,6 +7479,30 @@ export const openApiDocument = {
           ...photoRetentionProperties,
         },
       },
+      PhotoUploadBatchAdmission: {
+        type: "object",
+        additionalProperties: false,
+        required: ["batchId", "maximumConcurrentTransfers", "items"],
+        properties: {
+          batchId: { type: "string", format: "uuid" },
+          maximumConcurrentTransfers: { const: 2 },
+          items: {
+            type: "array",
+            minItems: 2,
+            maxItems: 2,
+            items: {
+              type: "object",
+              additionalProperties: false,
+              required: ["photoItemId", "expiresAt", "quotaWarning"],
+              properties: {
+                photoItemId: { type: "string", format: "uuid" },
+                expiresAt: { type: "string", format: "date-time" },
+                quotaWarning: { type: "boolean" },
+              },
+            },
+          },
+        },
+      },
       PhotoCollectionDeleteResponse: {
         type: "object",
         additionalProperties: false,
@@ -7933,6 +8446,7 @@ export const openApiDocument = {
             "ACCOUNT_MANAGER_REQUIRED",
             "ADMIN_REQUIRED",
             "ASSIGNMENT_ACCESS_REQUIRED",
+            "ASSIGNMENT_INSTRUCTION_INVALID",
             "DEVELOPER_REQUIRED",
             "DEVELOPER_PROJECTION_FAILED",
             "DATABASE_UNREACHABLE",
@@ -7984,6 +8498,7 @@ export const openApiDocument = {
             "INVALID_ASSIGNMENT_DURATION_POLICY",
             "ASSIGNMENT_DURATION_POLICY_VERSION_CONFLICT",
             "ACTIVE_ADMIN_REQUIRED",
+            "AVAILABILITY_APPROVAL_REQUIRED",
             "AVAILABILITY_WEEK_OUT_OF_RANGE",
             "PAST_AVAILABILITY_DATE_NOT_ALLOWED",
             "CHANGE_REQUEST_BEFORE_DEADLINE",
@@ -8181,12 +8696,15 @@ export const openApiDocument = {
             "PIN_ACCESS_REQUIRED",
             "SENSITIVE_TEXT_NOT_ALLOWED",
             "PIN_MATERIAL_NOT_ALLOWED",
+            "ROOM_TYPE_CLEANING_FEE_INVALID",
+            "ROOM_TYPE_CLEANING_FEE_RESPONSE_INVALID",
             "ROOM_COMMAND_FAILED",
             "ORIGIN_NOT_ALLOWED",
             "ROUTE_NOT_FOUND",
             "RUNTIME_NOT_CONFIGURED",
             "INTERNAL_SERVER_ERROR",
             ...postApprovalOpenApiErrorCodes,
+            ...roomReadyCorrectionErrorCodes,
           ]),
         ],
       },
@@ -8548,6 +9066,7 @@ export const openApiDocument = {
           "room.record_pin_sync",
           "room.occupancy_corrected",
           "room.display_status_overridden",
+          "room.ready_corrected",
           "room.pin_change_prepared",
           "room.pin_change_confirmed",
           "room.pin_mismatch_resolved",
@@ -9289,6 +9808,22 @@ export const openApiDocument = {
               paymentAttemptNumber: { type: "integer", minimum: 1 },
               paymentMethod: { type: "string", enum: ["bank_transfer"] },
               occupied: { type: "boolean" },
+              cancelledCleaningCount: {
+                type: "integer",
+                minimum: 0,
+                maximum: 100,
+              },
+              releasedOperationBlockCount: {
+                type: "integer",
+                minimum: 0,
+                maximum: 100,
+              },
+              resolvedRoomIssueCount: {
+                type: "integer",
+                minimum: 0,
+                maximum: 100,
+              },
+              candlesCleared: { type: "boolean" },
               displayStatusOverride: {
                 oneOf: [
                   { $ref: "#/components/schemas/RoomPrimaryDisplayStatus" },
@@ -10186,6 +10721,7 @@ export const openApiDocument = {
           "endedAt",
           "effectiveAt",
           "recordedAt",
+          "instructionMemo",
         ],
         properties: {
           attemptId: { type: "string", format: "uuid" },
@@ -10213,6 +10749,7 @@ export const openApiDocument = {
           endedAt: { type: ["string", "null"], format: "date-time" },
           effectiveAt: { type: "string", format: "date-time" },
           recordedAt: { type: "string", format: "date-time" },
+          instructionMemo: assignmentInstructionMemoSchema(),
         },
         description:
           "서버가 검증한 수행 identity/version/timestamp만 포함합니다. 일반 상태 enum의 후속 단계가 보이더라도 이번 API는 scheduled→in_progress→field_completed만 변경합니다. 현장 상태는 attempt.status·fieldCompletedAt·endedAt이 정본이며 target의 거친 in_progress 값만으로 청소중 표시를 판단하지 않습니다. 전체 room/template snapshot·고객명·PIN·사진·token은 공개하지 않습니다.",
@@ -10237,6 +10774,7 @@ export const openApiDocument = {
           "notifiedAt",
           "endedAt",
           "createdAt",
+          "instructionMemo",
         ],
         properties: {
           assignmentId: { type: "string", format: "uuid" },
@@ -10275,6 +10813,7 @@ export const openApiDocument = {
           notifiedAt: { type: ["string", "null"], format: "date-time" },
           endedAt: { type: ["string", "null"], format: "date-time" },
           createdAt: { type: "string", format: "date-time" },
+          instructionMemo: assignmentInstructionMemoSchema(),
         },
         description:
           "배정 당시 서비스 날짜·접근 가능 시각·마감 시각을 보존하는 revision projection입니다. 전화번호, 고객명, PIN, provider 식별자는 포함하지 않습니다.",
@@ -10405,6 +10944,7 @@ export const openApiDocument = {
           "serviceDate",
           "sequenceNumber",
           "revision",
+          "instructionMemo",
           "isCurrent",
           "targetAssignmentVersion",
           "cleaningKind",
@@ -10429,6 +10969,7 @@ export const openApiDocument = {
         ]),
         properties: {
           ...assignmentTargetReadProperties,
+          instructionMemo: assignmentInstructionMemoSchema(),
           assignmentId: { type: "string", format: "uuid" },
           cleaningTargetId: { type: "string", format: "uuid" },
           roomId: {
@@ -10557,6 +11098,7 @@ export const openApiDocument = {
           "expectedAssignmentVersion",
         ],
         properties: {
+          instructionMemo: assignmentInstructionMemoSchema(true),
           cleaningTargetId: { type: "string", format: "uuid" },
           maidProfileId: { type: "string", format: "uuid" },
           sequenceNumber: { type: "integer", minimum: 1 },
@@ -10576,6 +11118,7 @@ export const openApiDocument = {
           "serviceDate",
           "sequenceNumber",
           "revision",
+          "instructionMemo",
           "targetAssignmentVersion",
           "expectedAvailabilityVersion",
           "availableFrom",
@@ -10583,6 +11126,7 @@ export const openApiDocument = {
         ]),
         properties: {
           ...assignmentTargetReadProperties,
+          instructionMemo: assignmentInstructionMemoSchema(),
           assignmentId: { type: "string", format: "uuid" },
           cleaningTargetId: { type: "string", format: "uuid" },
           roomId: { type: "string", format: "uuid" },
@@ -10611,6 +11155,7 @@ export const openApiDocument = {
           "serviceDate",
           "sequenceNumber",
           "revision",
+          "instructionMemo",
           "targetAssignmentVersion",
           "currentAvailabilityVersion",
           "reasonCodes",
@@ -10619,6 +11164,7 @@ export const openApiDocument = {
         ]),
         properties: {
           ...assignmentTargetReadProperties,
+          instructionMemo: assignmentInstructionMemoSchema(),
           assignmentId: { type: "string", format: "uuid" },
           cleaningTargetId: { type: "string", format: "uuid" },
           roomId: { type: "string", format: "uuid" },
@@ -10899,15 +11445,15 @@ export const openApiDocument = {
         properties: {
           id: { type: "string", format: "uuid" },
           availabilityVersionId: {
-            type: "string",
+            type: ["string", "null"],
             format: "uuid",
-            description: "요청이 기준으로 삼은 가능일 version ID",
+            description: "요청 기준 version ID. 최초 요청은 null",
           },
           maidProfileId: { type: "string", format: "uuid" },
           weekStart: { type: "string", format: "date" },
           sourceVersion: {
             type: "integer",
-            minimum: 1,
+            minimum: 0,
             description: "요청 생성 시점의 CAS version",
           },
           requestedAvailableDates: {
@@ -10967,7 +11513,7 @@ export const openApiDocument = {
           weekStart: {
             type: "string",
             format: "date",
-            description: "KST 기준 현재 주 또는 다음 주의 월요일",
+            description: "KST 기준 다음 주의 월요일",
           },
           availableDates: {
             type: "array",
@@ -11004,7 +11550,7 @@ export const openApiDocument = {
             type: "string",
             pattern: "^[A-Z0-9_]{2,80}$",
           },
-          expectedVersion: { type: "integer", minimum: 1 },
+          expectedVersion: { type: "integer", minimum: 0 },
         },
       },
       AvailabilityDecisionRequest: {
@@ -11022,7 +11568,7 @@ export const openApiDocument = {
           },
           expectedVersion: {
             type: "integer",
-            minimum: 1,
+            minimum: 0,
             description: "요청의 sourceVersion과 비교할 CAS 값",
           },
         },
@@ -11972,6 +12518,272 @@ export const openApiDocument = {
           },
         },
       },
+      DeveloperResetCandidateImpact: {
+        type: "object",
+        additionalProperties: false,
+        required: ["relations", "observedRows", "exact"],
+        properties: {
+          relations: integer,
+          observedRows: integer,
+          exact: { type: "boolean" },
+        },
+      },
+      DeveloperResetRowImpact: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "available",
+          "diagnosticComplete",
+          "referencesValid",
+          "candidateCounts",
+          "authAccounts",
+          "preservedToRemoved",
+          "missingTargets",
+          "partialNulls",
+          "unresolvedTargets",
+          "unsupportedForeignKeys",
+          "blockers",
+        ],
+        properties: {
+          available: { type: "boolean" },
+          diagnosticComplete: { type: "boolean" },
+          referencesValid: { type: "boolean" },
+          candidateCounts: {
+            type: ["object", "null"],
+            additionalProperties: false,
+            required: [
+              "preserve",
+              "roomBaseline",
+              "resetCandidate",
+              "templateSource",
+              "photoHold",
+              "unresolved",
+            ],
+            properties: Object.fromEntries(
+              [
+                "preserve",
+                "roomBaseline",
+                "resetCandidate",
+                "templateSource",
+                "photoHold",
+                "unresolved",
+              ].map((label) => [label, integer]),
+            ),
+          },
+          authAccounts: {
+            type: ["object", "null"],
+            additionalProperties: false,
+            required: [
+              "observedRows",
+              "preserve",
+              "resetCandidate",
+              "unresolved",
+            ],
+            properties: Object.fromEntries(
+              ["observedRows", "preserve", "resetCandidate", "unresolved"].map(
+                (label) => [label, integer],
+              ),
+            ),
+          },
+          ...Object.fromEntries(
+            [
+              "preservedToRemoved",
+              "missingTargets",
+              "partialNulls",
+              "unresolvedTargets",
+              "unsupportedForeignKeys",
+            ].map(
+              (label) => [label, { type: ["integer", "null"], minimum: 0 }],
+            ),
+          ),
+          blockers: { type: "array", items: { type: "string" } },
+        },
+      },
+      DeveloperOperationGates: {
+        type: ["object", "null"],
+        additionalProperties: false,
+        required: [
+          "lifecycle",
+          "maintenance",
+          "policyConfigured",
+          "controlVersion",
+          "unfinishedAdmissions",
+          "expiredUnfinishedAdmissions",
+          "unresolvedPasswordChanges",
+          "preparedPasswordResets",
+          "coverage",
+          "recentReauthentication",
+          "executionEnabled",
+          "blockers",
+        ],
+        properties: {
+          lifecycle: {
+            type: "string",
+            enum: ["UNKNOWN", "PROVISIONING", "STARTED"],
+          },
+          maintenance: {
+            type: "string",
+            enum: ["UNKNOWN", "OPEN", "REQUESTED"],
+          },
+          policyConfigured: { type: "boolean" },
+          controlVersion: {
+            type: ["string", "null"],
+            pattern: "^[1-9][0-9]{0,18}$",
+            maxLength: 19,
+          },
+          unfinishedAdmissions: integer,
+          expiredUnfinishedAdmissions: integer,
+          unresolvedPasswordChanges: integer,
+          preparedPasswordResets: integer,
+          coverage: { type: "string", enum: ["NOT_INTEGRATED"] },
+          recentReauthentication: { type: "string", enum: ["NOT_EVALUATED"] },
+          executionEnabled: { type: "boolean", enum: [false] },
+          blockers: { type: "array", items: { type: "string" } },
+        },
+      },
+      DeveloperResetTemplateEvidence: {
+        type: "object",
+        additionalProperties: false,
+        description:
+          "모든 template 상태의 내용·slot 및 명시 역사 참조 수집. diagnosticComplete는 수집 완전성이고 복구/새 게시/초기화 승인이 아니다. 두 source 후보는 draft/retired 상태 처리나 제외를 결정하지 않는다.",
+        required: [
+          "available",
+          "diagnosticComplete",
+          "executionEnabled",
+          "templateCount",
+          "slotCount",
+          "contentFingerprintsCollected",
+          "statusCounts",
+          "referenceCounts",
+          "selectionAlternatives",
+          "historicallyUnreadable",
+          "registrationShapeInvalid",
+          "unsupportedPublicationPaths",
+          "slotProjectionMismatches",
+          "missingCreators",
+          "exhaustedVersions",
+          "blockers",
+        ],
+        properties: {
+          available: { type: "boolean" },
+          diagnosticComplete: { type: "boolean" },
+          executionEnabled: { type: "boolean", enum: [false] },
+          ...Object.fromEntries(
+            [
+              "templateCount",
+              "slotCount",
+              "contentFingerprintsCollected",
+              "historicallyUnreadable",
+              "registrationShapeInvalid",
+              "unsupportedPublicationPaths",
+              "slotProjectionMismatches",
+              "missingCreators",
+              "exhaustedVersions",
+            ].map((
+              label,
+            ) => [label, { type: ["integer", "null"], minimum: 0 }]),
+          ),
+          statusCounts: {
+            type: ["object", "null"],
+            additionalProperties: false,
+            required: ["draft", "published", "retired"],
+            properties: Object.fromEntries(
+              ["draft", "published", "retired"].map((
+                label,
+              ) => [label, integer]),
+            ),
+          },
+          referenceCounts: {
+            type: ["object", "null"],
+            additionalProperties: false,
+            required: ["edges", "absent", "malformed", "detached", "matched"],
+            properties: Object.fromEntries(
+              ["edges", "absent", "malformed", "detached", "matched"].map((
+                label,
+              ) => [label, integer]),
+            ),
+          },
+          selectionAlternatives: {
+            type: ["array", "null"],
+            maxItems: 2,
+            items: {
+              type: "object",
+              additionalProperties: false,
+              required: [
+                "scope",
+                "selected",
+                "excludedDraft",
+                "excludedRetired",
+                "statusPolicyDecided",
+              ],
+              properties: {
+                scope: {
+                  type: "string",
+                  enum: ["currentPublished", "allVersions"],
+                },
+                selected: integer,
+                excludedDraft: integer,
+                excludedRetired: integer,
+                statusPolicyDecided: { type: "boolean", enum: [false] },
+              },
+            },
+          },
+          blockers: { type: "array", items: { type: "string" } },
+        },
+      },
+      DeveloperResetPreview: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "readOnly",
+          "diagnosticComplete",
+          "executionEnabled",
+          "capturedAt",
+          "snapshotId",
+          "relationCount",
+          "missingRelations",
+          "unknownRelations",
+          "unsupportedRelations",
+          "truncatedRelations",
+          "candidateImpact",
+          "rowImpact",
+          "operationGates",
+          "templateEvidence",
+          "blockers",
+        ],
+        properties: {
+          readOnly: { type: "boolean", enum: [true] },
+          diagnosticComplete: { type: "boolean" },
+          executionEnabled: { type: "boolean", enum: [false] },
+          capturedAt: { type: "string", format: "date-time" },
+          snapshotId: fingerprint,
+          relationCount: integer,
+          missingRelations: integer,
+          unknownRelations: integer,
+          unsupportedRelations: integer,
+          truncatedRelations: integer,
+          candidateImpact: {
+            type: "object",
+            additionalProperties: false,
+            required: ["preserve", "mixed", "reseed", "clear", "review"],
+            properties: Object.fromEntries(
+              ["preserve", "mixed", "reseed", "clear", "review"].map(
+                (group) => [group, {
+                  $ref: "#/components/schemas/DeveloperResetCandidateImpact",
+                }],
+              ),
+            ),
+          },
+          rowImpact: { $ref: "#/components/schemas/DeveloperResetRowImpact" },
+          operationGates: {
+            $ref: "#/components/schemas/DeveloperOperationGates",
+          },
+          templateEvidence: {
+            $ref: "#/components/schemas/DeveloperResetTemplateEvidence",
+          },
+          blockers: { type: "array", items: { type: "string" } },
+        },
+      },
       DeveloperRoomCatalogSummary: {
         type: "object",
         additionalProperties: false,
@@ -12231,10 +13043,77 @@ export const openApiDocument = {
           effectiveAt: { type: "string", format: "date-time" },
         },
       },
+      RoomFixedMemo: {
+        type: "object",
+        additionalProperties: false,
+        required: ["roomId", "memo", "version", "updatedAt"],
+        properties: {
+          roomId: { type: "string", format: "uuid" },
+          memo: { type: ["string", "null"], maxLength: 500 },
+          version: { type: "integer", minimum: 0, maximum: 9007199254740991 },
+          updatedAt: { type: ["string", "null"], format: "date-time" },
+        },
+      },
+      RoomArrival: {
+        type: "object",
+        additionalProperties: false,
+        description:
+          "실제 입실 처리 상태. 예약 일정상 occupied와 독립. LIVE에서만 제공하며 과거·미래 날짜 조회는 null. 지연 등록을 실제 입실/청소 승인으로 간주하지 않음.",
+        required: [
+          "status",
+          "checkInReady",
+          "reasonCodes",
+          "actualCheckInAt",
+          "recordedAt",
+        ],
+        properties: {
+          status: {
+            type: "string",
+            enum: [
+              "NONE",
+              "SCHEDULED",
+              "CHECKIN_PENDING",
+              "CHECKED_IN",
+              "ROOM_MOVE_PENDING",
+            ],
+          },
+          checkInReady: {
+            type: ["boolean", "null"],
+            description:
+              "선택한 미입실 예약의 현재 입실 준비. 미래 일자·실제 입실 후·예약 없음은 null.",
+          },
+          reasonCodes: {
+            type: ["array", "null"],
+            items: {
+              type: "string",
+              enum: [
+                "OCCUPIED",
+                "RESERVATION_CURRENT",
+                "CLEANING_REQUIRED",
+                "CANDLE_PRESENT",
+                "OPERATION_BLOCKED",
+                "ROOM_ISSUE_BLOCKED",
+                "DATA_UNCONFIRMED",
+                "PIN_MISMATCH",
+                "CHECKOUT_NOT_COMPLETED",
+                "ROOM_INACTIVE",
+              ],
+            },
+          },
+          actualCheckInAt: { type: ["string", "null"], format: "date-time" },
+          recordedAt: {
+            type: ["string", "null"],
+            format: "date-time",
+            description:
+              "예약을 서버에 실제 등록한 시각. displayCheckInAt과 별도로 보존.",
+          },
+        },
+      },
       RoomProjection: {
         type: "object",
         additionalProperties: false,
         required: [
+          "arrival",
           "id",
           "roomNumber",
           "roomTypeCode",
@@ -12273,6 +13152,11 @@ export const openApiDocument = {
           "reasonCodes",
         ],
         properties: {
+          arrival: {
+            anyOf: [{ $ref: "#/components/schemas/RoomArrival" }, {
+              type: "null",
+            }],
+          },
           id: { type: "string", format: "uuid", description: "불변 객실 ID" },
           roomNumber: {
             type: "string",
@@ -12902,6 +13786,7 @@ export const openApiDocument = {
       RoomEventType: {
         type: "string",
         enum: [
+          "room.ready_corrected",
           "room.master_data_changed",
           "room.create_block",
           "room.release_block",
@@ -12923,6 +13808,15 @@ export const openApiDocument = {
         type: "object",
         additionalProperties: false,
         properties: {
+          roomStateVersion: { type: "integer", minimum: 1 },
+          cancelledCleaningCount: { type: "integer", minimum: 0, maximum: 100 },
+          releasedOperationBlockCount: {
+            type: "integer",
+            minimum: 0,
+            maximum: 100,
+          },
+          resolvedRoomIssueCount: { type: "integer", minimum: 0, maximum: 100 },
+          candlesCleared: { type: "boolean" },
           roomTypeId: { type: "string", format: "uuid" },
           elevatorZone: {
             type: ["string", "null"],
@@ -14561,7 +15455,8 @@ for (const [path, item] of Object.entries(openApiDocument.paths)) {
       path.startsWith("/v1/limited/") || path === "/v1/offline-events" ||
       (path === "/v1/attempts/{attemptId}/submissions" && method === "post") ||
       (operation.tags?.includes("Photos") &&
-        path !== "/v1/photos/{photoId}/content")
+        path !== "/v1/photos/{photoId}/content" &&
+        path !== "/v1/photos/{photoId}/thumbnail")
     ) {
       continue;
     }
@@ -14630,6 +15525,68 @@ function roomReadResponses(): Record<string, unknown> {
     "403": errorResponse,
     "404": errorResponse,
     "500": errorResponse,
+  };
+}
+
+function roomFixedMemoOperation(write: boolean): Record<string, unknown> {
+  return {
+    tags: ["Rooms"],
+    operationId: write ? "setRoomFixedMemo" : "getRoomFixedMemo",
+    summary: write ? "객실 고정 메모 수정·비우기" : "객실 고정 메모 조회",
+    description:
+      "#551 개발 후보·운영 미반영. 관리자 수정/현재 통보 배정 메이드 조회. 500 UTF-16자, null은 비우기, 독립 메모 버전 CAS. 개인정보·PIN·링크 금지. 자동 배정 없음.",
+    security: [{ bearerAuth: [] }],
+    "x-required-roles": write ? ["admin"] : ["admin", "maid"],
+    parameters: [roomIdParameter(), ...(write ? [idempotencyHeader] : [])],
+    ...(write
+      ? {
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                additionalProperties: false,
+                required: ["memo", "expectedVersion"],
+                properties: {
+                  memo: { type: ["string", "null"], maxLength: 500 },
+                  expectedVersion: {
+                    type: "integer",
+                    minimum: 0,
+                    maximum: 9007199254740990,
+                  },
+                },
+              },
+            },
+          },
+        },
+      }
+      : {}),
+    responses: {
+      "200": {
+        description: "객실 고정 메모",
+        headers: { "Cache-Control": noStoreHeader },
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              additionalProperties: false,
+              required: ["fixedMemo"],
+              properties: {
+                fixedMemo: { $ref: "#/components/schemas/RoomFixedMemo" },
+              },
+            },
+          },
+        },
+      },
+      "400": errorResponse,
+      "401": errorResponse,
+      "403": errorResponse,
+      "404": errorResponse,
+      "409": errorResponse,
+      "500": errorResponse,
+      "503": errorResponse,
+    },
   };
 }
 
@@ -14987,6 +15944,17 @@ function prestartOperation(
   };
 }
 
+function assignmentInstructionMemoSchema(input = false) {
+  return {
+    type: ["string", "null"],
+    minLength: input ? 0 : 1,
+    maxLength: 500,
+    description: input
+      ? "#534 미배포 후보. 선택 작업 요청사항. 원문 최대 500 UTF-16 code units이며 앞뒤 공백을 제거합니다. 생략은 같은 청소 대상의 직전 배정 메모 유지, null/공백만 입력은 지우기입니다. 수량·호실·줄바꿈을 허용하고 개인정보·PIN·인증정보 입력은 금지합니다. 내용 변경은 새 요청 키를 사용합니다."
+      : "#534 미배포 후보. 해당 assignment revision에 저장된 작업 요청사항. 메모 없음·legacy receipt 부재는 null이며 현재 다른 배정으로 보충하지 않습니다. 사진 보존기한과 분리해 작업 이력으로 남습니다. 메모가 청소 종류·사진 필수조건·수당을 변경하지 않습니다.",
+  };
+}
+
 function prestartRequestSchema(
   action: "change" | "unassign" | "request" | "decision" | "unavailable",
 ) {
@@ -15016,6 +15984,7 @@ function prestartRequestSchema(
   };
   const required = Object.keys(properties);
   if (action === "change") {
+    properties.instructionMemo = assignmentInstructionMemoSchema(true);
     properties.serviceDate = {
       type: "string",
       format: "date",

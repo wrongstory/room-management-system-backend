@@ -1,3 +1,7 @@
+// #532 source candidate: no new table; exact room.ready_corrected audit/receipt links
+// current cleaning target/obligation cancellation with assignment/access termination.
+// Preserve completed attempt/submission/photo/earning history and all future plans.
+// Full DB and production NOT RUN; see docs/ROOM_READY_CORRECTION_532.md.
 // 2026-10-04 #363/#373 A candidate: seven function bodies + owner-only STABLE read guard.
 // Existing tables/columns/relationships/ACL/RLS/ledgers remain unchanged. Raw strict FAIL stays visible;
 // exact nine compatibility diagnostics/catalog/source fingerprints are a separate gate.
@@ -208,10 +212,10 @@ Table public.availability_days {
 
 Table public.availability_change_requests {
   id uuid [pk]
-  availability_version_id uuid [not null]
+  availability_version_id uuid [note: '최초 승인 요청은 null, source_version=0; 기존 요청은 원본 version FK']
   maid_profile_id uuid [not null]
   week_start date [not null]
-  source_version int [not null]
+  source_version int [not null, note: '0 iff availability_version_id is null; otherwise > 0']
   requested_available_dates date[] [not null]
   reason_code text [not null]
   status availability_request_status [not null, default: 'pending']
@@ -227,7 +231,7 @@ Table public.room_types {
   id uuid [pk]
   code text [not null, unique]
   name text [not null]
-  base_cleaning_fee int [not null, note: 'KRW integer']
+  base_cleaning_fee int [not null, note: '#577 KRW integer catalog fee: business-admin versioned update, future ordinary target snapshots only; historical fees unchanged.']
   default_duration_minutes int [not null]
   default_guest_count int [not null, note: 'API baseOccupancy; >= 1']
   max_guest_count int [not null, note: 'API maxOccupancy; >= default_guest_count; reservation authority']
@@ -986,6 +990,7 @@ Table public.cleaning_target_schedule_revisions {
 
 Table public.cleaning_assignments {
   id uuid [pk]
+  instruction_memo text [note: '#534 candidate, nullable. Immutable assignment revision instruction; omitted new revision inherits latest same-target value including null clears. Existing rows null. No automatic retention purge, audit/push raw text or next-target inheritance.']
   cleaning_target_id uuid [not null]
   maid_profile_id uuid [not null]
   service_date date [not null, note: '#326 card effectiveServiceDate is this immutable revision date, never later target effective date.']
@@ -2716,7 +2721,7 @@ Table private.cleaning_overdue_recipients {
     recipient_profile_id
     actor_profile_id
   }
-  Note: 'Immutable admin enrollment. Deferred event/enrollment/typed-notice/outbox commit identity; actor self inbox retained, self push absent. Repeated runs/actor changes/group boundary never re-emit; new eligible admin keeps original event clock and 24h delivery TTL; possible immediate late-admin push expiry remains OPEN #345 (not changed by #343).'
+  Note: 'Immutable admin enrollment. Deferred event/enrollment/typed-notice/outbox commit identity; actor self inbox retained, self push absent. Repeated runs/actor changes/group boundary never re-emit. #345 source candidate preserves event/inbox/group clocks and uses enrolled_at only for a new recipient outbox, retaining 24h TTL without rewriting old deliveries. Actual SQL validation and operating rollout remain pending.'
 }
 
 Table private.cleaning_overdue_scan_cursor {
@@ -3135,3 +3140,131 @@ Ref: private.post_approval_issue_delete_barriers.object_id > private.post_approv
 Ref: private.post_approval_issue_purge_jobs.object_id > private.post_approval_issue_provider_objects.id
 
 // #452: room_pin_revisions.source adds sheet_import; service-role import uses immutable revision/current CAS. See docs/ROOM_PIN_TRANSFER.md.
+
+Table private.photo_upload_batches {
+  id uuid [pk]
+  actor_profile_id uuid [not null]
+  idempotency_key_digest text [not null]
+  request_hash text [not null]
+  created_at timestamptz [not null]
+  indexes {
+    (actor_profile_id, idempotency_key_digest) [unique]
+    (id, actor_profile_id) [unique]
+  }
+  Note: '#411 candidate. Immutable private reservation, no provider bytes or credentials. Two member admissions commit atomically. Actual SQL NOT RUN; photo deletion HOLD.'
+}
+Table private.photo_upload_batch_members {
+  batch_id uuid [not null]
+  actor_profile_id uuid [not null]
+  item_index integer [not null, note: '0 or 1']
+  idempotency_key_digest text [not null]
+  indexes {
+    (batch_id, item_index) [pk]
+    (actor_profile_id, idempotency_key_digest) [unique]
+  }
+  Note: '#411 candidate. Admission FK is DEFERRABLE INITIALLY DEFERRED. Different immutable members may hold two transfer claims; only accepted sibling change proves collection revision advance.'
+}
+Ref: private.photo_upload_batches.actor_profile_id > public.profiles.id
+Ref: private.photo_upload_batch_members.(batch_id,actor_profile_id) > private.photo_upload_batches.(id,actor_profile_id)
+Ref: private.photo_upload_batch_members.(actor_profile_id,idempotency_key_digest) > private.photo_upload_admissions.(actor_profile_id,idempotency_key_digest)
+
+Table private.developer_operation_control {
+  singleton boolean [pk, note: 'Always true; no seed row']
+  target_ref text [not null]
+  policy_hash text [not null]
+  reauth_ttl_seconds integer [not null, note: 'Positive, no default policy']
+  lifecycle text [not null, note: 'UNKNOWN / PROVISIONING / STARTED; STARTED irreversible']
+  maintenance text [not null, note: 'OPEN / REQUESTED is not full drain proof']
+  version bigint [not null]
+  started_at timestamptz
+  Note: '#396 source128; RLS, owner-only control, no account cascade. SQL NOT RUN.'
+}
+Table private.developer_operation_reauth {
+  id uuid [pk]
+  nonce_hash text [not null]
+  actor_profile_id uuid [not null, note: 'No FK: preserve security receipt during later approved reset']
+  auth_user_id uuid [not null]
+  session_digest text [not null]
+  password_version text [not null]
+  target_ref text [not null]
+  policy_hash text [not null]
+  control_version bigint [not null]
+  action text [not null]
+  created_at timestamptz [not null]
+  expires_at timestamptz [not null]
+  state text [not null]
+  probe_session_digest text [unique]
+  verified_at timestamptz
+  consumed_at timestamptz
+  Note: '#396 source128; password AMR observed after challenge and probe session absent before READY; no credentials/tokens stored.'
+}
+Table private.developer_operation_admissions {
+  id uuid [pk]
+  control_version bigint [not null]
+  kind text [not null]
+  owner_digest text [not null]
+  nonce_hash text [not null]
+  created_at timestamptz [not null]
+  deadline_at timestamptz [not null]
+  completed_at timestamptz
+  http_route_id text [note: 'source130 finite manifest route; null for non-HTTP admission']
+  http_actor_profile_id uuid [note: 'No account FK: preserve security receipt']
+  http_auth_user_id uuid
+  http_session_digest text
+  http_password_version text
+  http_command_name text
+  http_key_digest text
+  http_request_hash text
+  worker_kind text [note: 'source132 notification / source133 reservation scheduler / source134 incremental PIN worker; null for non-worker admission. PIN full resync/hosted mapping HOLD. Actual SQL NOT RUN.']
+  worker_context jsonb [note: 'Exact worker identities/digests and same-transaction DB observations; no PIN, subscription secret or payload']
+  indexes { (owner_digest,nonce_hash) [unique] }
+  Note: '#396 source128/130/131; deadline expiry is UNKNOWN. HTTP terminal requires exact immutable actor/command/key/hash receipt; finite audit/read-state effects complete in the same transaction. Node/Edge HTTP adapters are opt-in; opaque/worker/external full-path coverage remains pending.'
+}
+Table private.developer_operation_events {
+  id bigint [pk, increment]
+  created_at timestamptz [not null]
+  control_version bigint [not null]
+  actor_profile_id uuid [not null]
+  action text [not null]
+  receipt_id uuid [not null, unique]
+  Note: '#396 source128; append-only security audit, no raw nonce/session/credential.'
+}
+Ref: private.developer_operation_events.receipt_id > private.developer_operation_reauth.id [delete: restrict]
+
+Table private.developer_reset_receipt_heads {
+  id uuid [pk]
+  actor_profile_id uuid [not null]
+  project_ref text [not null]
+  key_digest text [not null]
+  binding jsonb [not null]
+  header jsonb [not null]
+  version integer [not null]
+  head_hash text [not null]
+  indexes { (actor_profile_id, project_ref, key_digest) [unique] }
+  Note: '#396 source135; immutable binding/header and CAS head. Closed FORCE RLS; no account FK. Stored observations are not execution authorization. Actual SQL NOT RUN.'
+}
+Table private.developer_reset_receipt_events {
+  receipt_id uuid [not null]
+  sequence integer [not null]
+  entry jsonb [not null]
+  indexes { (receipt_id, sequence) [pk] }
+  Note: '#396 source135; append-only bounded hash-chain entries, no raw session/credential/business rows. Preserve candidate.'
+}
+Ref: private.developer_reset_receipt_events.receipt_id > private.developer_reset_receipt_heads.id [delete: no action]
+
+// #548: read-only get_room_board_arrival_projection adds LIVE arrival facts; no table changes.
+// See docs/LATE_RESERVATION_548.md. DB verification and production application are pending approval.
+
+
+Table private.room_fixed_memo_revisions {
+  room_id uuid [not null, ref: > rooms.id]
+  revision bigint [not null]
+  memo text
+  actor_profile_id uuid [not null, ref: > profiles.id]
+  recorded_at timestamptz [not null]
+  indexes {
+    (room_id, revision) [pk]
+    actor_profile_id
+  }
+  Note: '#551 candidate only. Append-only; RLS runtime direct deny. RESTRICT FKs, scoped service-only RPCs, version CAS and receipt replay. Null revision clears but preserves history. No scheduling. Migration NOT RUN; reset classification remains fail closed.'
+}

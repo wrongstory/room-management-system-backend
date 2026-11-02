@@ -1,4 +1,36 @@
+## #577 관리자 타입별 청소 단가
+
+`PUT /v1/room-types/{roomTypeId}/cleaning-fee`는 최신 business admin/session/password, actor-scoped receipt, 공통 reservation-command 잠금과 room-type CAS를 거쳐 catalog 기본료만 변경한다. 감사와 receipt를 원자 commit하며 기존 target/earning/payroll은 쓰지 않는다. 새 일반 target의 생성 시 snapshot만 새 단가를 사용하고 원 snapshot 승계/0원 재청소는 유지한다. 새 table/column은 없다. [계약과 미실행 범위](ROOM_TYPE_CLEANING_FEE_577.md)를 따른다.
+
 # 백엔드 서버 설계
+
+## #534 청소 배정 메모 — 미배포 후보
+
+선택 `instructionMemo`를 기존 배정 draft/change API에 가산한다. 명시 입력만 메모 지원 RPC와
+새 요청 hash 항목을 사용하며 생략한 기존 요청은 기존 RPC·hash·receipt 계약을 보존한다.
+DB는 같은 청소의 최신 배정 revision에서 생략 메모를 계승한다. 메모 자체는 revision 불변이다.
+Edge/Fastify 조회는 exact assignment의 허용된 필드만 반환하며 기존 receipt를 현재 DB로 보강하지 않는다.
+감사에 쓰이는 기본 수행 projection은 유지하고 인가된 읽기에만 메모를 추가한다.
+전체 DB·운영 적용 승인, v1.0.0 통합 순서와 프런트 계약은
+[#534 인계](./ASSIGNMENT_INSTRUCTION_MEMO_534.md)를 따른다.
+
+## #532 예약 가능 상태 정정 — 미배포 후보
+
+`POST /v1/rooms/{roomId}/ready-correction/preview`는 현재 해제 대상·차단 이유·수당 경고와
+5분 영향 fingerprint를 계산한다. `POST .../ready-correction`는 live 관리자·room CAS·동일
+영향 범위를 다시 검사하고 명시 확인/수당 확인 뒤 target·원천 의무·담당/수행 권한을 원자 정리한다.
+진행 중 사진 전송·실제 예약/점유 등 해결하지 못하는 사유는 별도 업무로 안내한다.
+사진·제출·완료 시각·기존 확정 수익을 보존하고 `room.ready_corrected` 감사로 취소 효력을 설명한다.
+현재와 미래 청소를 구별하며 후속 배정·수행 시작까지 exact 취소 근거를 일관되게 적용한다.
+기존 display override는 업무 취소 권한이 아니다. 새 확인 절차로 실제 상태를 변경한 뒤 override를
+해제해 카드 값을 다시 계산한다. [확정 정책·프런트 인계·검증 경계](./ROOM_READY_CORRECTION_532.md).
+
+## #411 비공개 사진 미리보기 후보
+
+`GET /v1/photos/{photoId}/thumbnail`은 원본의 DB 읽기 권한과 보존 상태를 전후
+재검증한 뒤 같은 Drive 객체의 provider 미리보기를 서버에서 중계한다.
+별도 storage object/table/cache·보존 clock·삭제 worker 변경은 없다.
+구체 범위와 운영 미검증 사항은 [썸네일 계약](./PHOTO_THUMBNAIL_411.md)을 따른다.
 
 ## #414 주급 projection 재사용 후보
 
@@ -704,8 +736,8 @@ target 생성 당시 고정한 사진 슬롯을 attempt별 사진 version이 참
 | 객실·예약 명령 | actor 최신 상태·admin 역할 + 객실 `state_version`/예약 `version` CAS + actor/명령별 idempotency key + 짧은 전역 advisory lock으로 lock 순서 고정 |
 | 예약 저장 | KST 기준 최소 1박·분 단위 + `[check_in_at, check_out_at)` `tstzrange` GiST exclusion으로 겹침 차단 |
 | 입·퇴실 전이 | 고유 event key + 예약 lock으로 예정/수동 전이 중복 차단. 한 batch에서는 퇴실을 먼저 닫아 같은 instant의 다음 입실을 지연시키지 않고, worker 중단 중 완전히 지난 미입실 예약도 가짜 check-in 없이 checkout으로 catch-up |
-| 주간 가능일 | KST 현재·다음 주의 요일 무관 직접 제출 + 과거 날짜 신규 true 소급 금지 + 메이드/주차 current version CAS + canonical request hash. 일요일은 안내상 주 제출일 |
-| 승인형 가능일 변경 | 대상 주 시작 후 pending 요청 1건 + 관리자 결정 row lock + 승인 때만 새 immutable version |
+| 주간 가능일 | 다음 주만 요일 무관 직접 제출. 이번 주 직접 제출은 AVAILABILITY_APPROVAL_REQUIRED(409). 메이드/주차 current version CAS + canonical request hash |
+| 승인형 가능일 변경 | KST 이번 주 pending 1건 + 관리자 결정 row lock + 승인 때만 새 immutable version. 최초 sourceVersion=0/null source 허용. 요청·승인 시 지난 날짜 불변, 승인 시 활성 메이드·배정 충돌 재검증. 반려는 현재 값 유지 |
 | 청소 요청 | 예약·객실·checkout obligation·target을 양방향 복합키로 고정하고 동일 obligation을 한 번만 materialize. 연박/추가 수동 요청은 점유·명시된 접근 구간을 검증하되 열린 checkout 계획을 임의 1분 구간으로 만들지 않으며, 안정적인 target ID 및 CAS soft cancel을 사용 |
 | 입실 준비 증명 | preparation obligation의 current attempt와 approved submission을 같은 수행으로 묶고, target 접근 가능 시각 이후 `attempt 시작 → 현장 완료 → 종료 → 제출 → 승인` 순서가 직전 점유 종료 이후부터 해당 체크인 이전까지 같은 객실에서 완결된 경우만 `approved` 허용. submission 소비 원장은 append-only·전역 unique라 다른 예약에 재사용할 수 없음 |
 | PIN lease | 객실·예약·target·현재 assignment·현재 attempt·담당 메이드·최신 verified PIN version을 한 계약으로 묶음. 수동 checkout은 stale lease를 폐기하고 현재 verified version으로 현재 미공개 lease 한 건만 새 revision으로 재발급 |
@@ -990,6 +1022,9 @@ enrollment와 emitter에서 재검증합니다. 수신자 profile에 추가 역�
 동일 이벤트는 다른 실행 actor·10분 grouping 경계에서도 재생성하지 않습니다. 늦게 활성화된
 관리자의 새 inbox는 허용하지만 원 event 시각과 기존 push 24h TTL을 유지합니다.
 따라서 24시간 뒤 신규 관리자 push의 즉시 만료 가능성은 별도 #345 OPEN입니다.
+#345 source 후보는 신규 outbox에만 수신자 `enrolled_at`을 사용하고 deferred 검사도
+같은 시각을 요구합니다. 과거 event/inbox/outbox는 보존하며 적용·SQL 검증은 승인 대기입니다.
+[후보 및 검증 상태](./CLEANING_OVERDUE_DELIVERY_CLOCK_345.md)를 확인합니다.
 #343 신규 complaint family의 enrollment-clock delivery 보완을 기존 cleaning family 완료로 확대하지 않습니다.
 현장 완료·업로드·검수 대기에 새 SLA를 만들지 않으며 original domain row는 변경하지 않습니다.
 
@@ -1344,3 +1379,78 @@ token, request body 또는 idempotency payload를 저장하지 않는다. 이 so
 ## #452 명시적 PIN 파일 전송
 
 관리자 전용 export/preview/apply는 [ROOM_PIN_TRANSFER.md](./ROOM_PIN_TRANSFER.md)를 따른다. 읽기 원본과 쓰기 projection은 분리하며 transaction에는 암호화 envelope만 전달한다. 새 revision source `sheet_import`, current CAS/nonce reservation/entitlement rotation을 재사용한다. 전체 SQL 실행은 최종 릴리스 승인 때 수행한다.
+
+## #415 배정 카드 조회 통합 후보
+
+service-only `get_assignment_card_hydration`은100개 assignment의 표시 관계를 묶으며
+기존 final actor/session/ownership·schedule RPC는 모든 hydration 이후 유지한다.
+public base table/RLS/원장 변경 없이 migration124 함수만 추가한다.
+[계약·완전성·DB 미실행 경계](./ASSIGNMENT_HYDRATION_COST_BASELINE.md)를 따른다.
+
+## #411 두 사진 전송 후보
+
+동일 collection의 두 파일은 private immutable batch/member에 원자 예약한 뒤 기존 binary
+경로로 전송한다. 고정된 원래 CAS와 다른 member의 accepted change 증거를 결합하며,
+파일별 identity/lease·quota·수량과 제출·삭제 차단을 유지한다. 실제 DB/Drive는 NOT RUN이다.
+계약·검증·rollback은 [사진 묶음 계약](./PHOTO_UPLOAD_BATCH_411.md)을 따른다.
+
+## #396 운영 안전 장치 후보
+
+128은 lifecycle/CAS와 password AMR 기반 재인증, 임시 세션 폐기 readback, nonce에 묶인
+admission/terminal 처리 primitive를 제공한다. marker 부재와 만료 미완료 effect는 UNKNOWN이다.
+130/131과 Node/Edge HTTP 연결은 65개 명령 원장과 고정 감사/읽음 transaction으로
+완료를 관측한다. Auth/provider 27개 경로는 시작만 기록하고 별도 완료 증거를 기다린다.
+기본 비활성, 실제 Supabase target 결합, 동일 관측 기한과 제한 세션 계약을 유지한다.
+worker/기존 요청과 직접 접근의 전체 coverage는 후속 근거이며 signed worker mode나 caller
+Boolean으로 drain을 증명하지 않는다. 실제 활성화와 DB 실행은 NOT RUN이다.
+[HTTP 연결](./HTTP_OPERATION_ADMISSION_396.md), [원자 감사](./OPERATION_ATOMIC_AUDIT.md),
+[운영 안전 경계](./DEVELOPER_OPERATION_GATES.md)를 따른다.
+
+134의 PIN Node/Edge worker opt-in은 증분 claim과 입장을 원자화하고 고정 dispatch가 해당
+outbox/fence의 결과와 heartbeat를 같은 transaction에서 admission에 기록한다. mutable
+terminal이나 최신 PIN으로 과거 UNKNOWN을 지우지 않는다. hosted mapping·활성화·full-resync와
+photo deletion HOLD를 유지한다. [PIN 증분 계약](./OPERATION_PIN_ADMISSION.md), 실제 SQL NOT RUN.
+
+별도 사진 보류 source는 `photo-purge` Edge entry를 `503 PHOTO_PURGE_HELD`로 고정한다.
+secret·body·환경 입력과 DB/provider 생성을 거치지 않으며 해제 mode나 성공 heartbeat를
+추가하지 않는다. 기존 worker 알고리즘은 합성 회귀로 유지한다. 미배포 source는 기존 hosted
+실행 종료를 증명하지 않는다. [사진 HOLD 경계](./PHOTO_PURGE_HOLD_396.md)를 따른다.
+
+132의 알림 Node/Edge worker는 실제 claim과 입장 기록을 원자화하고 해당 immutable attempt
+결과를 조회한 뒤에만 완료한다. 결과를 확인하지 못한 시도는 새 claim 성공/만료로 해제되지
+않는다. 구성 실패 heartbeat도 같은 transaction으로 보호한다. 별도 opt-in이며 scheduler,
+PIN/사진 worker 및 직접 운영 접근의 전체 coverage를 대신하지 않는다.
+[Worker 계약과 미실행 SQL](./OPERATION_WORKER_ADMISSION.md)을 따른다.
+
+### Source133 예약 scheduler admission
+
+기본 비활성인 예약 scheduler 연결은 기존 두 업무 transaction과 partial success를 유지한다.
+명시된 유한 관측 예산 안에서 acquire→예약 전이→배정 lifecycle→성공 heartbeat→정확한 DB 완료 readback을 수행한다.
+두 immutable command receipt와 동일 request의 heartbeat가 모두 있어야 완료하며 만료/다음 실행/현재 상태로 해제하지 않는다.
+운영 활성화·실제 DB 검증·전체 coverage는 미완료이고 details는 SCHEDULER_OPERATION_ADMISSION.md를 따른다.
+
+### Source135 초기화 관측의 영속 저장
+
+초기화 순수 receipt는 별도 private head/events와 서버 내부 RPC adapter로 저장한다.
+actor/project/key 유일성, 불변 header, append-only event, 최신 version/head CAS 및 정확 readback을 강제한다.
+timeout과 잘린 prefix는 UNKNOWN이며 자동 쓰기 재시도가 없다. 두 신규 관계만 보존 후보로 추가하고
+127/128 source와 129 combined snapshot 계약은 유지한다. 실행 허가·정책·TTL 선택·공개 HTTP는 추가하지 않는다.
+[영속 원장 계약과 실제 SQL 미실행 경계](./RESET_RECEIPT_STORE.md)를 따른다.
+
+## #535 비밀번호 준비 응답 계약 보완 (2026-10-30 후보)
+
+prepare_password_change의 execute/recover 응답 모두 저장된 effectMarker를 반환한다.
+기존 권한·claim·lease·response-loss 규칙은 유지한다. 확인값 누락으로 Auth 미호출이
+확인된 초기 계정의 만료 요청만 승인된 운영 점검 후 failed로 보존하는 세션 한정
+복구 절차를 [별도 문서](PASSWORD_CHANGE_RECOVERY_535.md)에 둔다.
+일반 사용자/서비스 RPC 권한이나 자동 Auth 재실행을 추가하지 않는다. 운영 적용은 미실행이다.
+
+
+## #548 예약 지연 등록·입실 상태 읽기 후보
+
+새 테이블/업무 원장 쓰기 없이 service-role 전용 `get_room_board_arrival_projection` 읽기 RPC를 추가한다. 기존 날짜별 projection을 보존하며 LIVE의 실제 입실 상태·예약 등록 시각·예약별 준비 사유를 추가한다. [계약 및 미실행 DB gate](./LATE_RESERVATION_548.md)를 따른다.
+
+
+## #551 객실 고정 메모 후보
+
+`private.room_fixed_memo_revisions(room_id,revision)`은 객실별 append-only 안내 원장이다. 관리자 수정, 실제 통보된 현재 담당 메이드 조회, 별도 CAS/멱등성, room/profile RESTRICT FK와 actor index를 사용한다. 배정·일정 자동 생성 없음. API·권한·마이그레이션 미실행 경계와 #396 미분류 차단은 [상세 인계](./ROOM_FIXED_MEMO_551.md)를 따른다.

@@ -1,4 +1,8 @@
 /** #111 provider-neutral Edge orchestration. Actual Web Push HTTP and activation belong to #112. */
+import {
+  type OperationWorkerConfig,
+  withNotificationOperationAdmission,
+} from "./worker-admission.ts";
 export const NOTIFICATION_DELIVERY_BATCH_LIMIT = 10;
 export const NOTIFICATION_DELIVERY_RUN_BUDGET_MS = 45_000;
 export const NOTIFICATION_DELIVERY_PROVIDER_DEADLINE_MS = 33_000;
@@ -209,6 +213,7 @@ export class EdgeNotificationDeliveryWorker {
     private provider: EdgeDeliveryProvider,
     private config: EdgeDeliveryCryptoConfig,
     private clock: () => number = Date.now,
+    private operationAdmission?: OperationWorkerConfig,
   ) {}
   #remaining(deadline: number) {
     return Math.floor(deadline - this.clock());
@@ -258,6 +263,23 @@ export class EdgeNotificationDeliveryWorker {
     }
   }
   async run(): Promise<EdgeDeliveryRunResult> {
+    if (this.operationAdmission) {
+      return withNotificationOperationAdmission(
+        {
+          config: this.operationAdmission,
+          db: this.db,
+          budgetMs: NOTIFICATION_DELIVERY_RUN_BUDGET_MS,
+          clock: this.clock,
+        },
+        (db) =>
+          new EdgeNotificationDeliveryWorker(
+            db,
+            this.provider,
+            this.config,
+            this.clock,
+          ).run(),
+      );
+    }
     const started = this.clock(),
       providerDeadline = started + NOTIFICATION_DELIVERY_PROVIDER_DEADLINE_MS;
     const settleDeadline = started + NOTIFICATION_DELIVERY_SETTLE_DEADLINE_MS,

@@ -6,12 +6,28 @@ import {
   requestId,
 } from "../_shared/runtime.ts";
 import { schedulerTransitionCount } from "../_shared/scheduler-transition-count.ts";
+import {
+  scheduledInvokeMode,
+  verifyScheduledInvocation,
+} from "../_shared/scheduled-invocation.ts";
+
+import {
+  OperationWorkerAdmissionError,
+  operationWorkerConfig,
+} from "../_shared/worker-admission.ts";
+import {
+  schedulerOperationBudget,
+  withSchedulerOperationAdmission,
+} from "../_shared/scheduler-admission.ts";
 
 async function matchesSecret(
   provided: string,
   expected: string,
 ): Promise<boolean> {
-  if (provided.length < 32 || expected.length < 32) {
+  if (
+    provided.length < 32 || expected.length < 32 || provided.length > 4096 ||
+    expected.length > 4096
+  ) {
     return false;
   }
   const encoder = new TextEncoder();
@@ -57,7 +73,10 @@ function requiredEnv(name: string): string {
   return value;
 }
 
-Deno.serve(async (request) => {
+export async function handleReservationScheduler(
+  request: Request,
+  dependencies: { createClients?: typeof createEdgeClients } = {},
+): Promise<Response> {
   const id = requestId(request);
   const startedAt = new Date();
   try {
@@ -66,7 +85,28 @@ Deno.serve(async (request) => {
     }
     const expectedSecret = requiredEnv("SCHEDULER_INVOKE_SECRET");
     const providedSecret = request.headers.get("x-scheduler-secret") ?? "";
-    if (!await matchesSecret(providedSecret, expectedSecret)) {
+    let mode: ReturnType<typeof scheduledInvokeMode>;
+    try {
+      mode = scheduledInvokeMode(Deno.env.get("SCHEDULER_INVOKE_MODE"));
+    } catch {
+      throw new EdgeError(
+        503,
+        "RUNTIME_NOT_CONFIGURED",
+        "scheduler 호출 설정을 확인할 수 없습니다.",
+      );
+    }
+    const url = new URL(request.url);
+    const valid = mode === "signed-v1"
+      ? !request.headers.has("x-scheduler-secret") && !url.search &&
+        ["/functions/v1/reservation-scheduler", "/reservation-scheduler"]
+          .includes(url.pathname) &&
+        await verifyScheduledInvocation(
+          request.headers,
+          new TextEncoder().encode(expectedSecret),
+          "reservation-scheduler:aodikrxcczbogjpsjwjt",
+        )
+      : await matchesSecret(providedSecret, expectedSecret);
+    if (!valid) {
       throw new EdgeError(
         401,
         "INVALID_SCHEDULER_SECRET",
@@ -87,9 +127,11 @@ Deno.serve(async (request) => {
         "scheduler 관리자 설정이 올바르지 않습니다.",
       );
     }
-    const payload = await request.json().catch(() => ({})) as {
-      scheduledAt?: unknown;
-    };
+    // Signed invocations perform only the fixed current-time operation. Caller body is ignored.
+    const payload =
+      (mode === "signed-v1" ? {} : await request.json().catch(() => ({}))) as {
+        scheduledAt?: unknown;
+      };
     const scheduledAt = typeof payload.scheduledAt === "string"
       ? new Date(payload.scheduledAt)
       : new Date();
@@ -107,87 +149,129 @@ Deno.serve(async (request) => {
       "",
     );
     const invocationKey = `reservation-scheduler-${bucket}`;
-    const clients = createEdgeClients();
+    const clients = (dependencies.createClients ?? createEdgeClients)();
     const commandAt = new Date().toISOString();
-    const { data, error } = await clients.admin.rpc(
-      "process_due_reservation_transitions",
-      {
-        p_actor_profile_id: actorProfileId,
-        p_as_of: commandAt,
-        p_idempotency_key: invocationKey,
-        p_request_hash: await requestHash(
-          "reservation.process_due_transitions",
-        ),
-      },
+    const admissionConfig = operationWorkerConfig(
+      Deno.env.get("SCHEDULER_OPERATION_ADMISSION_MODE"),
+      Deno.env.get("DEVELOPER_OPERATION_TARGET"),
+      Deno.env.get("SUPABASE_URL"),
     );
-    const { data: assignmentData, error: assignmentError } = error || !data
-      ? { data: null, error: null }
-      : await clients.admin.rpc(
-        "process_due_assignment_lifecycle",
+    const reservationHash = await requestHash(
+      "reservation.process_due_transitions",
+    );
+    const assignmentHash = await requestHash(
+      "assignment.process_due_lifecycle",
+    );
+    return await withSchedulerOperationAdmission({
+      config: admissionConfig,
+      db: clients.admin,
+      budgetMs: admissionConfig
+        ? schedulerOperationBudget(
+          Deno.env.get("SCHEDULER_OPERATION_BUDGET_MS"),
+        )
+        : undefined,
+      binding: {
+        actorId: actorProfileId,
+        invocationKey,
+        scheduledAt: scheduledBucketAt.toISOString(),
+        requestId: id,
+        commandAt,
+        startedAt: startedAt.toISOString(),
+        reservationHash,
+        assignmentHash,
+      },
+    }, async (operationRpc) => {
+      // The adapter preserves the finite original RPC result contract.
+      const rpc = operationRpc as typeof clients.admin.rpc;
+      const { data, error } = await rpc(
+        "process_due_reservation_transitions",
         {
           p_actor_profile_id: actorProfileId,
           p_as_of: commandAt,
           p_idempotency_key: invocationKey,
-          p_request_hash: await requestHash(
-            "assignment.process_due_lifecycle",
-          ),
+          p_request_hash: reservationHash,
         },
       );
-    if (error || !data || assignmentError || !assignmentData) {
-      const { error: heartbeatError } = await clients.admin.rpc(
+      const { data: assignmentData, error: assignmentError } = error || !data
+        ? { data: null, error: null }
+        : await rpc(
+          "process_due_assignment_lifecycle",
+          {
+            p_actor_profile_id: actorProfileId,
+            p_as_of: commandAt,
+            p_idempotency_key: invocationKey,
+            p_request_hash: assignmentHash,
+          },
+        );
+      if (error || !data || assignmentError || !assignmentData) {
+        const { error: heartbeatError } = await rpc(
+          "record_scheduler_heartbeat",
+          {
+            p_actor_profile_id: actorProfileId,
+            p_invocation_key: invocationKey,
+            p_scheduled_at: scheduledBucketAt.toISOString(),
+            p_status: "failed",
+            p_transition_count: null,
+            p_error_code: "RESERVATION_SCHEDULER_FAILED",
+            p_started_at: startedAt.toISOString(),
+            p_completed_at: new Date().toISOString(),
+            p_request_id: id,
+          },
+        );
+        console.error("Reservation scheduler RPC failed", {
+          requestId: id,
+          code: error?.code ?? assignmentError?.code,
+          heartbeatCode: heartbeatError?.code,
+        });
+        throw new EdgeError(
+          500,
+          "RESERVATION_SCHEDULER_FAILED",
+          "예약 전이 scheduler를 실행하지 못했습니다.",
+        );
+      }
+
+      const { error: heartbeatError } = await rpc(
         "record_scheduler_heartbeat",
         {
           p_actor_profile_id: actorProfileId,
           p_invocation_key: invocationKey,
           p_scheduled_at: scheduledBucketAt.toISOString(),
-          p_status: "failed",
-          p_transition_count: null,
-          p_error_code: "RESERVATION_SCHEDULER_FAILED",
+          p_status: "succeeded",
+          p_transition_count: schedulerTransitionCount(data, assignmentData),
+          p_error_code: null,
           p_started_at: startedAt.toISOString(),
           p_completed_at: new Date().toISOString(),
           p_request_id: id,
         },
       );
-      console.error("Reservation scheduler RPC failed", {
-        requestId: id,
-        code: error?.code ?? assignmentError?.code,
-        heartbeatCode: heartbeatError?.code,
-      });
-      throw new EdgeError(
-        500,
-        "RESERVATION_SCHEDULER_FAILED",
-        "예약 전이 scheduler를 실행하지 못했습니다.",
-      );
-    }
+      if (heartbeatError) {
+        console.error("Reservation scheduler heartbeat failed", {
+          requestId: id,
+          code: heartbeatError.code,
+        });
+        throw new EdgeError(
+          500,
+          "SCHEDULER_HEARTBEAT_FAILED",
+          "scheduler 실행 상태를 기록하지 못했습니다.",
+        );
+      }
 
-    const { error: heartbeatError } = await clients.admin.rpc(
-      "record_scheduler_heartbeat",
-      {
-        p_actor_profile_id: actorProfileId,
-        p_invocation_key: invocationKey,
-        p_scheduled_at: scheduledBucketAt.toISOString(),
-        p_status: "succeeded",
-        p_transition_count: schedulerTransitionCount(data, assignmentData),
-        p_error_code: null,
-        p_started_at: startedAt.toISOString(),
-        p_completed_at: new Date().toISOString(),
-        p_request_id: id,
-      },
-    );
-    if (heartbeatError) {
-      console.error("Reservation scheduler heartbeat failed", {
-        requestId: id,
-        code: heartbeatError.code,
-      });
-      throw new EdgeError(
-        500,
-        "SCHEDULER_HEARTBEAT_FAILED",
-        "scheduler 실행 상태를 기록하지 못했습니다.",
-      );
-    }
-
-    return jsonResponse({ transitions: data, assignments: assignmentData });
+      return jsonResponse({ transitions: data, assignments: assignmentData });
+    });
   } catch (error) {
-    return errorResponse(error, id, {});
+    return errorResponse(
+      error instanceof OperationWorkerAdmissionError
+        ? new EdgeError(
+          503,
+          error.code,
+          "scheduler 작업 상태를 확인할 수 없습니다.",
+        )
+        : error,
+      id,
+      {},
+    );
   }
-});
+}
+if (import.meta.main) {
+  Deno.serve((request) => handleReservationScheduler(request));
+}

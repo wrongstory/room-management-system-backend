@@ -1,5 +1,13 @@
 # 객실 PIN Excel 내보내기 / 지정 Drive 가져오기 (#452)
 
+## 2026-10-25 dev 통합 — #485
+
+운영의 마지막 확인 기록은 [v0.9.9 배포](https://github.com/wrongstory/room-management-system-backend/pull/477#issuecomment-6359461664)의 API53 / migration122 / main3e805249다. 아래 과거의 현재·후보·미배포 표현은 각 checkpoint 당시 상태다.
+이번 변경은 main의 검증·문서 보완을 dev로 복원하며 API 계약·운영 runtime·migration 파일을 변경하지 않는다. dev의 #479/#480 보안 의존성과 #481 PIN 오류 진단은 보존하며 아직 운영 반영과 구분한다.
+Full DB/SQL/upgrade/경합 및 운영 migration은 이번 작업에서 NOT RUN이다. 최종 릴리스의 실제 DB 실행 전에 별도 사용자 승인을 받는다. 프런트 코드 변경이나 새 API 연결은 필요하지 않다.
+세부 검증·인계는 [통합 기록](./RELEASE_VALIDATION_BACKPORT_485.md)을 따른다.
+
+
 2026-10-13 사용자 결정. 프런트 연계: makee-ham/room-management-system#220.
 기존 숫자 4~8자리 서버 제한을 폐기한다. 일반/장기숙박 구분 없이 비어 있지 않은 문자열을 보존하고,
 서비스 보호를 위해 UTF-8 128바이트, 제어문자/잘못된 Unicode 금지만 적용한다. 자동 생성은 숫자 4자리다.

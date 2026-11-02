@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
 import { createClient } from '@supabase/supabase-js';
+import { pastAvailableDatesForApproval } from './lib/availability-race-fixture.mjs';
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -189,7 +190,7 @@ export async function testAttemptLifecycleConcurrency(client) {
   const requestId = randomUUID();
   ok(await client.from('availability_change_requests').insert({ id: requestId,
     availability_version_id: approvalTarget.versionId, maid_profile_id: approvalTarget.id,
-    week_start: availabilityWeek, source_version: 1, requested_available_dates: [],
+    week_start: availabilityWeek, source_version: 1, requested_available_dates: pastAvailableDatesForApproval(availabilityWeek, day),
     reason_code: 'CONCURRENCY_UNAVAILABLE', status: 'pending', requested_at: now.toISOString() }), 'availability approval race request');
   const releaseApproval = await holdLock(`select pg_advisory_xact_lock(hashtextextended('availability:${approvalTarget.id}:${availabilityWeek}',0))`);
   let approvalReleased = false;

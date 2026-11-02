@@ -1,0 +1,210 @@
+import {
+  OperationWorkerAdmissionError,
+  type OperationWorkerConfig,
+  type OperationWorkerRpc,
+} from "./worker-admission.js";
+
+type Binding = {
+  actorId: string;
+  invocationKey: string;
+  scheduledAt: string;
+  requestId: string;
+  commandAt: string;
+  startedAt: string;
+  reservationHash: string;
+  assignmentHash: string;
+};
+const fail = (): never => {
+  throw new OperationWorkerAdmissionError();
+};
+const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const hex = /^[0-9a-f]{64}$/;
+const validDate = (value: string) => Number.isFinite(Date.parse(value));
+export function schedulerOperationBudget(value: string | undefined): number {
+  if (!value || !/^[1-9][0-9]*$/.test(value)) return fail();
+  const result = Number(value);
+  if (!Number.isSafeInteger(result) || result > 120_000) return fail();
+  return result;
+}
+
+/** Fixed server-only RPC sequence. The existing two command transactions and
+ * partial-success behavior remain separate. Observation expiry never clears an
+ * admission or proves that a pending server query stopped. */
+export async function withSchedulerOperationAdmission<T>(input: {
+  config: OperationWorkerConfig | undefined;
+  db: OperationWorkerRpc;
+  budgetMs?: number;
+  binding: Binding;
+  clock?: () => number;
+  nonce?: () => string;
+}, run: (rpc: OperationWorkerRpc["rpc"]) => Promise<T>): Promise<T> {
+  if (!input.config) return run(input.db.rpc.bind(input.db));
+  const b = { ...input.binding }, clock = input.clock ?? Date.now;
+  const budget = input.budgetMs ?? fail();
+  const deadline = clock() + budget;
+  if (
+    !Number.isSafeInteger(budget) || budget < 1 || budget > 120_000 ||
+    !Number.isSafeInteger(deadline) ||
+    !Number.isFinite(new Date(deadline).getTime()) ||
+    !/^[a-z]{20}$/.test(input.config.target) || !uuid.test(b.actorId) ||
+    !/^reservation-scheduler-[0-9]{12}$/.test(b.invocationKey) ||
+    !validDate(b.scheduledAt) || !validDate(b.commandAt) ||
+    !validDate(b.startedAt) ||
+    new Date(b.scheduledAt).toISOString().slice(0, 16).replace(/[-:T]/g, "") !==
+      b.invocationKey.slice(-12) ||
+    new Date(b.scheduledAt).getUTCSeconds() !== 0 ||
+    new Date(b.scheduledAt).getUTCMilliseconds() !== 0 ||
+    !b.requestId || b.requestId.length > 128 || !hex.test(b.reservationHash) ||
+    !hex.test(b.assignmentHash)
+  ) return fail();
+  const nonce = input.nonce?.() ??
+    Array.from(
+      crypto.getRandomValues(new Uint8Array(32)),
+      (n) => n.toString(16).padStart(2, "0"),
+    ).join("");
+  if (!hex.test(nonce)) return fail();
+  const controller = new AbortController();
+  let closed = false, running = false, step = 0;
+  const observe = async <R>(operation: () => PromiseLike<R>): Promise<R> => {
+    const remaining = deadline - clock();
+    if (closed || remaining <= 0 || controller.signal.aborted) return fail();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        Promise.resolve(operation()),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => {
+            controller.abort();
+            reject(new OperationWorkerAdmissionError());
+          }, remaining);
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  };
+  const call = async (name: string, args: Record<string, unknown>) => {
+    try {
+      return await observe(() => {
+        const raw = input.db.rpc(name, args);
+        return raw.abortSignal?.(controller.signal) ?? raw;
+      });
+    } catch {
+      closed = true;
+      return fail();
+    }
+  };
+  try {
+    const acquired = await call("acquire_operation_reservation_scheduler", {
+      p_target: input.config.target,
+      p_nonce: nonce,
+      p_deadline: new Date(deadline).toISOString(),
+      p_actor_profile_id: b.actorId,
+      p_invocation_key: b.invocationKey,
+      p_scheduled_at: b.scheduledAt,
+      p_request_id: b.requestId,
+      p_reservation_hash: b.reservationHash,
+      p_assignment_hash: b.assignmentHash,
+    });
+    const data = acquired.data as { admissionId?: unknown } | null;
+    if (
+      acquired.error || !data ||
+      Object.keys(data).join(",") !== "admissionId" ||
+      (data.admissionId !== null &&
+        (typeof data.admissionId !== "string" || !uuid.test(data.admissionId)))
+    ) return fail();
+    const admissionId = data.admissionId;
+    const rpc: OperationWorkerRpc["rpc"] = (name, supplied) => {
+      const args = { ...supplied };
+      let execution:
+        | Promise<Awaited<ReturnType<OperationWorkerRpc["rpc"]>>>
+        | undefined;
+      return {
+        // biome-ignore lint/suspicious/noThenProperty: Preserve one-shot lazy RPC execution.
+        then(resolve, reject) {
+          execution ??= (async () => {
+            if (closed || running || step > 2) return fail();
+            const expectedName = [
+              "process_due_reservation_transitions",
+              "process_due_assignment_lifecycle",
+              "record_scheduler_heartbeat",
+            ][step];
+            if (name !== expectedName) return fail();
+            const expected = step < 2
+              ? {
+                p_actor_profile_id: b.actorId,
+                p_as_of: b.commandAt,
+                p_idempotency_key: b.invocationKey,
+                p_request_hash: step === 0
+                  ? b.reservationHash
+                  : b.assignmentHash,
+              }
+              : {
+                p_actor_profile_id: b.actorId,
+                p_invocation_key: b.invocationKey,
+                p_scheduled_at: b.scheduledAt,
+                p_status: "succeeded",
+                p_error_code: null,
+                p_started_at: b.startedAt,
+                p_request_id: b.requestId,
+              };
+            const keys = [
+              ...Object.keys(expected),
+              ...(step === 2 ? ["p_transition_count", "p_completed_at"] : []),
+            ].sort();
+            if (
+              Object.keys(args).sort().join(",") !== keys.join(",") ||
+              Object.entries(expected).some(([key, value]) =>
+                args[key] !== value
+              ) ||
+              (step === 2 &&
+                ((args.p_transition_count !== null &&
+                  (!Number.isSafeInteger(args.p_transition_count) ||
+                    (args.p_transition_count as number) < 0)) ||
+                  typeof args.p_completed_at !== "string" ||
+                  !validDate(args.p_completed_at) ||
+                  Date.parse(args.p_completed_at) < Date.parse(b.startedAt)))
+            ) return fail();
+            running = true;
+            try {
+              const response = await call(name, args);
+              if (response.error || (step < 2 && !response.data)) {
+                closed = true;
+                return fail();
+              }
+              step++;
+              return response;
+            } catch (error) {
+              closed = true;
+              throw error;
+            } finally {
+              running = false;
+            }
+          })();
+          return execution.then(resolve, reject);
+        },
+      };
+    };
+    const result = await observe(() => run(rpc));
+    if (closed || running || step !== 3) return fail();
+    if (admissionId !== null) {
+      const completion = await call(
+        "complete_operation_reservation_scheduler",
+        {
+          p_target: input.config.target,
+          p_admission_id: admissionId,
+          p_nonce: nonce,
+        },
+      );
+      const value = completion.data as { completed?: unknown } | null;
+      if (
+        completion.error || !value ||
+        Object.keys(value).join(",") !== "completed" || value.completed !== true
+      ) return fail();
+    }
+    return result;
+  } finally {
+    closed = true;
+    controller.abort();
+  }
+}

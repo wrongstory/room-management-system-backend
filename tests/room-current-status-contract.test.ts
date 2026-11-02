@@ -120,7 +120,7 @@ describe('current room status public contract', () => {
         allocationReady: true
       })
     ]);
-    expect(rpc).toHaveBeenCalledWith('get_room_board_projection', {
+    expect(rpc).toHaveBeenCalledWith('get_room_board_arrival_projection', {
       p_actor_profile_id: adminActor.profileId,
       p_session_id: adminSessionId,
       p_service_date: '2026-09-16',
@@ -193,7 +193,7 @@ describe('current room status public contract', () => {
     expect(openApiDocument.components.schemas.RoomReasonCode.enum).toContain(
       'RESERVATION_CURRENT'
     );
-    expect(Object.keys(openApiDocument.paths)).toHaveLength(154);
+    expect(Object.keys(openApiDocument.paths)).toHaveLength(161);
   });
 
   it('publishes an admin-only append-only occupancy correction contract', () => {

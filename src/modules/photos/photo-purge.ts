@@ -172,7 +172,20 @@ export class PhotoPurgeWorker {
   }
 }
 
-/** Exact dedicated route; no CORS, bearer fallback, request IDs, caller clock or payload persistence. */
+/** Deployment HOLD: no unlock input, credential/worker port, DB write or heartbeat.
+ * Existing algorithms remain available for synthetic regression, not this entry. */
+export function handleHeldPhotoPurge(request: Request): Response {
+  const respond = (status: number, code: string) => Response.json({ error: { code } }, {
+    status, headers: { 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' },
+  });
+  const url = new URL(request.url);
+  if (!['/photo-purge', '/functions/v1/photo-purge'].includes(url.pathname) || url.search) return respond(404, 'ROUTE_NOT_FOUND');
+  if (request.method !== 'POST') return respond(405, 'METHOD_NOT_ALLOWED');
+  return respond(503, 'PHOTO_PURGE_HELD');
+}
+
+/** Legacy algorithm harness; no deployment entrypoint calls this during HOLD.
+ * Exact dedicated route; no CORS, bearer fallback, request IDs, caller clock or payload persistence. */
 export async function handlePhotoPurge(request: Request, secret: string | undefined, worker: () => Promise<PurgeRunResult>): Promise<Response> {
   const respond = (status: number, value: unknown) => Response.json(value, { status, headers: { 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' } });
   try {

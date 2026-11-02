@@ -1,4 +1,4 @@
-import { PhotoError, PHOTO_MAX_BYTES, type PhotoMime, readPhotoBody } from './photo-binary.js';
+import { PhotoError, PHOTO_MAX_BYTES, type PhotoMime, readPhotoBody, checkPhotoThumbnail } from './photo-binary.js';
 import { PhotoPurgeProviderError } from './photo-purge.js';
 import { photoStorageFileName } from './photo-storage-name.js';
 
@@ -18,6 +18,7 @@ export interface PhotoProvider {
   upload(object: DriveObject, bytes: Uint8Array, timing?: PhotoProviderTiming): Promise<{ uploadedAt: string }>;
   inspect(object: DriveObject, timing?: PhotoProviderTiming): Promise<{ uploadedAt: string }>;
   read(object: DriveReadObject, timing?: PhotoProviderTiming): Promise<Uint8Array>;
+  thumbnail?(object: DriveReadObject, timing?: PhotoProviderTiming): Promise<Uint8Array>;
   remove(fileId: string): Promise<'deleted' | 'not_found'>;
 }
 const unavailable = (): never => { throw new PhotoError(503, 'PHOTO_PROVIDER_UNAVAILABLE'); };
@@ -227,6 +228,40 @@ export class GoogleDriveProvider implements PhotoProvider {
     const hash = await crypto.subtle.digest('SHA-256', Uint8Array.from(bytes));
     if (Array.from(new Uint8Array(hash), n => n.toString(16).padStart(2, '0')).join('') !== object.sha256) mismatch();
     return bytes;
+  }
+  /** Same Drive object, no derivative storage or retention clock. Never expose/cache the signed link. */
+  async thumbnail(object: DriveReadObject, timing?: PhotoProviderTiming): Promise<Uint8Array> {
+    const fail = (): never => { throw new PhotoError(503, 'PHOTO_THUMBNAIL_UNAVAILABLE'); };
+    const deadline = Date.now() + 20000;
+    const metadata = async () => {
+      const response = await this.#request(`files/${id(object.fileId)}?fields=id,mimeType,size,sha256Checksum,trashed,shared,version,thumbnailVersion,thumbnailLink,hasThumbnail`, {}, false, deadline, timing);
+      if (!response.ok) { await response.body?.cancel(); return fail(); }
+      const value = await this.#json(response);
+      if (value.id !== object.fileId || value.mimeType !== object.mime || value.size !== String(object.sizeBytes)
+        || value.sha256Checksum !== object.sha256 || value.trashed !== false || value.shared !== false
+        || value.hasThumbnail !== true || typeof value.version !== 'string' || !/^[0-9]{1,30}$/.test(value.version)
+        || typeof value.thumbnailVersion !== 'string' || !/^[0-9]{1,30}$/.test(value.thumbnailVersion)) return fail();
+      return value;
+    };
+    try {
+      const first = await metadata();
+      if (typeof first.thumbnailLink !== 'string' || first.thumbnailLink.length > 4096) return fail();
+      const url = new URL(first.thumbnailLink);
+      // This is an output-only URL from authenticated files.get, never a client URL.
+      // Unknown provider hosts fail closed; credentials are never sent through a redirect.
+      if (url.origin !== 'https://lh3.googleusercontent.com' || url.username || url.password || url.hash) return fail();
+      const token = timing ? await timing.measure('drive_token', () => this.#accessToken(deadline)) : await this.#accessToken(deadline);
+      const response = await this.#fetch(url, { method: 'GET', redirect: 'error', signal: this.#signal(deadline),
+        headers: { authorization: `Bearer ${token}` } });
+      if (!response.ok || response.headers.get('content-type')?.split(';')[0] !== 'image/jpeg') {
+        await response.body?.cancel(); return fail();
+      }
+      const bytes = await readPhotoBody(response.body, response.headers.get('content-length'), 65536);
+      checkPhotoThumbnail(bytes);
+      const latest = await metadata();
+      if (first.version !== latest.version || first.thumbnailVersion !== latest.thumbnailVersion) return fail();
+      return bytes;
+    } catch { return fail(); }
   }
   async remove(fileId: string): Promise<'deleted' | 'not_found'> {
     const response = await this.#request(`files/${id(fileId)}`, { method: 'DELETE' });

@@ -1,0 +1,153 @@
+{
+  "format": "historical-baseline-review-evidence-v1",
+  "projectRef": "aodikrxcczbogjpsjwjt",
+  "observedDate": "2026-10-25",
+  "evidenceScope": "RECORDED_BOUNDED_METADATA_NOT_LIVE_PROOF",
+  "baselineCount": 122,
+  "baselineHead": "post_approval_memo_only",
+  "baselineAccepted": false,
+  "executionAllowed": false,
+  "rows": [
+    {
+      "historyVersion": "20260825163223",
+      "name": "initial_core_schema",
+      "path": "supabase/migrations/20260825141441_initial_core_schema.sql",
+      "sourceBytes": 31295,
+      "sourceSha256": "34fa4c12bf62e984607d36d20bb1f71366b4b9b8a11a7bdfa4cb2f1cef4f4a5b",
+      "historyBytes": 30730,
+      "explanation": "UNRESOLVED_ORIGINAL",
+      "historyStatementSha256": "8cec44139cc495623bf82cebdfc66c1c8bdb69516141c591ede9bac043173121"
+    },
+    {
+      "historyVersion": "20260825163431",
+      "name": "harden_data_api_grants",
+      "path": "supabase/migrations/20260825163315_harden_data_api_grants.sql",
+      "sourceBytes": 1818,
+      "sourceSha256": "0b0959d6d4d63e1859d22d21a3b72c2367f8c42a45d9aab82e7835b44905949c",
+      "historyBytes": 1747,
+      "explanation": "HISTORIC_GIT_BLOB",
+      "historyStatementSha256": "a1abfa34c6c76968501520e03f798fba6be44c5020b609f70cc5ae87bdc9bacc"
+    },
+    {
+      "historyVersion": "20260827134735",
+      "name": "restrict_non_active_data_api_access",
+      "path": "supabase/migrations/20260827133604_restrict_non_active_data_api_access.sql",
+      "sourceBytes": 1826,
+      "sourceSha256": "65e80461fd3ea9ab653fc1aaea374268242c1c00f43a80c0a70b97bddbff47bd",
+      "historyBytes": 1179,
+      "explanation": "EXACT_COMMENT_DIFFERENCE",
+      "historyStatementSha256": "ff25c6eba54b8540db8c3967735c8ec26db47f4c4cda7eaa46f089b3d6434ffa"
+    },
+    {
+      "historyVersion": "20260926010110",
+      "name": "complaint_deadlines_non_blocking",
+      "path": "supabase/migrations/20260926010110_complaint_deadlines_non_blocking.sql",
+      "sourceBytes": 16119,
+      "sourceSha256": "0e1da5c9e33d991a6439327729faa35d217ba1d7fb09ee2713362f55a88ced75",
+      "historyBytes": 99,
+      "explanation": "UNRESOLVED_ORIGINAL",
+      "historyStatementSha256": "4f0941945431e63eb45146f6564c016b43edac7a155bf67b9c266f5a1e8d4a62"
+    },
+    {
+      "historyVersion": "20261009120258",
+      "name": "room_event_effective_lookup_indexes",
+      "path": "supabase/migrations/20261009081846_room_event_effective_lookup_indexes.sql",
+      "sourceBytes": 691,
+      "sourceSha256": "dc9ee95371faa2b0daae9cd3b279c0b0d38c243581ca73bdc5e5260375aae41c",
+      "historyBytes": 1800,
+      "explanation": "DOCUMENTED_WRAPPER",
+      "historyStatementSha256": "481a2b8808590b1fb2cad26d3c472f71dabbfad602261089ddc3d5fe546685ae"
+    },
+    {
+      "historyVersion": "20261021074834",
+      "name": "common_auth_context_read",
+      "path": "supabase/migrations/20261010143530_common_auth_context_read.sql",
+      "sourceBytes": 2509,
+      "sourceSha256": "522b9c0c146243a0c78013f756a4711ac491569361faae24cbd8749969784ffd",
+      "historyBytes": 2587,
+      "explanation": "EXACT_TIMEOUT_WRAPPER",
+      "historyStatementSha256": "341ab8b0b2298ddc9ff74bb992ae7468a71be6eb9537461255fb83865ee9ac92"
+    },
+    {
+      "historyVersion": "20261021074836",
+      "name": "room_board_issue_counts_single_scan",
+      "path": "supabase/migrations/20261010153508_room_board_issue_counts_single_scan.sql",
+      "sourceBytes": 2810,
+      "sourceSha256": "609b0846902173b91ca7f081d8e38329c1c0d3cd94ec2f5e194912819b59992c",
+      "historyBytes": 2888,
+      "explanation": "EXACT_TIMEOUT_WRAPPER",
+      "historyStatementSha256": "f6ac57a412a11595b1cb3b0d9e9326181d9c91f160197ca3ae0a6722484e3edb"
+    },
+    {
+      "historyVersion": "20261021074838",
+      "name": "assignment_tomorrow_backlog",
+      "path": "supabase/migrations/20261010154753_assignment_tomorrow_backlog.sql",
+      "sourceBytes": 11023,
+      "sourceSha256": "3e1b9c6829ee4b7869c09471ccee289d49818633ff72c3b956550f1a82a33e2b",
+      "historyBytes": 11101,
+      "explanation": "EXACT_TIMEOUT_WRAPPER",
+      "historyStatementSha256": "e9600b21afe81b21d2662c98087e5a9cfad1c71e9d7d166a750bef2ab9d4f847"
+    },
+    {
+      "historyVersion": "20261021074848",
+      "name": "payroll_remittance_basis_materialized",
+      "path": "supabase/migrations/20261013063440_payroll_remittance_basis_materialized.sql",
+      "sourceBytes": 1767,
+      "sourceSha256": "3f6f47b6969a12ffe61b9a2ef56a5cef87dbd9b124a6ab5630889e1763248462",
+      "historyBytes": 1845,
+      "explanation": "EXACT_TIMEOUT_WRAPPER",
+      "historyStatementSha256": "4d39370b81bde433b3d9c7aaa2228bd1b041a920f5ed93ed1baa69fb6c2b512a"
+    },
+    {
+      "historyVersion": "20261021074850",
+      "name": "payroll_projection_materialization",
+      "path": "supabase/migrations/20261013064056_payroll_projection_materialization.sql",
+      "sourceBytes": 1791,
+      "sourceSha256": "02dd365a9e9356595b903becd7f07513c27c640d35118bee460f24589fd2094a",
+      "historyBytes": 1869,
+      "explanation": "EXACT_TIMEOUT_WRAPPER",
+      "historyStatementSha256": "d69d2ef7e394772eea297cc509fc7362dfc8ef0f6b87eca284590241a0e100a6"
+    },
+    {
+      "historyVersion": "20261021074851",
+      "name": "assignment_midnight_rollover",
+      "path": "supabase/migrations/20261013065246_assignment_midnight_rollover.sql",
+      "sourceBytes": 12759,
+      "sourceSha256": "dc7fee28c3049c870072ff53f93427af14b11179c5e208321924d72c49613da8",
+      "historyBytes": 12837,
+      "explanation": "EXACT_TIMEOUT_WRAPPER",
+      "historyStatementSha256": "4503512ade93d39210f778de62be3fc6b8f786c3c0a879ced91c8555e684b888"
+    },
+    {
+      "historyVersion": "20261021074853",
+      "name": "room_pin_transfer",
+      "path": "supabase/migrations/20261013072848_room_pin_transfer.sql",
+      "sourceBytes": 10425,
+      "sourceSha256": "77a5de1fcb89d355bb59a2247c6b36414defb4ec911e1e8afcc30aaaa8e64725",
+      "historyBytes": 10489,
+      "explanation": "EXACT_TIMEOUT_WRAPPER_EXISTING_TRANSACTION",
+      "historyStatementSha256": "4ba42545b05b9cd43ab674f59210da0214999fb8af00219305e58b4d5a8667b3"
+    }
+  ],
+  "references": {
+    "historicGrantSource": {
+      "commit": "b3b3ae2887c997205983e0c2cdbd4240c2cb4a34",
+      "gitBlobSha1": "21539ef2594735bf207eec82e23765bd239e02cc",
+      "rawSha256": "0a53b1ceaa5db5cc7fece8926ae27647b2037d1c7348dbb53c47223e56ec802d",
+      "byteLength": 1745
+    },
+    "indexWrapper": "https://github.com/wrongstory/room-management-system-backend/issues/425#issuecomment-6080544897",
+    "timeoutWrappers": {
+      "releaseCommit": "329a8a361bef431e31b6395b636d44cf7acc7abc",
+      "url": "https://github.com/wrongstory/room-management-system-backend/issues/458"
+    },
+    "complaintDeployment": "https://github.com/wrongstory/room-management-system-backend/issues/309#issuecomment-5844084725"
+  },
+  "observedStatementCount": 1,
+  "observedArrayDimensions": [
+    {
+      "length": 1,
+      "lowerBound": 1
+    }
+  ]
+}

@@ -34,6 +34,9 @@ SELECT jsonb_build_object(
   'snapshotCatalogFingerprint',(SELECT digest || digest FROM fk),
   'complete',true,
   'relations',jsonb_build_array('public.profiles','private.receipts'),
+  'relationRowCounts',jsonb_build_array(
+    jsonb_build_object('relation','public.profiles','count',(SELECT count(*) FROM pg_temp.reset_fixture_parent)),
+    jsonb_build_object('relation','private.receipts','count',(SELECT count(*) FROM pg_temp.reset_fixture_child))),
   'foreignKeys',(SELECT jsonb_agg(jsonb_build_object(
     'source','private.receipts','target','public.profiles','name',name)) FROM fk),
   'rows',(SELECT jsonb_agg(item ORDER BY item->>'relation',item->>'key') FROM rows)

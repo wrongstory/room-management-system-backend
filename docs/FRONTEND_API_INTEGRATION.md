@@ -1,4 +1,69 @@
+## #577 관리자 타입별 단가 변경 추가
+
+사용자 선택으로 v1.0.0에 `PUT /v1/room-types/{roomTypeId}/cleaning-fee`를 추가한다. 기존 GET의 가격/version으로 확인하고 `baseCleaningFee`·`expectedVersion`·`confirmFutureTargetsOnly:true`와 Idempotency-Key를 보낸다. 기존 미래청소/진행청소/확정수당은 유지한다. 성공·재전송·409 후 목록을 새로 조회한다. API source는161paths/174operations다. 프런트정본의기준snapshot을 임의변경하지않으며 관리자화면연결/활성화/실사용은미완료다. [전체계약·운영경계](ROOM_TYPE_CLEANING_FEE_577.md)를 따른다.
+
 # 프론트엔드·Codex API 연동 가이드
+
+## 2026-10-31 #534 배정 메모 v1.0.0 인계 — dev 병합·운영 미배포
+
+백엔드 PR #539는 dev `46e47ed`에 병합됐다. draft/change의 선택 `instructionMemo`와
+배정/업무 읽기를 추가했으며 생략은 유지, null/빈 입력은 초기화다. 프런트 구현·연결은
+[#270](https://github.com/makee-ham/room-management-system/issues/270)에서 진행한다.
+CI41079932523의 application/migration(source-only)는 PASS지만 실제 전체 DB 검증과 운영
+적용은 NOT RUN이다. DB/API 배포 확인 후 활성화하고 메모로 사진·검수·수당 조건을 바꾸지 않는다.
+[전용 계약 및 다른 채팅용 진행 순서](./ASSIGNMENT_INSTRUCTION_MEMO_534.md)에 main hotfix
+포함 확인, 격리 CI 사전 승인, release/main 병합·proof 확인, 운영 migration 별도 승인,
+DB → API/Swagger → 프런트 연결·실사용 확인을 정리했다. 이 인계 자체는 DB 실행 승인이 아니다.
+
+같은 날 후보 재확인: 로컬 `release/v1.0.0@6d13f13`에는 #534 기능·#540 인계·#544 경합 검사
+준비와 main hotfix가 모두 포함됐다. 확인 당시 원격 릴리스 브랜치·PR은 없고 실제 전체 DB·운영
+적용도 NOT RUN이다. 후속 변경 대조·최종 입력 동결 → 실행 전 승인 → 전체 DB 검증 → main 병합
+및 동일 입력 proof 확인 → 운영 별도 승인 → DB/API/Swagger → 프런트 순서로 이어간다.
+직전 후보의 인계 누락·미커밋 작업 설명은 과거 기록이며 상세 문서의 최신 checkpoint를 따른다.
+
+## 2026-10-25 #396 읽기 전용 초기화 영향 조회 — 운영 미배포
+
+`GET /v1/developer/reset/preview`는 조건/body 없이 개발자 access token만 받는다. 기존 인증과
+비밀번호 변경 조건을 통과한 뒤 DB가 수집 전후 최신 개발자 role/status/session을 확인한다.
+응답 `preview`에는 snapshot 시각/진단 ID와 preserve/mixed/reseed/clear/review 후보 그룹의
+관계 수·관찰 행 수·exact 여부, 누락/미분류/미지원/상한 초과 건수, 고정 blocker 코드만 있다.
+개별 업무 값·계정 ID·PIN·사진 식별자·테이블명은 반환하지 않는다. 응답은 no-store다.
+
+`diagnosticComplete=true`여도 `executionEnabled=false`다. 후보 그룹의 건수는 확정 삭제
+건수가 아니며, `exact=false`의 observedRows는 누락 또는 상한 때문에 전체 합계가 아니다.
+snapshotId는 실행 token·CAS·백업/복구 증명이 아니다. 실제 초기화 경로는 없으며 신규 SQL을
+실행하거나 프런트 화면을 수정하지 않았다. 개발자 콘솔 UI 연결은 별도 범위다.
+source OpenAPI 156 paths / 168 operations. [전체 계약](./DEVELOPER_RESET.md).
+
+후속 행 후보 수집에서는 `rowImpact`를 추가한다. 보존·기준 객실·업무 초기화·템플릿 원본·사진 HOLD·
+미분류 행의 합계, Auth ID-only census의 계정 분류, 현재 실제 FK의 충돌/누락/NULL 건수만 제공한다.
+`available=false`는 이전 inventory-only collector 또는 미수집 상태이며 통과가 아니다.
+`rowImpact.diagnosticComplete`와 `referencesValid`는 건수 기반 현재 FK 진단이다. 동일 건수 내용
+교체·삭제 순서·유효 승인·복구 증명을 뜻하지 않으며 실행은 항상 false다. 원본 행/ID/비밀번호/PIN은
+응답에 없다. 운영 배포·DB 실행·프런트 변경은 여전히 NOT RUN이다.
+
+## 2026-10-25 #415 합성 기준선 통합
+
+#453/#455 계산 개선은 v0.9.5 이후 운영에 포함됐다. PR456의
+[합성 CPU 기준선](./ASSIGNMENT_HYDRATION_COST_BASELINE.md)을 최신 dev와 통합한다.
+CPU 비교는 실제 API·DB·네트워크·사용자 대기 시간의 개선율이 아니다.
+신규 bounded hydration RPC의 source 후보를 준비했다. 실제 DB 실행·운영 적용·속도 계측은 NOT RUN이며 #415는 OPEN이다.
+기존 endpoint/Swagger/프런트 호출을 유지한다. Full DB는 NOT RUN이며
+최종 릴리스 1회 실행 전에 별도 승인을 받는다.
+
+## 2026-10-25 #487 보안 패치 후보
+
+Zod·fast-uri 및 Edge 생성물 보안을 보완한다. 정상 API 계약과 프런트 연결은 동일하며 운영 미배포다.
+검증·도달 범위·DB 승인 경계는 [보안 기록](./DEPENDENCY_SECURITY_487.md)을 따른다.
+
+
+## 2026-10-25 dev 통합 — #485
+
+운영의 마지막 확인 기록은 [v0.9.9 배포](https://github.com/wrongstory/room-management-system-backend/pull/477#issuecomment-6359461664)의 API53 / migration122 / main3e805249다. 아래 과거의 현재·후보·미배포 표현은 각 checkpoint 당시 상태다.
+이번 변경은 main의 검증·문서 보완을 dev로 복원하며 API 계약·운영 runtime·migration 파일을 변경하지 않는다. dev의 #479/#480 보안 의존성과 #481 PIN 오류 진단은 보존하며 아직 운영 반영과 구분한다.
+Full DB/SQL/upgrade/경합 및 운영 migration은 이번 작업에서 NOT RUN이다. 최종 릴리스의 실제 DB 실행 전에 별도 사용자 승인을 받는다. 프런트 코드 변경이나 새 API 연결은 필요하지 않다.
+세부 검증·인계는 [통합 기록](./RELEASE_VALIDATION_BACKPORT_485.md)을 따른다.
+
 
 ## #411 사진 최종 등록 왕복 감소 — 2026-10-22 미배포 후보
 
@@ -738,3 +803,29 @@ token, 비밀번호, 전체 휴대전화, temporaryPassword를 로그·fixture·
 - 이 계약은 production OpenAPI와 `api` bundle에 반영됐다. 실제 역할별 hosted read/mutation smoke가 없는 경로는 배포 여부와 별도로 표시한다.
 
 현재 production Swagger 범위는 인증·계정·developer 운영 projection뿐 아니라 객실·예약·가능일·배정·수행·사진·제출·검수·컴플레인·주급·알림·PIN 관련 계약을 포함한 OpenAPI 0.5.1, 128 paths / 138 operations다. operation이 존재한다는 사실과 hosted provider/positive mutation 검증은 구분하며, 프런트는 역할·CAS·idempotency·redaction 계약을 충족한 경로만 활성화한다. Python 운영도구의 generated client는 계속 운영 관리 surface만 유지하며 전체 업무 API를 자동 포함하지 않는다.
+
+## #411 두 사진 예약 후보
+
+새 metadata-only `POST .../photo-slots/{slotId}/upload-batches`로 정확히 두 item을 예약한 뒤
+기존 binary upload 두 요청에 각 원래 key와 collection/item CAS를 그대로 사용한다.
+프런트 코드·실제 배포·현장 성능은 아직 변경/검증하지 않았다.
+[요청·실패·재시도 계약](./PHOTO_UPLOAD_BATCH_411.md)을 확인한 뒤 별도 프런트 연결이 필요하다.
+
+## 개발자 초기화 미리보기의 템플릿 증거
+
+`GET /v1/developer/reset/preview`의 `templateEvidence`는 모든 draft/published/retired 내용과
+slot projection, 명시된 역사 참조의 건수 진단이다. 실제 내용·작성자·ID·내용 digest는 표시하지
+않는다. `historicallyUnreadable`과 `registrationShapeInvalid`는 서로 다른 원인이다.
+`selectionAlternatives`의 두 후보는 source 수와 제외 상태의 수만 보여주며, 게시나 상태 변환을
+선택한 결과가 아니다. `diagnosticComplete=true`도 백업·보호·게시·초기화 승인이나 운영 성공이
+아니며 `executionEnabled=false`를 유지한다. 이전 DB가 아직 수집하지 않으면 available=false와
+`TEMPLATE_INVENTORY_NOT_COLLECTED`를 반환한다. 프런트 구현은 별도 범위다.
+
+## 최초 비밀번호 변경 장애 후속 (#535, 2026-10-30)
+
+준비 RPC 확인값 누락 수정 후보와 기존 실패 계정 복구는
+[상세 인계](PASSWORD_CHANGE_RECOVERY_535.md)를 따른다.
+[프런트 #271](https://github.com/makee-ham/room-management-system/issues/271)에
+오류 안내·요청 키 수명·복구 후 새 요청 UAT를 인계했다.
+공개 API 계약 변경은 없으며 운영 migration/계정 복구는 아직 실행하지 않았다.
+일반 응답 유실 재시도는 동일 키를 유지하고, 이번 실패 요청의 종료가 확인된 뒤에만 새 키를 쓴다.

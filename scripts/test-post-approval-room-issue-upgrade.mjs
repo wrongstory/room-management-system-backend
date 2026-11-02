@@ -125,9 +125,9 @@ const serviceAcl = { ...ownerAcl, grantee: 'service_role' };
 
 export function validatePostApprovalUpgradeSource(manifest, entries) {
   assert.equal(manifest.schemaVersion, 1); assert.equal(manifest.release, 'dev');
-  assert.equal(manifest.hashAlgorithm, 'sha256-lf-utf8'); assert([111,112,113,114,115,116,117,118,119,120,121,122,123,124].includes(manifest.totalCount));
+  assert.equal(manifest.hashAlgorithm, 'sha256-lf-utf8'); assert([111,112,113,114,115,116,117,118,119,120,121,122,123,124,125,126,127,128,129,130,131,132,133,134,135,136,137,138,139,140,141,142,143,144,145,146,147,148].includes(manifest.totalCount));
   assert.equal(manifest.migrations.length, manifest.totalCount); assert.equal(entries.length, manifest.totalCount);
-  assert.equal(manifest.head, { 111: 'post_approval_room_issue_ledger', 112: 'room_event_effective_lookup_indexes', 113: 'common_auth_context_read', 114: 'room_board_issue_counts_single_scan', 115: 'assignment_tomorrow_backlog', 116: 'payroll_remittance_basis_materialized', 117: 'payroll_projection_materialization', 118: 'assignment_midnight_rollover', 119: 'room_pin_transfer', 120: 'photo_upload_pre_provider_retry', 121: 'photo_finalize_snapshot', 122: 'post_approval_memo_only', 123: 'password_change_prepare_effect_marker', 124: 'password_effect_completion' }[manifest.totalCount]);
+  assert.equal(manifest.head, { 111: 'post_approval_room_issue_ledger', 112: 'room_event_effective_lookup_indexes', 113: 'common_auth_context_read', 114: 'room_board_issue_counts_single_scan', 115: 'assignment_tomorrow_backlog', 116: 'payroll_remittance_basis_materialized', 117: 'payroll_projection_materialization', 118: 'assignment_midnight_rollover', 119: 'room_pin_transfer', 120: 'photo_upload_pre_provider_retry', 121: 'photo_finalize_snapshot', 122: 'post_approval_memo_only', 123: 'cleaning_overdue_delivery_clock', 124: 'assignment_card_hydration', 125: 'developer_reset_preview', 126: 'photo_collection_upload_batch', 127: 'developer_reset_row_impact', 128: 'developer_operational_safety_gates', 129: 'developer_reset_template_inventory', 130: 'operation_admission_authority', 131: 'operation_atomic_audit_admission', 132: 'operation_worker_admission', 133: 'operation_scheduler_admission', 134: 'operation_pin_worker_admission', 135: 'developer_reset_receipt_store', 136: 'developer_template_handover_effect', 137: 'operation_lifecycle_admission', 138: 'room_ready_correction', 139: 'password_change_prepare_effect_marker', 140: 'assignment_instruction_memo', 141: 'operation_offline_resolution_admission', 142: 'password_effect_completion', 143: 'room_arrival_readiness_projection', 144: 'room_fixed_memo', 145: 'current_week_availability_approval', 146: 'db_lint_source_corrections', 147: 'availability_guard_unused_parameter', 148: 'room_type_cleaning_fee' }[manifest.totalCount]);
   assert.equal(manifest.pending.head, manifest.head); assert.equal(manifest.pending.count, manifest.totalCount - 78);
   assert.deepEqual(manifest.baseline, { count: 78, head: 'reservation_bookability_optional_guest_count' });
   assert.equal(sha(JSON.stringify(manifest.migrations.slice(0, 110))), POST_APPROVAL_UPGRADE_PREFIX_SHA256);
@@ -203,12 +203,127 @@ export function validatePostApprovalUpgradeSource(manifest, entries) {
       'Only the source-reviewed memo-only122 tail is permitted');
   }
   if (validated.length >= 123) {
-    assert.equal(validated[122].file, '20261030141647_password_change_prepare_effect_marker.sql');
-    assert.equal(validated[122].sha256, 'fba87ded4fd085d2d4da8659e32897f79dcebbfd224adaf19a42fb9317f4bf95', 'Only the source-reviewed password-effect123 tail is permitted');
+    assert.equal(validated[122].file, '20261024041819_cleaning_overdue_delivery_clock.sql');
+    assert.equal(validated[122].sha256, '7a517ff02679dbc8c7e895ea911e3d08fe337f78bb4a5f56b139444392bdd9cd',
+      'Only the source-reviewed overdue-clock123 tail is permitted');
   }
-  if (validated.length === 124) {
-    assert.equal(validated[123].file, '20261030183754_password_effect_completion.sql');
-    assert.equal(validated[123].sha256, 'd376583cce221bfefa07c8839acf2b4b572dacee4428790373d106eefe1974c8', 'Only the source-reviewed password-completion124 tail is permitted');
+  if (validated.length >= 124) {
+    assert.equal(validated[123].file, '20261025020616_assignment_card_hydration.sql');
+    assert.equal(validated[123].sha256, 'c82c9b3b950c1ec92460b4f597451791222b9bfeee9f7a5868ef6c3ed7e87607',
+      'Only the source-reviewed card-hydration124 tail is permitted');
+  }
+  if (validated.length >= 125) {
+    assert.equal(validated[124].file, '20261025021139_developer_reset_preview.sql');
+    assert.equal(validated[124].sha256, 'b9c1f020cbfdcd741980fff1d5a92031a9eab45ee9183fe430f72b1988ed9677',
+      'Only the source-reviewed read-only reset-preview tail is permitted');
+  }
+  if (validated.length >= 126) {
+    assert.equal(validated[125].file, '20261025022445_photo_collection_upload_batch.sql');
+    assert.equal(validated[125].sha256, '3a89a10f24a6dbcfd0eecf77935e7c580313f8f9039d4fc3b6148718ccee1c71',
+      'Only the source-reviewed bounded photo-batch126 tail is permitted');
+  }
+  if (validated.length >= 127) {
+    assert.equal(validated[126].file, '20261025024327_developer_reset_row_impact.sql');
+    assert.equal(validated[126].sha256, '3ee8731e5fe1a5872e479a0015dd7427a0c2426a2ee9f45b5157b7253b6771fc',
+      'Only the source-reviewed read-only row-impact127 tail is permitted');
+  }
+  if (validated.length >= 128) {
+    assert.equal(validated[127].file, '20261025025742_developer_operational_safety_gates.sql');
+    assert.equal(validated[127].sha256, '4e598b0a464bc8f59716c11a1e4ea87f84d527b00f5a4e0f788cbd0052583f90',
+      'Only the source-reviewed operation-gates128 tail is permitted');
+  }
+  if (validated.length >= 129) {
+    assert.equal(validated[128].file, '20261025031218_developer_reset_template_inventory.sql');
+    assert.equal(validated[128].sha256, 'a36e78db633c8bdb92cf2382940d5937da17c554dca2228b77227e05880213ed',
+      'Only the source-reviewed template-inventory129 tail is permitted');
+  }
+  if (validated.length >= 130) {
+    assert.equal(validated[129].file, '20261025032719_operation_admission_authority.sql');
+    assert.equal(validated[129].sha256, '03d67e06609adad00d72805332c53dc550000145368f428e21f2168bc6ca2b43',
+      'Only the source-reviewed HTTP-admission130 tail is permitted');
+  }
+  if (validated.length >= 131) {
+    assert.equal(validated[130].file, '20261025035331_operation_atomic_audit_admission.sql');
+    assert.equal(validated[130].sha256, '93decb4aa53ce505a9cccfc95dcb1f7bb8f25644cca75cd9d80e881ea38dd628',
+      'Only the source-reviewed atomic-audit131 tail is permitted');
+  }
+  if (validated.length >= 132) {
+    assert.equal(validated[131].file, '20261025040854_operation_worker_admission.sql');
+    assert.equal(validated[131].sha256, '8b047f6cb444411556943eb670f0f8f87282a7ae2415d4cf653c5bca31efe099',
+      'Only the source-reviewed notification-worker132 tail is permitted');
+  }
+  if (validated.length >= 133) {
+    assert.equal(validated[132].file, '20261025043054_operation_scheduler_admission.sql');
+    assert.equal(validated[132].sha256, '769a44fff26efbf6b43643c045e8120a891e9076ec3705225489a4412a367bdd',
+      'Only the source-reviewed scheduler-worker133 tail is permitted');
+  }
+  if (validated.length >= 134) {
+    assert.equal(validated[133].file, '20261025043354_operation_pin_worker_admission.sql');
+    assert.equal(validated[133].sha256, 'e9787e1da5e8203267547dba580fe4b09933c3751c89ad0bb94bb1d2268acbd1',
+      'Only the source-reviewed pin-worker134 tail is permitted');
+  }
+  if (validated.length >= 135) {
+    assert.equal(validated[134].file, '20261025051231_developer_reset_receipt_store.sql');
+    assert.equal(validated[134].sha256, '3e9513bbfb8f071e173bd1b3838d389fab123dc827ee3ed55641bbcd74c77299',
+      'Only the source-reviewed reset-receipt135 tail is permitted');
+  }
+  if (validated.length >= 136) {
+    assert.equal(validated[135].file, '20261025072617_developer_template_handover_effect.sql');
+    assert.equal(validated[135].sha256, '2d087c3d4db572fefd32b8068f7a0c5956ea8a3d4ae494f1f4d9a9f1c14b8cca',
+      'Only the source-reviewed template-handover136 tail is permitted');
+  }
+  if (validated.length >= 137) {
+    assert.equal(validated[136].file, '20261025081701_operation_lifecycle_admission.sql');
+    assert.equal(validated[136].sha256, '937e54348e55994619894eb9350a55306d6dc8ce56012e6bb922ca9d4854c582',
+      'Only the source-reviewed lifecycle-admission137 tail is permitted');
+  }
+  if (validated.length >= 138) {
+    assert.equal(validated[137].file, '20261030123748_room_ready_correction.sql');
+    assert.equal(validated[137].sha256, 'a24df12dc50e1a48f0e1fe1dc3b2b71a085481d3b3a422e082611b014423fff8',
+      'Only the source-reviewed room-ready138 tail is permitted');
+  }
+  if (validated.length >= 139) {
+    assert.equal(validated[138].file, '20261030141647_password_change_prepare_effect_marker.sql');
+    assert.equal(validated[138].sha256, 'fba87ded4fd085d2d4da8659e32897f79dcebbfd224adaf19a42fb9317f4bf95',
+      'Only the source-reviewed password-effect139 tail is permitted');
+  }
+  if (validated.length >= 140) {
+    assert.equal(validated[139].file, '20261030143048_assignment_instruction_memo.sql');
+    assert.equal(validated[139].sha256, '9bdadc1789d8971b920368af45f3483091e2bddc21af91f3fcb4d6a4d8fcf1e9',
+      'Only the source-reviewed assignment-instruction140 tail is permitted');
+  }
+  if (validated.length >= 141) {
+    assert.equal(validated[140].file, '20261030174256_operation_offline_resolution_admission.sql');
+    assert.equal(validated[140].sha256, 'd5b55ad940fa9d22891f9df85edeaad161dafc9107bb883a28925600240d65dd',
+      'Only the source-reviewed offline-resolution141 tail is permitted');
+  }
+  if (validated.length >= 142) {
+    assert.equal(validated[141].file, '20261030183754_password_effect_completion.sql');
+    assert.equal(validated[141].sha256, 'd376583cce221bfefa07c8839acf2b4b572dacee4428790373d106eefe1974c8', 'Only the source-reviewed password-completion142 tail is permitted');
+  }
+  if (validated.length >= 143) {
+    assert.equal(validated[142].file, '20261101104125_room_arrival_readiness_projection.sql');
+    assert.equal(validated[142].sha256, 'f63a47dbe170828c9f6126e004a7c398a9589373461e1999c94c7355eb91838a', 'Only the reviewed read-only arrival143 tail is permitted');
+  }
+  if (validated.length >= 144) {
+    assert.equal(validated[143].file, '20261101131722_room_fixed_memo.sql');
+    assert.equal(validated[143].sha256, '2b1f16198d6b2a16ccf83901e65a7e9b2d99fc439d446d25d49c97be41725eec', 'Only reviewed room memo144 tail permitted');
+  }
+  if (validated.length >= 145) {
+    assert.equal(validated[144].file, '20261101230757_current_week_availability_approval.sql');
+    assert.equal(validated[144].sha256, '7b4b70d2a506dd028aa02469369429c5971eb160769e168438cf6f8fa61aa70c', 'Only reviewed current-week approval145 tail permitted');
+  }
+  if (validated.length >= 146) {
+    assert.equal(validated[145].file, '20261101235131_db_lint_source_corrections.sql');
+    assert.equal(validated[145].sha256, 'b7f6834b471877e8a209116e669c566320bd2d67894952947abb351149377282', 'Only reviewed lint-correction146 tail permitted');
+  }
+  if (validated.length >= 147) {
+    assert.equal(validated[146].file, '20261101235415_availability_guard_unused_parameter.sql');
+    assert.equal(validated[146].sha256, 'a3d9e37ce45ebe1f1f6b5ad68e63feb79b401ffb4eb26c389520e9c18aec7d3f', 'Only reviewed availability-guard147 tail permitted');
+  }
+  if (validated.length >= 148) {
+    assert.equal(validated[147].file, '20261102111756_room_type_cleaning_fee.sql');
+    assert.equal(validated[147].sha256, '5f0f7f852c0833950a66800bbda245de16a4728aac35ca818e4747f4198ed535', 'Only reviewed admin cleaning-fee148 tail permitted');
   }
   return { entries: validated, ledger: validated[110].canonical };
 }
@@ -227,7 +342,7 @@ export function validatePostApprovalUpgradeLocal({ args, env, config, endpoint, 
   return { ...local, endpoint: localEndpoint };
 }
 export function assertPostApprovalUpgradeHistory(actual, source, installed = source.entries.length) {
-  assert([110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124].includes(installed) && installed <= source.entries.length);
+  assert([110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142, 143, 144, 145, 146, 147, 148].includes(installed) && installed <= source.entries.length);
   assert.deepEqual(actual, source.entries.slice(0, installed).map(({ version, name }) => ({ version, name })),
     'Exact version/name history is required, not count/head only');
 }

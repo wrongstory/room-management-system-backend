@@ -1,5 +1,7 @@
 # CASTLE THE ART 객실관리 백엔드
 
+> 2026-10-25 v1.0.0 준비: 현재 개발 통합·검증·운영 상태는 [v1 준비 기록](docs/RELEASE_V1.0.0_READINESS.md)과 [API 상태표](docs/API_STATUS_MATRIX.md)를 따른다. 아래 날짜별 checkpoint와 과거의 “최신” 표기는 당시 기록이다. 이번 신규 SQL의 전체 DB 검증, 운영 적용·배포, 초기화와 현장 확인은 아직 완료하지 않았다. 소스 검증 성공을 운영 완료로 해석하지 않는다.
+
 > 2026-10-04 최신 작업: #367/PR369·#368/PR370은 `dev@e9fcc564`까지 통합했다. v0.8.0 후보 `release/v0.8.0@5408c54`는 고정하며 운영 gate를 유지한다. 사용자 승인 별도 개발 [#329 기존 세션의 제한 업무 재진입](docs/LIMITED_SESSION_REENTRY.md)은 새 SHA에서 Node1275·Edge477·Python95·LF fresh101·upgrade27/SQL79·4774·KST145·경합7·추가 권한4·합성복구 PASS, 독립 소스 QA 새 확정 P0/P1/P2=0이다. strict 신규0/기존17 FAIL과 최초 전체SQL FAIL·동일 소스 재실행 PASS 이력을 보존한다. 승인된 진단용 commit·push·Draft PR 공유 단계이며 CI·dev 통합·운영 제공·프런트 UAT는 미완료다. 프런트 source·새 로그인 권한·Auth 설정·키/PIN/송금은 변경하지 않는다. 아래 선행 작업/후보 상태는 과거 checkpoint다.
 
 > 릴리스 CI `37127623239`는 application PASS / migration FAIL이다. 전체26 upgrade·SQL78/4641·KST145는 PASS지만 알림 delivery fixture drain이 실패했고 뒤5개 경합 script는 NOT RUN이다. [#371](https://github.com/wrongstory/room-management-system-backend/issues/371)에서 테스트 종료 판정·claim 조건 정합화를 별도로 처리한다. 실패 CI와 실제 운영 백업·보안 DB 연결 gate가 해소되기 전 병합·배포하지 않는다.

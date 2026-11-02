@@ -9,6 +9,8 @@ import {
 } from './room-operation-cursor.js';
 import type { RoomOperationPageInput } from './room.service.js';
 import type { RoomService } from './room.service.js';
+import { roomReadyContractAppError } from './room.service.js';
+import { parseRoomReadyPreviewRequest, parseRoomReadyCorrectionRequest } from './room-ready-correction-contract.js';
 
 const roomIdSchema = z.object({ roomId: z.uuid() });
 const blockIdSchema = z.object({ roomId: z.uuid(), blockId: z.uuid() });
@@ -186,6 +188,17 @@ export function createRoomRoutes(roomService: RoomService): FastifyPluginAsync {
       if (!['admin', 'maid'].includes(request.actor.role)) throw new AppError(403, 'FORBIDDEN', '촛불 조정 권한이 필요합니다.');
     }];
 
+    app.get('/:roomId/fixed-memo', {preHandler: authenticated}, async (request,reply)=> {
+      if(Object.keys(request.query as object).length) throw new AppError(400,'ROOM_FIXED_MEMO_INVALID','조회 조건을 확인해 주세요.');
+      const {roomId}=roomIdSchema.parse(request.params);
+      return reply.header('Cache-Control','no-store').send({fixedMemo:await roomService.getFixedMemo(request.actor,roomId)});
+    });
+    app.put('/:roomId/fixed-memo', {preHandler: admin}, async (request,reply)=> {
+      if(Object.keys(request.query as object).length) throw new AppError(400,'ROOM_FIXED_MEMO_INVALID','조회 조건을 확인해 주세요.');
+      const {roomId}=roomIdSchema.parse(request.params);
+      return reply.header('Cache-Control','no-store').send({fixedMemo:await roomService.setFixedMemo(request.actor,{roomId,body:request.body,idempotencyKey:idempotencyKey(request)})});
+    });
+
     app.get('/', { preHandler: admin }, async (request, reply) => {
       const query = roomListQuerySchema.parse(request.query);
       return reply.header('Cache-Control', 'no-store').send({
@@ -273,6 +286,28 @@ export function createRoomRoutes(roomService: RoomService): FastifyPluginAsync {
         idempotencyKey: idempotencyKey(request)
       });
       return reply.code(201).send({ correction });
+    });
+
+    app.post('/:roomId/ready-correction/preview', { preHandler: admin }, async (request, reply) => {
+      reply.header('Cache-Control', 'no-store');
+      z.object({}).strict().parse(request.query);
+      const { roomId } = roomIdSchema.parse(request.params);
+      try {
+        const body = parseRoomReadyPreviewRequest(request.body);
+        return reply.send({ preview: await roomService.previewReadyCorrection(request.actor, { roomId, ...body }) });
+      } catch (error) { throw roomReadyContractAppError(error); }
+    });
+
+    app.post('/:roomId/ready-correction', { preHandler: admin }, async (request, reply) => {
+      reply.header('Cache-Control', 'no-store');
+      z.object({}).strict().parse(request.query);
+      const { roomId } = roomIdSchema.parse(request.params);
+      try {
+        const body = parseRoomReadyCorrectionRequest(request.body);
+        return reply.send({ correction: await roomService.applyReadyCorrection(request.actor, {
+          roomId, ...body, idempotencyKey: idempotencyKey(request)
+        }) });
+      } catch (error) { throw roomReadyContractAppError(error); }
     });
 
     app.post('/:roomId/display-status-overrides', { preHandler: admin }, async (request, reply) => {
@@ -446,6 +481,16 @@ export function createRoomRoutes(roomService: RoomService): FastifyPluginAsync {
 
 export function createRoomTypeRoutes(roomService: RoomService): FastifyPluginAsync {
   return async (app) => {
+    app.put('/:roomTypeId/cleaning-fee', {
+      preHandler: [app.authenticate, app.requirePasswordChanged, app.requireAdmin]
+    }, async (request, reply) => {
+      reply.header('Cache-Control','no-store');
+      if (Object.keys(request.query as object).length) throw new AppError(400,'ROOM_TYPE_CLEANING_FEE_INVALID','조회 조건을 사용할 수 없습니다.');
+      const {roomTypeId} = z.object({roomTypeId:z.uuid()}).parse(request.params);
+      return reply.header('Cache-Control','no-store').send({roomType:await roomService.setTypeCleaningFee(request.actor,
+        {roomTypeId,body:request.body,idempotencyKey:idempotencyKey(request)})});
+    });
+
     app.get('/', {
       preHandler: [app.authenticate, app.requirePasswordChanged, app.requireAdmin]
     }, async (request, reply) => {

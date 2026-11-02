@@ -1,0 +1,70 @@
+{
+  "binding": {
+    "actorProfileId": "11111111-1111-4111-8111-111111111111",
+    "authUserId": "22222222-2222-4222-8222-222222222222",
+    "sessionDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "passwordVersionDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "projectRef": "aaaaaaaaaaaaaaaaaaaa",
+    "sourceCommit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "catalogFingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "contentFingerprint": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "planFingerprint": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "expectedPostconditionFingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "policyHash": "1111111111111111111111111111111111111111111111111111111111111111",
+    "approvalScopeHash": "2222222222222222222222222222222222222222222222222222222222222222",
+    "backupProofHash": "3333333333333333333333333333333333333333333333333333333333333333"
+  },
+  "header": {
+    "format": "reset-receipt-v1",
+    "commandHash": "8e922c58ff1a78b68d407e2a9d6ca5e4278828f26e283b57a923eafe20d27bb1",
+    "bindingHash": "4d574c965997cf895bd2a490c68b62e740491683ebfbad8bc7beb38781ad300d",
+    "idempotencyKeyDigest": "4444444444444444444444444444444444444444444444444444444444444444",
+    "expectedPostconditionFingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "createdAt": 1000,
+    "expiresAt": 2000,
+    "steps": [
+      {
+        "id": "5555555555555555555555555555555555555555555555555555555555555555",
+        "kind": "DATABASE"
+      }
+    ]
+  },
+  "events": [
+    {
+      "sequence": 1,
+      "at": 1100,
+      "previousHash": "5e13e280f43c42e2304801850f13a5fe3c7d13c106bbe3b1c4a1ec5a597886d1",
+      "event": {
+        "type": "STARTED",
+        "stepId": "5555555555555555555555555555555555555555555555555555555555555555",
+        "bindingHash": "4d574c965997cf895bd2a490c68b62e740491683ebfbad8bc7beb38781ad300d"
+      },
+      "hash": "0dcb7f99a38f77b1537782a6821c4d81770bcce43c451b277b38a56844489f90"
+    },
+    {
+      "sequence": 2,
+      "at": 1200,
+      "previousHash": "0dcb7f99a38f77b1537782a6821c4d81770bcce43c451b277b38a56844489f90",
+      "event": {
+        "type": "OBSERVED",
+        "stepId": "5555555555555555555555555555555555555555555555555555555555555555",
+        "outcome": "APPLIED",
+        "evidenceHash": "6666666666666666666666666666666666666666666666666666666666666666"
+      },
+      "hash": "9d76983a8f1df8544bc09d8ae0a228f6e851eee4878ded2f40066a0c3de51cd0"
+    },
+    {
+      "sequence": 3,
+      "at": 1300,
+      "previousHash": "9d76983a8f1df8544bc09d8ae0a228f6e851eee4878ded2f40066a0c3de51cd0",
+      "event": {
+        "type": "FINAL_VERIFIED",
+        "postconditionFingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "evidenceHash": "7777777777777777777777777777777777777777777777777777777777777777",
+        "remoteQuiescent": true
+      },
+      "hash": "356efb80f352d1ed739e1475388ee8dd728bc7ce38c55444211be1c0c22cd7b8"
+    }
+  ],
+  "headerHash": "5e13e280f43c42e2304801850f13a5fe3c7d13c106bbe3b1c4a1ec5a597886d1"
+}

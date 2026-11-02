@@ -14,10 +14,18 @@ const literal = value => `'${value.replaceAll("'", "''")}'`;
 function checkExpectedCount(expectedCount) {
   // 112 indexes; 113 auth read; 114 room aggregate; 115/118 assignment planning;
   // 116/117 payroll projection; 119 PIN transfer; 120/121 photo commands;
-  // 122 memo-only reports; 123 password prepare return values. These sources add no notification catalog rows.
+  // 122 memo-only reports; 123 overdue delivery clock; 124 card hydration;
+  // 125 reset inventory read; 126 bounded photo batch admission;
+  // 127 read-only reset row impact; 128 private operation gates; 129 template inventory; 130 HTTP admission; 131 atomic audit; 132 notification admission; 133 scheduler admission; 134 incremental PIN admission; 135 durable reset receipt store; 136 inactive template handover effect; 137 finite lifecycle admission; 138 room-ready correction reuses existing notification families. 139 repairs password receipt return values. 140 adds assignment instructions without new families. No catalog rows are added.
   // Runtime event dispatch is not permission to mutate historical catalog metadata.
-  assert(Number.isSafeInteger(expectedCount) && expectedCount >= 95 && expectedCount <= 124,
-    'Only the audited95..124 upgrade range is supported; 112..124 add no catalog rows');
+  // 141 only observes an existing offline resolution terminal; no family is added.
+  // 142 settles a password effect using the existing account.password_changed event.
+  // 143 is an arrival read projection; it adds no event or catalog writes.
+  // 144 adds room memo revisions; 145 changes current-week approval timing.
+  // 146 replaces six existing function bodies without adding catalog rows.
+  // 147 removes one unused private helper argument without notification catalog changes.
+  assert(Number.isSafeInteger(expectedCount) && expectedCount >= 95 && expectedCount <= 148,
+    'Only the audited95..148 upgrade range is supported; 112..148 add no catalog rows');
 }
 function catalogRows(value) {
   assert(Array.isArray(value), 'An existing baseline notification catalog is required');

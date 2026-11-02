@@ -22,6 +22,7 @@ import {
   type PhotoRetentionPolicy,
   type PhotoUploadOperationProjection,
   preparePhotoCollectionDelete,
+  preparePhotoCollectionBatch,
   preparePhotoCollectionUploadBegin,
   preparePhotoCollectionUploadKey,
   preparePhotoUploadBegin,
@@ -47,7 +48,7 @@ export type PhotoUploadResponse = PhotoUploadOperationProjection & {
   photoSlots?: unknown;
 };
 const dbTimingStages = {
-  admit_photo_upload: 'db_admit', admit_photo_collection_upload: 'db_admit',
+  admit_photo_upload: 'db_admit', admit_photo_collection_upload: 'db_admit', admit_photo_collection_upload_batch: 'db_admit',
   begin_admitted_photo_upload: 'db_begin', begin_admitted_photo_collection_upload: 'db_begin',
   claim_admitted_photo_upload: 'db_claim', get_photo_provider_context: 'db_context',
   reserve_photo_drive_folder: 'db_folder', reserve_named_photo_provider_identity: 'db_identity',
@@ -77,6 +78,7 @@ export class PhotoTiming {
   }
 }
 export type PhotoRoute =
+  | { kind: "admit-batch"; attemptId: string; slotId: string }
   | { kind: "upload"; attemptId: string; slotId: string; photoItemId?: string }
   | {
     kind: "delete-item";
@@ -86,7 +88,8 @@ export type PhotoRoute =
   }
   | { kind: "slots"; attemptId: string }
   | { kind: "status"; operationId: string }
-  | { kind: "content"; photoId: string };
+  | { kind: "content"; photoId: string }
+  | { kind: "thumbnail"; photoId: string };
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function invalid(): never {
@@ -156,6 +159,8 @@ function locator(v: unknown): string {
   return v;
 }
 export function photoRoute(method: string, path: string): PhotoRoute | null {
+  const batch = path.match(/^\/v1\/attempts\/([^/]+)\/photo-slots\/([^/]+)\/upload-batches$/);
+  if (method === 'POST' && batch) return { kind: 'admit-batch', attemptId: uuid(batch[1]), slotId: uuid(batch[2]) };
   const upload = path.match(
     /^\/v1\/attempts\/([^/]+)\/photo-slots\/([^/]+)\/upload$/,
   );
@@ -168,6 +173,7 @@ export function photoRoute(method: string, path: string): PhotoRoute | null {
   const slots = path.match(/^\/v1\/attempts\/([^/]+)\/photo-slots$/);
   const status = path.match(/^\/v1\/photo-uploads\/([^/]+)$/);
   const content = path.match(/^\/v1\/photos\/([^/]+)\/content$/);
+  const thumbnail = path.match(/^\/v1\/photos\/([^/]+)\/thumbnail$/);
   if (method === "POST" && upload) {
     return {
       kind: "upload",
@@ -199,6 +205,9 @@ export function photoRoute(method: string, path: string): PhotoRoute | null {
   }
   if (method === "GET" && content) {
     return { kind: "content", photoId: uuid(content[1]) };
+  }
+  if (method === "GET" && thumbnail) {
+    return { kind: "thumbnail", photoId: uuid(thumbnail[1]) };
   }
   return null;
 }
@@ -343,6 +352,39 @@ export class PhotoService {
       } catch { /* Preserve the accepted receipt; client may independently retry GET. */ }
     }
     return { ...accepted, photoSlots };
+  }
+  async admitBatch(request: Request, i: PhotoIdentity, attemptId: string, slotId: string): Promise<unknown> {
+    this.#uploadActor(i);
+    if (new URL(request.url).search || request.headers.get('content-type')?.split(';')[0]?.trim() !== 'application/json' ||
+        request.headers.has('content-encoding') || request.headers.has('content-range')) invalid();
+    const bytes = await readPhotoBody(request.body, request.headers.get('content-length'), 8192);
+    let input: unknown;
+    try { input = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)); } catch { invalid(); }
+    if (!input || typeof input !== 'object' || Array.isArray(input) ||
+        Object.keys(input).length !== 4 ||
+        !['assignmentId', 'assignmentRevision', 'expectedCollectionRevision', 'items'].every(k => Object.hasOwn(input as object, k))) invalid();
+    const prepared = await preparePhotoCollectionBatch(i.profileId, {
+      ...input, attemptId, targetSlotId: slotId,
+    }, request.headers.get('idempotency-key'));
+    const args = { ...this.#actor(i), p_attempt_id: prepared.attemptId, p_assignment_id: prepared.assignmentId,
+      p_assignment_revision: prepared.assignmentRevision, p_target_slot_id: prepared.targetSlotId,
+      p_expected_collection_revision: prepared.expectedCollectionRevision, p_items: prepared.items,
+      p_idempotency_key_digest: prepared.idempotencyKeyDigest, p_request_hash: prepared.requestHash };
+    let result: unknown;
+    try { result = await this.#rpc('admit_photo_collection_upload_batch', args); }
+    catch (error) {
+      if (photoError(error).code !== 'PHOTO_STORAGE_QUOTA_UNAVAILABLE') throw error;
+      await this.#refreshQuota();
+      result = await this.#rpc('admit_photo_collection_upload_batch', args);
+    }
+    const value = row(result);
+    if (value.maximumConcurrentTransfers !== 2 || !Array.isArray(value.items) || value.items.length !== 2) failed();
+    const items = value.items.map((item, index) => {
+      const entry = row(item);
+      if (entry.photoItemId !== prepared.items[index]?.photoItemId || typeof entry.quotaWarning !== 'boolean') failed();
+      return { photoItemId: uuid(entry.photoItemId), expiresAt: time(entry.expiresAt), quotaWarning: entry.quotaWarning };
+    });
+    return { batchId: uuid(value.batchId), maximumConcurrentTransfers: 2, items };
   }
   async #upload(
     request: Request,
@@ -852,6 +894,7 @@ export class PhotoService {
     request: Request,
     i: PhotoIdentity,
     photoId: string,
+    representation: "content" | "thumbnail" = "content",
   ): Promise<Response> {
     if (i.profileStatus !== "active" || !["admin", "maid"].includes(i.role)) {
       throw new PhotoError(403, "PHOTO_ACCESS_REQUIRED");
@@ -868,12 +911,18 @@ export class PhotoService {
       (firstRetention.expiresAt !== null &&
         Date.parse(firstRetention.expiresAt) <= Date.now())
     ) throw new PhotoError(403, "PHOTO_ACCESS_REQUIRED");
-    const bytes = await this.#measure('drive', () => this.provider().read(object, ...this.#providerTiming()));
+    const bytes = await this.#measure('drive', () => {
+      const provider = this.provider();
+      if (representation === "content") return provider.read(object, ...this.#providerTiming());
+      if (!provider.thumbnail) throw new PhotoError(503, "PHOTO_THUMBNAIL_UNAVAILABLE");
+      return provider.thumbnail(object, ...this.#providerTiming());
+    });
     const latest = row(await this.#rpc("authorize_photo_read", args));
+    const latestObject = readObject(latest);
     const latestRetention = retentionMetadata(latest);
     if (
-      latest.providerFileId !== first.providerFileId ||
-      latest.sha256 !== first.sha256 ||
+      latestObject.fileId !== object.fileId || latestObject.sha256 !== object.sha256 ||
+      latestObject.mime !== object.mime || latestObject.sizeBytes !== object.sizeBytes ||
       photoStorageFileName(latest.fileName, object.mime) !== fileName ||
       JSON.stringify(latestRetention) !== JSON.stringify(firstRetention) ||
       latestRetention.mediaAvailability !== "available" ||
@@ -882,11 +931,11 @@ export class PhotoService {
     ) throw new PhotoError(403, "PHOTO_ACCESS_REQUIRED");
     return new Response(Uint8Array.from(bytes), {
       headers: {
-        "content-type": object.mime,
+        "content-type": representation === "thumbnail" ? "image/jpeg" : object.mime,
         "content-length": String(bytes.length),
         "cache-control": "no-store",
         "x-content-type-options": "nosniff",
-        "content-disposition": photoContentDisposition(fileName, object.mime),
+        "content-disposition": representation === "thumbnail" ? 'inline; filename="thumbnail.jpg"' : photoContentDisposition(fileName, object.mime),
         "access-control-expose-headers": "Content-Disposition",
       },
     });

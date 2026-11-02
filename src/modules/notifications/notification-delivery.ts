@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { type OperationWorkerConfig, withNotificationOperationAdmission } from "../developer-reset/worker-admission.js";
 import {
   decryptWebPushEnvelope,
   type DecryptedWebPushEnvelope,
@@ -144,6 +145,7 @@ export class NotificationDeliveryWorker {
       "key" | "keyVersion" | "keyring"
     >,
     private readonly clock: () => number = Date.now,
+    private readonly operationAdmission?: OperationWorkerConfig,
   ) {}
 
   #remaining(deadlineAt: number): number {
@@ -216,6 +218,12 @@ export class NotificationDeliveryWorker {
   }
 
   async run(): Promise<NotificationDeliveryRunResult> {
+    if (this.operationAdmission) {
+      return withNotificationOperationAdmission({
+        config: this.operationAdmission, db: this.db,
+        budgetMs: NOTIFICATION_DELIVERY_RUN_BUDGET_MS, clock: this.clock,
+      }, db => new NotificationDeliveryWorker(db, this.provider, this.cryptoConfig, this.clock).run());
+    }
     const startedAt = this.clock();
     const providerDeadline =
       startedAt + NOTIFICATION_DELIVERY_PROVIDER_DEADLINE_MS;

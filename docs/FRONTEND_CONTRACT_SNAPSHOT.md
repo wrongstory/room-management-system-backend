@@ -1,5 +1,47 @@
 # 프런트엔드 계약 snapshot
 
+## 2026-10-31 #534 청소 배정 메모 — dev 병합·운영 미배포
+
+프런트 [#270](https://github.com/makee-ham/room-management-system/issues/270) 인계 대상이다.
+배정 draft/change 선택 필드 `instructionMemo`와 exact assignment/card/commit-preview/attempt
+읽기 DTO의 nullable 필드를 추가한다. 생략=같은 청소의 직전 메모 유지, null/빈 입력=초기화,
+원본 입력 최대 500 UTF-16 단위다. 사진·수당 조건을 바꾸는 명령으로 해석하지 않는다.
+현재 운영 API에는 없는 v1.0.0 후보이며 적용 전 프런트 기능을 활성화하지 않는다.
+PR #539는 dev `46e47ed`에 병합됐고 CI41079932523의 application/migration(source-only)는 PASS다.
+실제 전체 DB 검증·운영 적용은 NOT RUN이다. release PR 생성/push/재실행으로 유발하는 전체 DB도
+사전 승인받고, 운영 migration은 별도 승인받는다. [상세 계약·릴리스 담당 체크포인트](./ASSIGNMENT_INSTRUCTION_MEMO_534.md).
+
+## 2026-10-30 #532 예약 가능 상태 정정 후보
+
+source OpenAPI는 159 paths / 171 operations다. 관리자 preview/정정 POST 두 경로를 추가했다.
+프런트 main `36153cc6742c2559f76cb44a2981fb93228f5bed`와 dev `4c696841bca128356b506455042f30c179154d27`의
+객실 카드 상태·예약 저장 흐름만 대조했으며 전역 제품 snapshot은 바꾸지 않는다.
+수당 별도 확인·기존 예약/투숙 별도 처리 정책 및 응답 계약은 [#532 인계](./ROOM_READY_CORRECTION_532.md),
+프런트 작업은 [#268](https://github.com/makee-ham/room-management-system/issues/268)을 따른다.
+운영 미배포·프런트 미연결이며 전체 DB 검증은 승인 전 NOT RUN이다.
+
+## 2026-10-25 #396 초기화 영향 조회 후보
+
+#396 단독 checkpoint의 source OpenAPI는 156 paths / 168 operations다. `GET /v1/developer/reset/preview`만 추가했으며
+active developer/session 전후 검증과 후보 그룹별 건수 조회를 제공한다. 실행은 항상 false이고
+`diagnosticComplete`는 수집 완전성만 나타낸다. 신규 migration/API는 운영 미적용이며 프런트
+코드는 변경하지 않았다. [진단 계약과 미실행 범위](./DEVELOPER_RESET.md)를 따른다.
+
+## 2026-10-25 #411 썸네일 개발 후보
+
+썸네일 단독 checkpoint의 source OpenAPI155 paths/167 operations: `GET /v1/photos/{photoId}/thumbnail` 1개 추가.
+원본과 같은 권한·retention/no-store이며 provider 미리보기가 없으면503이다.
+운영·프런트는 미반영이다. [계약·미실행 검증](./PHOTO_THUMBNAIL_411.md)을 따른다.
+기존154/166 계약과 아래 운영 기록은 해당 checkpoint의 이력이다.
+
+## 2026-10-25 dev 통합 — #485
+
+운영의 마지막 확인 기록은 [v0.9.9 배포](https://github.com/wrongstory/room-management-system-backend/pull/477#issuecomment-6359461664)의 API53 / migration122 / main3e805249다. 아래 과거의 현재·후보·미배포 표현은 각 checkpoint 당시 상태다.
+이번 변경은 main의 검증·문서 보완을 dev로 복원하며 API 계약·운영 runtime·migration 파일을 변경하지 않는다. dev의 #479/#480 보안 의존성과 #481 PIN 오류 진단은 보존하며 아직 운영 반영과 구분한다.
+Full DB/SQL/upgrade/경합 및 운영 migration은 이번 작업에서 NOT RUN이다. 최종 릴리스의 실제 DB 실행 전에 별도 사용자 승인을 받는다. 프런트 코드 변경이나 새 API 연결은 필요하지 않다.
+세부 검증·인계는 [통합 기록](./RELEASE_VALIDATION_BACKPORT_485.md)을 따른다.
+
+
 > 2026-10-13 최신: 운영 v0.9.4, 미배포 [v0.9.5 후보](./RELEASE_V0.9.5.md).
 > 아래 과거 운영/후보 표현은 각 기록 시점 기준이며 전역 제품 정책 snapshot은 바꾸지 않는다.
 
@@ -185,3 +227,9 @@ Issue #9 Stage 1을 포함한 nullable retention metadata와 후속 계약은 pr
 4. 새 프런트 정책이 기존 사용자 확정 계약과 충돌하면 조용히 승격하지 않고 양 저장소 Issue에 충돌과 처리 결정을 기록한다.
 5. 백엔드 OpenAPI의 path 수만 비교하지 않고 role, status, error code, idempotency, CAS, nullable 의미를 함께 비교한다.
 6. generated client와 breaking diff CI 구현은 #173, 전체 adapter 전환과 browser E2E는 #13에서 진행한다.
+
+## #411 두 사진 예약 후보
+
+metadata-only batch admission 1 path/1 operation을 추가한다. 기존 업로드 경로와 수량 계약은
+유지하며 frontend 참조 commit을 갱신하지 않는다. 최신 dev125와 합친 후보 inventory는 157 paths/169 operations다.
+실제 실행·연결 상태는 [사진 묶음 계약](./PHOTO_UPLOAD_BATCH_411.md)을 따른다.

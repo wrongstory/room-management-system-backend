@@ -10,6 +10,19 @@ const sourcePaths = [
   'supabase/functions/_shared/api-timing.ts',
   'supabase/functions/_shared/runtime.ts',
   'src/modules/auth/auth-context.ts',
+  'src/modules/rooms/room-ready-correction-contract.ts',
+  'src/modules/rooms/room-arrival-contract.ts',
+  'src/modules/rooms/room-fixed-memo-contract.ts',
+  'src/modules/rooms/room-type-fee-contract.ts',
+  'supabase/functions/_shared/http-admission.ts',
+  'supabase/functions/_shared/http-admission-api.ts',
+  'supabase/functions/_shared/operation-atomic-rpc.ts',
+  'supabase/functions/_shared/scheduled-invocation.ts',
+  'supabase/functions/_shared/reservation-backup-monitor.ts',
+  'supabase/functions/_shared/reservation-backup-alert.ts',
+  'supabase/functions/_shared/reservation-backup-github-app.ts',
+  'supabase/functions/reservation-backup-monitor/index.ts',
+  'supabase/functions/_shared/room-pin-diagnostic.ts',
   'supabase/functions/_shared/activity-contract.ts',
   'supabase/functions/_shared/activity-api.ts',
   'supabase/functions/_shared/payroll-remittance-batch.ts',
@@ -17,10 +30,13 @@ const sourcePaths = [
   'supabase/functions/_shared/account-api.ts',
   'supabase/functions/_shared/availability-api.ts',
   'supabase/functions/_shared/assignment-api.ts',
+  'supabase/functions/_shared/assignment-instruction-memo.ts',
   'supabase/functions/_shared/assignment-schedule-core.ts',
+  'supabase/functions/_shared/assignment-hydration.ts',
   'supabase/functions/_shared/attempt-api.ts',
   'supabase/functions/_shared/attempt-lifecycle-api.ts',
   'src/modules/limited-attempts/limited-attempt-contract.ts',
+  'src/modules/assignments/instruction-memo.ts',
   'supabase/functions/_shared/attempt-offline-api.ts',
   'supabase/functions/_shared/checkout-incident-api.ts',
   'supabase/functions/_shared/checkout-incident-cursor.ts',
@@ -56,8 +72,17 @@ const sourcePaths = [
   'supabase/functions/_shared/web-push-binding-proof.ts',
   'supabase/functions/_shared/web-push-subscription-api.ts',
   'supabase/functions/_shared/notification-delivery-worker.ts',
+  'supabase/functions/_shared/worker-admission.ts',
+  'supabase/functions/_shared/scheduler-admission.ts',
+  'supabase/functions/_shared/pin-worker-admission.ts',
   'supabase/functions/_shared/web-push-provider.ts',
   'supabase/functions/_shared/developer-api.ts',
+  'supabase/functions/_shared/developer-reset-api.ts',
+  'supabase/functions/_shared/reset-preview.ts',
+  'supabase/functions/_shared/operation-gates.ts',
+  'supabase/functions/_shared/reset-row-impact.ts',
+  'supabase/functions/_shared/reset-template-evidence.ts',
+  'supabase/functions/_shared/reset-preview-groups.ts',
   'supabase/functions/_shared/openapi.ts',
   'supabase/functions/_shared/room-operation-cursor.ts',
   'supabase/functions/_shared/room-api.ts',
@@ -80,6 +105,10 @@ const sourcePaths = [
   'supabase/functions/room-pin-sheet-sync/index.ts'
 ];
 const testPaths = [
+  'supabase/functions/photo-purge/index.deno.ts',
+  'supabase/functions/_shared/pin-worker-admission.deno.ts',
+  'supabase/functions/reservation-scheduler/index.deno.ts',
+  'supabase/functions/reservation-backup-monitor/index.deno.ts',
   'supabase/functions/_shared/room-pin-transfer-api.deno.ts',
   'supabase/functions/_shared/scheduler-transition-count.deno.ts',
   'supabase/functions/_shared/activity-api.deno.ts',
@@ -119,6 +148,7 @@ const testPaths = [
   'supabase/functions/_shared/room-pin-crypto.deno.ts',
   'supabase/functions/_shared/room-pin-api.deno.ts',
   'supabase/functions/_shared/room-pin-sheet-operations-api.deno.ts',
+  'supabase/functions/_shared/http-admission-api.deno.ts',
   'supabase/functions/api/index.deno.ts'
   ,'supabase/functions/api/checkout-incident-list.deno.ts'
   ,'supabase/functions/notification-delivery/index.deno.ts'
@@ -187,6 +217,21 @@ export function verifyEdgeBundle() {
   });
 }
 
+export function verifyBackupMonitorBundle() {
+  withLfFormatCopy([], temporary => {
+    const output = resolve(temporary, 'reservation-backup-monitor.eszip');
+    const relativeOutput = relative(process.cwd(), output).split(sep).join('/');
+    const result = spawnSync('docker', ['run', '--rm', '-v', `${process.cwd()}:/workspace`, '-w', '/workspace/supabase/functions',
+      'ghcr.io/supabase/edge-runtime:v1.74.3@sha256:c52405002a890ca9fcf77978671c57f3a988e03174afb277f84ac65bc917013c',
+      'bundle', '--entrypoint', 'reservation-backup-monitor/index.ts', '--output', `/workspace/${relativeOutput}`,
+      '--checksum', 'sha256', '--timeout', '60'], { stdio: 'inherit', timeout: 70000 });
+    if (result.error || result.status !== 0) throw new Error('Backup monitor Edge bundle failed');
+    const size = statSync(output).size;
+    if (!Number.isSafeInteger(size) || size <= 0 || size >= 2000000) throw new Error('Backup monitor bundle exceeds 2,000,000 bytes');
+    console.log(`Backup monitor Edge bundle PASS: ${size} bytes`);
+  });
+}
+
 /** Candidate graph only, never writes production entrypoint/config/lock or deploys. */
 export function verifyPostApprovalReportEdgeBundle({ rawSourceDiagnostic = false } = {}) {
   withLfFormatCopy([], temporary => {
@@ -204,10 +249,13 @@ export function verifyPostApprovalReportEdgeBundle({ rawSourceDiagnostic = false
     if (!rawSourceDiagnostic) {
       const { artifact } = generateReportBundle({ check: true });
       const code = readFileSync(artifact, 'utf8').replace(/\r\n?/g, '\n');
-      const runtimeImport = 'from "./runtime.ts"';
-      if (!code.includes(runtimeImport)) throw new Error('Generated runtime import drift');
+      // esbuild may omit optional whitespace after `from`; both forms retain
+      // the exact external module graph checked by the generator.
+      const runtimeImport = /\bfrom\s*"\.\/runtime\.ts"/g;
+      const photoImport = /\bfrom\s*"\.\/photo-binary\.ts"/g;
+      if (!code.match(runtimeImport) || !code.match(photoImport)) throw new Error('Generated runtime import drift');
       writeFileSync(resolve(temporary, 'report.js'), code.replaceAll(runtimeImport,
-        'from "file:///workspace/supabase/functions/_shared/runtime.ts"').replaceAll('from "./photo-binary.ts"',
+        'from "file:///workspace/supabase/functions/_shared/runtime.ts"').replaceAll(photoImport,
         'from "file:///workspace/supabase/functions/_shared/photo-binary.ts"'));
       console.log(`Generated report JavaScript bytes: ${statSync(resolve(temporary, 'report.js')).size}`);
       const testPaths = [
@@ -230,7 +278,7 @@ export function verifyPostApprovalReportEdgeBundle({ rawSourceDiagnostic = false
       }
       // Execute the same service/HTTP/authentication assertions against emitted JavaScript.
       // Original TS source typechecking remains mandatory in the normal gate.
-      runDeno(['test', '--allow-env=CORS_ORIGINS,POST_APPROVAL_ROOM_ISSUE_HANDOVER_KEY_BASE64,SUPABASE_ANON_KEY,SUPABASE_PUBLISHABLE_KEY,SUPABASE_SERVICE_ROLE_KEY,SUPABASE_SECRET_KEY,ACCOUNT_PHONE_PEPPER,RESERVATION_PII_KEY_BASE64,RESERVATION_GUEST_NAME_PEPPER,ROOM_PIN_KEY_BASE64,PAYROLL_CURSOR_HMAC_SECRET,NOTIFICATION_CURSOR_HMAC_SECRET,INSPECTION_CURSOR_HMAC_SECRET,WEB_PUSH_SUBSCRIPTION_KEY_BASE64,WEB_PUSH_BINDING_DIGEST_SECRET,GOOGLE_DRIVE_CLIENT_ID,GOOGLE_DRIVE_CLIENT_SECRET,GOOGLE_DRIVE_REFRESH_TOKEN,GOOGLE_DRIVE_ROOT_FOLDER_ID,GOOGLE_SHEETS_SERVICE_ACCOUNT_PRIVATE_KEY,SCHEDULER_INVOKE_SECRET,PHOTO_PURGE_INVOKE_SECRET,NOTIFICATION_DELIVERY_INVOKE_SECRET,ROOM_PIN_SHEET_SYNC_INVOKE_SECRET,VAPID_PRIVATE_KEY,ROOM_PIN_KEYRING_JSON,RESERVATION_PII_KEYRING_JSON,WEB_PUSH_SUBSCRIPTION_KEYRING_JSON,VAPID_KEYRING_JSON', '--frozen', '--config', 'supabase/functions/post-approval-report.deno.json',
+      runDeno(['test', '--allow-env=DEVELOPER_OPERATION_ADMISSION_MODE,DEVELOPER_OPERATION_TARGET,DEVELOPER_OPERATION_BUDGET_MS,CORS_ORIGINS,POST_APPROVAL_ROOM_ISSUE_HANDOVER_KEY_BASE64,SUPABASE_ANON_KEY,SUPABASE_PUBLISHABLE_KEY,SUPABASE_SERVICE_ROLE_KEY,SUPABASE_SECRET_KEY,ACCOUNT_PHONE_PEPPER,RESERVATION_PII_KEY_BASE64,RESERVATION_GUEST_NAME_PEPPER,ROOM_PIN_KEY_BASE64,PAYROLL_CURSOR_HMAC_SECRET,NOTIFICATION_CURSOR_HMAC_SECRET,INSPECTION_CURSOR_HMAC_SECRET,WEB_PUSH_SUBSCRIPTION_KEY_BASE64,WEB_PUSH_BINDING_DIGEST_SECRET,GOOGLE_DRIVE_CLIENT_ID,GOOGLE_DRIVE_CLIENT_SECRET,GOOGLE_DRIVE_REFRESH_TOKEN,GOOGLE_DRIVE_ROOT_FOLDER_ID,GOOGLE_SHEETS_SERVICE_ACCOUNT_PRIVATE_KEY,SCHEDULER_INVOKE_SECRET,PHOTO_PURGE_INVOKE_SECRET,NOTIFICATION_DELIVERY_INVOKE_SECRET,ROOM_PIN_SHEET_SYNC_INVOKE_SECRET,VAPID_PRIVATE_KEY,ROOM_PIN_KEYRING_JSON,RESERVATION_PII_KEYRING_JSON,WEB_PUSH_SUBSCRIPTION_KEYRING_JSON,VAPID_KEYRING_JSON', '--frozen', '--config', 'supabase/functions/post-approval-report.deno.json',
         '--lock', 'supabase/functions/post-approval-report.deno.lock', ...testPaths]);
       reportEntry = './report.js';
     }
@@ -251,6 +299,20 @@ export function verifyPostApprovalReportEdgeBundle({ rawSourceDiagnostic = false
 }
 
 function main() {
+const assignmentInstruction = spawnSync(process.execPath, ['scripts/generate-assignment-instruction-edge.mjs', '--check'], { stdio: 'inherit' });
+if (assignmentInstruction.status !== 0) throw new Error('Assignment instruction generated source verification failed');
+const schedulerAdmission = spawnSync(process.execPath, ['scripts/generate-scheduler-admission-edge.mjs', '--check'], { stdio: 'inherit' });
+if (schedulerAdmission.status !== 0) throw new Error('Scheduler admission source drift');
+const resetPreview = spawnSync(process.execPath, ['scripts/generate-reset-preview-edge.mjs', '--check'], { stdio: 'inherit' });
+const workerAdmission = spawnSync(process.execPath, ['scripts/generate-worker-admission-edge.mjs', '--check'], { stdio: 'inherit' });
+if (workerAdmission.status !== 0) throw new Error('Worker admission source drift');
+if (resetPreview.status !== 0) throw new Error('Reset preview generated source verification failed');
+const resetRows = spawnSync(process.execPath, ['scripts/generate-reset-row-impact.mjs', '--check'], { stdio: 'inherit' });
+if (resetRows.status !== 0) throw new Error('Reset row collector generated source verification failed');
+const resetReceiptStore = spawnSync(process.execPath, ['scripts/generate-reset-receipt-store.mjs', '--check'], { stdio: 'inherit' });
+if (resetReceiptStore.status !== 0) throw new Error('Reset receipt store generated source verification failed');
+const pinDiagnostic = spawnSync(process.execPath, ['scripts/generate-room-pin-diagnostic-edge.mjs', '--check'], { stdio: 'inherit' });
+if (pinDiagnostic.status !== 0) throw new Error('PIN diagnostic generated source verification failed');
 const batch = spawnSync(process.execPath, ['scripts/generate-remittance-batch-edge.mjs', '--check'], { stdio: 'inherit' });
 if (batch.status !== 0) throw new Error('Remittance batch generated source verification failed');
 const timing = spawnSync(process.execPath, ['scripts/generate-api-timing-edge.mjs', '--check'], { stdio: 'inherit' });
@@ -273,7 +335,7 @@ if (runtimeLock.status !== 0) throw new Error('Edge runtime lock verification fa
 // Raw report source validation uses a separate frozen lock; actual api/index.ts
 // imports the reviewed generated JS instead of the heavier raw npm/Node graph.
 // Both actual entrypoint and source-plus-artifact diagnostic bundles stay size-gated.
-runDeno(['test', '--allow-env=CORS_ORIGINS,POST_APPROVAL_ROOM_ISSUE_HANDOVER_KEY_BASE64,SUPABASE_ANON_KEY,SUPABASE_PUBLISHABLE_KEY,SUPABASE_SERVICE_ROLE_KEY,SUPABASE_SECRET_KEY,ACCOUNT_PHONE_PEPPER,RESERVATION_PII_KEY_BASE64,RESERVATION_GUEST_NAME_PEPPER,ROOM_PIN_KEY_BASE64,PAYROLL_CURSOR_HMAC_SECRET,NOTIFICATION_CURSOR_HMAC_SECRET,INSPECTION_CURSOR_HMAC_SECRET,WEB_PUSH_SUBSCRIPTION_KEY_BASE64,WEB_PUSH_BINDING_DIGEST_SECRET,GOOGLE_DRIVE_CLIENT_ID,GOOGLE_DRIVE_CLIENT_SECRET,GOOGLE_DRIVE_REFRESH_TOKEN,GOOGLE_DRIVE_ROOT_FOLDER_ID,GOOGLE_SHEETS_SERVICE_ACCOUNT_PRIVATE_KEY,SCHEDULER_INVOKE_SECRET,PHOTO_PURGE_INVOKE_SECRET,NOTIFICATION_DELIVERY_INVOKE_SECRET,ROOM_PIN_SHEET_SYNC_INVOKE_SECRET,VAPID_PRIVATE_KEY,ROOM_PIN_KEYRING_JSON,RESERVATION_PII_KEYRING_JSON,WEB_PUSH_SUBSCRIPTION_KEYRING_JSON,VAPID_KEYRING_JSON', '--frozen', '--config', 'supabase/functions/post-approval-report.deno.json',
+runDeno(['test', '--allow-env=DEVELOPER_OPERATION_ADMISSION_MODE,DEVELOPER_OPERATION_TARGET,DEVELOPER_OPERATION_BUDGET_MS,CORS_ORIGINS,POST_APPROVAL_ROOM_ISSUE_HANDOVER_KEY_BASE64,SUPABASE_ANON_KEY,SUPABASE_PUBLISHABLE_KEY,SUPABASE_SERVICE_ROLE_KEY,SUPABASE_SECRET_KEY,ACCOUNT_PHONE_PEPPER,RESERVATION_PII_KEY_BASE64,RESERVATION_GUEST_NAME_PEPPER,ROOM_PIN_KEY_BASE64,PAYROLL_CURSOR_HMAC_SECRET,NOTIFICATION_CURSOR_HMAC_SECRET,INSPECTION_CURSOR_HMAC_SECRET,WEB_PUSH_SUBSCRIPTION_KEY_BASE64,WEB_PUSH_BINDING_DIGEST_SECRET,GOOGLE_DRIVE_CLIENT_ID,GOOGLE_DRIVE_CLIENT_SECRET,GOOGLE_DRIVE_REFRESH_TOKEN,GOOGLE_DRIVE_ROOT_FOLDER_ID,GOOGLE_SHEETS_SERVICE_ACCOUNT_PRIVATE_KEY,SCHEDULER_INVOKE_SECRET,PHOTO_PURGE_INVOKE_SECRET,NOTIFICATION_DELIVERY_INVOKE_SECRET,ROOM_PIN_SHEET_SYNC_INVOKE_SECRET,VAPID_PRIVATE_KEY,ROOM_PIN_KEYRING_JSON,RESERVATION_PII_KEYRING_JSON,WEB_PUSH_SUBSCRIPTION_KEYRING_JSON,VAPID_KEYRING_JSON', '--frozen', '--config', 'supabase/functions/post-approval-report.deno.json',
   '--lock', 'supabase/functions/post-approval-report.deno.lock',
   'supabase/functions/_shared/post-approval-report-service.deno.ts',
   'supabase/functions/_shared/post-approval-report-api.deno.ts',
@@ -301,7 +363,7 @@ runDeno([
 runDeno([
   'test',
   '--allow-read=supabase/functions/api/assets',
-  '--allow-env=CORS_ORIGINS,SUPABASE_URL,SUPABASE_ANON_KEY,SUPABASE_PUBLISHABLE_KEY,SUPABASE_SERVICE_ROLE_KEY,SUPABASE_SECRET_KEY,ACCOUNT_PHONE_PEPPER,RESERVATION_PII_KEY_BASE64,RESERVATION_PII_KEY_VERSION,RESERVATION_PII_KEYRING_JSON,RESERVATION_GUEST_NAME_PEPPER,SCHEDULER_INVOKE_SECRET,GOOGLE_DRIVE_CLIENT_ID,GOOGLE_DRIVE_CLIENT_SECRET,GOOGLE_DRIVE_REFRESH_TOKEN,GOOGLE_DRIVE_ROOT_FOLDER_ID,PHOTO_PURGE_INVOKE_SECRET,POST_APPROVAL_ROOM_ISSUE_HANDOVER_KEY_BASE64,PAYROLL_CURSOR_HMAC_SECRET,NOTIFICATION_CURSOR_HMAC_SECRET,INSPECTION_CURSOR_HMAC_SECRET,WEB_PUSH_SUBSCRIPTION_KEY_BASE64,WEB_PUSH_SUBSCRIPTION_KEY_VERSION,WEB_PUSH_SUBSCRIPTION_KEYRING_JSON,WEB_PUSH_BINDING_DIGEST_SECRET,VAPID_SUBJECT,VAPID_CURRENT_KEY_VERSION,VAPID_PUBLIC_KEY,VAPID_PUBLIC_KEYRING_JSON,VAPID_PRIVATE_KEY,VAPID_KEYRING_JSON,NOTIFICATION_DELIVERY_INVOKE_SECRET,ROOM_PIN_KEY_BASE64,ROOM_PIN_KEY_VERSION,ROOM_PIN_KEYRING_JSON,ROOM_PIN_IMPORT_SPREADSHEET_ID,ROOM_PIN_IMPORT_SHEET_ID,ROOM_PIN_TRANSFER_HMAC_SECRET,ROOM_PIN_INITIAL_DIGITS,ROOM_PIN_SHEET_SYNC_INVOKE_SECRET,GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL,GOOGLE_SHEETS_SERVICE_ACCOUNT_PRIVATE_KEY,GOOGLE_SHEETS_SPREADSHEET_ID,GOOGLE_SHEETS_ROOM_PIN_TAB,RUNTIME_ENVIRONMENT,SUPABASE_PROJECT_REF',
+  '--allow-env=DEVELOPER_OPERATION_ADMISSION_MODE,DEVELOPER_OPERATION_TARGET,DEVELOPER_OPERATION_BUDGET_MS,SCHEDULER_INVOKE_MODE,SCHEDULER_OPERATION_ADMISSION_MODE,SCHEDULER_OPERATION_BUDGET_MS,RESERVATION_SCHEDULER_ACTOR_PROFILE_ID,NOTIFICATION_DELIVERY_INVOKE_MODE,RESERVATION_BACKUP_MONITOR_INVOKE_MODE,RESERVATION_BACKUP_MONITOR_KEY_SHA256,RESERVATION_BACKUP_MONITOR_ENABLED,RESERVATION_BACKUP_ALERT_APP_ID,RESERVATION_BACKUP_ALERT_INSTALLATION_ID,RESERVATION_BACKUP_ALERT_PRIVATE_KEY,RESERVATION_BACKUP_ALERT_ISSUE,CORS_ORIGINS,SUPABASE_URL,SUPABASE_ANON_KEY,SUPABASE_PUBLISHABLE_KEY,SUPABASE_SERVICE_ROLE_KEY,SUPABASE_SECRET_KEY,ACCOUNT_PHONE_PEPPER,RESERVATION_PII_KEY_BASE64,RESERVATION_PII_KEY_VERSION,RESERVATION_PII_KEYRING_JSON,RESERVATION_GUEST_NAME_PEPPER,SCHEDULER_INVOKE_SECRET,GOOGLE_DRIVE_CLIENT_ID,GOOGLE_DRIVE_CLIENT_SECRET,GOOGLE_DRIVE_REFRESH_TOKEN,GOOGLE_DRIVE_ROOT_FOLDER_ID,PHOTO_PURGE_INVOKE_SECRET,POST_APPROVAL_ROOM_ISSUE_HANDOVER_KEY_BASE64,PAYROLL_CURSOR_HMAC_SECRET,NOTIFICATION_CURSOR_HMAC_SECRET,INSPECTION_CURSOR_HMAC_SECRET,WEB_PUSH_SUBSCRIPTION_KEY_BASE64,WEB_PUSH_SUBSCRIPTION_KEY_VERSION,WEB_PUSH_SUBSCRIPTION_KEYRING_JSON,WEB_PUSH_BINDING_DIGEST_SECRET,VAPID_SUBJECT,VAPID_CURRENT_KEY_VERSION,VAPID_PUBLIC_KEY,VAPID_PUBLIC_KEYRING_JSON,VAPID_PRIVATE_KEY,VAPID_KEYRING_JSON,NOTIFICATION_DELIVERY_INVOKE_SECRET,ROOM_PIN_KEY_BASE64,ROOM_PIN_KEY_VERSION,ROOM_PIN_KEYRING_JSON,ROOM_PIN_IMPORT_SPREADSHEET_ID,ROOM_PIN_IMPORT_SHEET_ID,ROOM_PIN_TRANSFER_HMAC_SECRET,ROOM_PIN_INITIAL_DIGITS,ROOM_PIN_SHEET_SYNC_INVOKE_SECRET,GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL,GOOGLE_SHEETS_SERVICE_ACCOUNT_PRIVATE_KEY,GOOGLE_SHEETS_SPREADSHEET_ID,GOOGLE_SHEETS_ROOM_PIN_TAB,RUNTIME_ENVIRONMENT,SUPABASE_PROJECT_REF',
   '--frozen',
   '--lock',
   'supabase/functions/post-approval-report.deno.lock',
@@ -311,6 +373,7 @@ runDeno([
 ]);
 verifyEdgeBundle();
 verifyPostApprovalReportEdgeBundle();
+verifyBackupMonitorBundle();
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   if (process.argv.includes('--report-raw-bundle-diagnostic')) verifyPostApprovalReportEdgeBundle({ rawSourceDiagnostic: true });

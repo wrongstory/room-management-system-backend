@@ -1,8 +1,16 @@
+import { feeRoomTypeId, parseRoomTypeFeeInput, parseRoomTypeFeeResult, RoomTypeFeeError, type RoomTypeFeeResult } from './room-type-fee-contract.js';
+import { fixedMemoErrors, fixedMemoRoomId, parseRoomFixedMemo, parseRoomFixedMemoInput, RoomFixedMemoError, type RoomFixedMemo } from './room-fixed-memo-contract.js';
+import { parseRoomArrival, type RoomArrival } from './room-arrival-contract.js';
 import { randomInt, randomUUID } from 'node:crypto';
 import type { Actor } from '../../domain/actor.js';
 import { AppError } from '../../lib/app-error.js';
 import { requestHash } from '../../lib/command.js';
 import type { SupabaseClients } from '../../lib/supabase.js';
+import {
+  parseRoomReadyPreviewRequest, parseRoomReadyCorrectionRequest, parseRoomReadyPreview, parseRoomReadyCorrectionResult,
+  roomReadyUuid, roomReadyErrors, RoomReadyContractError, parseRoomReadyEventSummary,
+  type RoomReadyPreviewRequest, type RoomReadyCorrectionRequest, type RoomReadyPreview, type RoomReadyCorrectionResult
+} from './room-ready-correction-contract.js';
 import {
   canonicalRoomPin,
   decryptRoomPin,
@@ -108,6 +116,7 @@ export interface RoomSummary {
   displayCheckOutAt: string | null;
   displayGuestCount: number | null;
   displayBaseOccupancy: number;
+  arrival: RoomArrival | null;
 }
 
 export interface ChangeRoomMasterDataInput {
@@ -432,6 +441,11 @@ export interface RoomEventsResult {
 }
 
 export interface RoomService {
+  getFixedMemo(actor: Actor, roomId: string): Promise<RoomFixedMemo>;
+  setTypeCleaningFee(actor: Actor, input: {roomTypeId: string; body: unknown; idempotencyKey: string}): Promise<RoomTypeFeeResult>;
+  setFixedMemo(actor: Actor, input: {roomId: string; body: unknown; idempotencyKey: string}): Promise<RoomFixedMemo>;
+  previewReadyCorrection(actor: Actor, input: RoomReadyPreviewRequest & { roomId: string }): Promise<RoomReadyPreview>;
+  applyReadyCorrection(actor: Actor, input: RoomReadyCorrectionRequest & { roomId: string; idempotencyKey: string }): Promise<RoomReadyCorrectionResult>;
   listCandles(actor: Actor, input: { roomId?: string | undefined; cursor?: string | undefined; limit?: number | undefined }): Promise<RoomCandlePage>;
   listTypes(actor: Actor): Promise<RoomTypeCatalogItem[]>;
   listOperationBlocks(actor: Actor, roomId: string, input: RoomOperationPageInput): Promise<RoomOperationBlocksResult>;
@@ -498,6 +512,7 @@ interface RoomProjectionRow {
   display_check_out_at: string | null;
   display_guest_count: number | null;
   display_base_occupancy: number;
+  arrival?: unknown;
 }
 
 interface RoomTypeCatalogRow {
@@ -528,6 +543,7 @@ function toRoomTypeCatalogItem(row: RoomTypeCatalogRow): RoomTypeCatalogItem {
 
 function toRoom(row: RoomProjectionRow): RoomSummary {
   return {
+    arrival: parseRoomArrival(row.arrival),
     id: row.id,
     roomNumber: row.room_number,
     roomTypeCode: row.room_type_code,
@@ -745,7 +761,16 @@ export function generateUniqueFourDigitPins(
   return [...values].map((value) => value.toString().padStart(4, '0'));
 }
 
+function fixedMemoAppError(error: unknown): unknown {
+  if(error instanceof RoomFixedMemoError) return new AppError(error.output?500:400,
+    error.output?'ROOM_FIXED_MEMO_RESPONSE_INVALID':'ROOM_FIXED_MEMO_INVALID',error.output?'객실 메모를 불러오지 못했습니다.':'객실 메모 입력을 확인해 주세요.');
+  return error;
+}
 function roomError(error: { message?: string } | null): AppError {
+  const fixed=fixedMemoErrors.find(([code])=>error?.message?.includes(code));
+  if(fixed) return new AppError(fixed[1],fixed[0],fixed[2]);
+  const correctionError = roomReadyErrors.find(([code]) => error?.message?.includes(code));
+  if (correctionError) return new AppError(correctionError[1], correctionError[0], correctionError[2]);
   const message = error?.message ?? '';
   if (message.includes('ROOM_OPERATION_PAGE_LIMIT_INVALID')) {
     return new AppError(400, 'ROOM_OPERATION_PAGE_LIMIT_INVALID', '객실 운영 page 크기가 올바르지 않습니다.');
@@ -948,7 +973,82 @@ export function assertNoContactInformation(value: string | undefined): void {
   }
 }
 
+export function roomReadyContractAppError(error: unknown): unknown {
+  if (error instanceof RoomReadyContractError) return new AppError(error.response ? 500 : 400,
+    error.response ? 'ROOM_READY_CORRECTION_RESPONSE_INVALID' : 'ROOM_READY_CORRECTION_INVALID_INPUT', error.message);
+  return error;
+}
+
+function roomReadySessionId(actor: Actor): string {
+  try { return roomReadyUuid(verifiedSessionId(actor.accessToken)); }
+  catch { throw new AppError(401, 'INVALID_ACCESS_TOKEN', '로그인이 필요합니다.'); }
+}
+
 export class SupabaseRoomService implements RoomService {
+  async getFixedMemo(actor: Actor, rawRoomId: string): Promise<RoomFixedMemo> {
+    if (!['admin','maid'].includes(actor.role)) throw new AppError(403,'ROOM_FIXED_MEMO_FORBIDDEN','객실 메모 조회 권한이 없습니다.');
+    if (actor.mustChangePassword) throw new AppError(403,'PASSWORD_CHANGE_REQUIRED','비밀번호를 먼저 변경해 주세요.');
+    try {
+      const roomId=fixedMemoRoomId(rawRoomId);
+      const {data,error}=await this.clients.admin.rpc('get_room_fixed_memo', {
+        p_actor_profile_id:actor.profileId,p_session_id:verifiedSessionId(actor.accessToken),p_room_id:roomId
+      });
+      if(error) throw roomError(error);
+      return parseRoomFixedMemo(data,roomId);
+    } catch(error) { throw fixedMemoAppError(error); }
+  }
+  async setFixedMemo(actor: Actor, input: {roomId:string;body:unknown;idempotencyKey:string}): Promise<RoomFixedMemo> {
+    ensureAdmin(actor);
+    if(actor.mustChangePassword) throw new AppError(403,'PASSWORD_CHANGE_REQUIRED','비밀번호를 먼저 변경해 주세요.');
+    try {
+      const roomId=fixedMemoRoomId(input.roomId), parsed=parseRoomFixedMemoInput(input.body);
+      if(!/^[A-Za-z0-9._:-]{8,128}$/.test(input.idempotencyKey)) throw new RoomFixedMemoError();
+      const {data,error}=await this.clients.admin.rpc('set_room_fixed_memo', {
+        p_actor_profile_id:actor.profileId,p_session_id:verifiedSessionId(actor.accessToken),p_room_id:roomId,
+        p_expected_version:parsed.expectedVersion,p_memo:parsed.memo,p_idempotency_key:input.idempotencyKey,
+        p_request_hash:requestHash({roomId,...parsed})
+      });
+      if(error) throw roomError(error);
+      return parseRoomFixedMemo(data,roomId);
+    } catch(error) { throw fixedMemoAppError(error); }
+  }
+
+  async previewReadyCorrection(actor: Actor, input: RoomReadyPreviewRequest & { roomId: string }): Promise<RoomReadyPreview> {
+    ensureAdmin(actor);
+    if (actor.mustChangePassword) throw new AppError(403, 'PASSWORD_CHANGE_REQUIRED', '비밀번호를 먼저 변경해 주세요.');
+    try {
+      const roomId = roomReadyUuid(input.roomId);
+      const { roomId: _roomId, ...body } = input;
+      const parsed = parseRoomReadyPreviewRequest(body);
+      const { data, error } = await this.clients.admin.rpc('preview_room_ready_correction', {
+        p_actor_profile_id: actor.profileId, p_session_id: roomReadySessionId(actor),
+        p_room_id: roomId, p_reason_code: parsed.reasonCode
+      });
+      if (error) throw roomError(error);
+      return parseRoomReadyPreview(data, roomId);
+    } catch (error) { throw roomReadyContractAppError(error); }
+  }
+
+  async applyReadyCorrection(actor: Actor, input: RoomReadyCorrectionRequest & { roomId: string; idempotencyKey: string }): Promise<RoomReadyCorrectionResult> {
+    ensureAdmin(actor);
+    if (actor.mustChangePassword) throw new AppError(403, 'PASSWORD_CHANGE_REQUIRED', '비밀번호를 먼저 변경해 주세요.');
+    try {
+      const roomId = roomReadyUuid(input.roomId);
+      const { roomId: _roomId, idempotencyKey, ...body } = input;
+      if (!/^[A-Za-z0-9._:-]{8,128}$/.test(idempotencyKey)) throw new RoomReadyContractError(false);
+      const parsed = parseRoomReadyCorrectionRequest(body);
+      const { data, error } = await this.clients.admin.rpc('apply_room_ready_correction', {
+        p_actor_profile_id: actor.profileId, p_session_id: roomReadySessionId(actor), p_room_id: roomId,
+        p_expected_room_version: parsed.expectedRoomVersion, p_impact_fingerprint: parsed.impactFingerprint,
+        p_evaluated_at: parsed.evaluatedAt, p_expires_at: parsed.expiresAt, p_confirmed: parsed.confirmed,
+        p_acknowledge_no_new_earnings: parsed.acknowledgeNoNewEarnings, p_confirm_physical_candle_removal: parsed.confirmPhysicalCandleRemoval,
+        p_reason_code: parsed.reasonCode, p_idempotency_key: idempotencyKey, p_request_hash: requestHash({ roomId, ...parsed })
+      });
+      if (error) throw roomError(error);
+      return parseRoomReadyCorrectionResult(data, roomId);
+    } catch (error) { throw roomReadyContractAppError(error); }
+  }
+
   async listCandles(actor: Actor, input: { roomId?: string | undefined; cursor?: string | undefined; limit?: number | undefined }): Promise<RoomCandlePage> {
     ensureCandleActor(actor);
     const limit = input.limit ?? 50;
@@ -1038,6 +1138,31 @@ export class SupabaseRoomService implements RoomService {
       throw new AppError(403, 'PIN_REVEAL_AUTHORIZATION_CHANGED', 'PIN 열람 권한이 변경되었습니다.');
     }
     return { roomId, credential, pinVersion: Number(row.pin_version), clearAfterSeconds, expiresAt };
+  }
+
+  async setTypeCleaningFee(actor: Actor, input: {roomTypeId: string; body: unknown; idempotencyKey: string}): Promise<RoomTypeFeeResult> {
+    ensureAdmin(actor);
+    if (actor.mustChangePassword) throw new AppError(403,'PASSWORD_CHANGE_REQUIRED','비밀번호를 먼저 변경해 주세요.');
+    try {
+      const roomTypeId = feeRoomTypeId(input.roomTypeId), parsed = parseRoomTypeFeeInput(input.body);
+      const {data,error} = await this.clients.admin.rpc('set_room_type_cleaning_fee', {
+        p_actor_profile_id: actor.profileId, p_session_id: verifiedSessionId(actor.accessToken),
+        p_room_type_id: roomTypeId, p_expected_version: parsed.expectedVersion,
+        p_base_cleaning_fee: parsed.baseCleaningFee, p_confirm_future_targets_only: parsed.confirmFutureTargetsOnly,
+        p_idempotency_key: input.idempotencyKey, p_request_hash: requestHash({roomTypeId,...parsed})
+      });
+      if (error) {
+        if (error.message?.includes('ROOM_TYPE_CLEANING_FEE_INVALID')) throw new AppError(400,'ROOM_TYPE_CLEANING_FEE_INVALID','청소 단가와 적용 범위 확인을 확인해 주세요.');
+        if (error.message?.includes('ROOM_TYPE_NOT_FOUND')) throw new AppError(404,'ROOM_TYPE_NOT_FOUND','객실 타입을 찾을 수 없습니다.');
+        throw roomError(error);
+      }
+      return parseRoomTypeFeeResult(data,roomTypeId,parsed);
+    } catch (error) {
+      if (error instanceof RoomTypeFeeError) throw new AppError(error.output?500:400,
+        error.output?'ROOM_TYPE_CLEANING_FEE_RESPONSE_INVALID':'ROOM_TYPE_CLEANING_FEE_INVALID',
+        error.output?'청소 단가 변경 결과를 확인하지 못했습니다.':'청소 단가와 적용 범위 확인을 확인해 주세요.');
+      throw error;
+    }
   }
 
   async listTypes(actor: Actor): Promise<RoomTypeCatalogItem[]> {
@@ -1262,12 +1387,16 @@ export class SupabaseRoomService implements RoomService {
       p_limit: limit
     });
     if (error) throw roomError(error);
-    return data as unknown as RoomEventsResult;
+    const page = data as unknown as RoomEventsResult;
+    try {
+      return { ...page, items: page.items.map(item => item.eventType === 'room.ready_corrected'
+        ? { ...item, summary: parseRoomReadyEventSummary(item.summary) } : item) };
+    } catch (error) { throw roomReadyContractAppError(error); }
   }
 
   async list(actor: Actor, input: RoomListInput = {}): Promise<RoomSummary[]> {
     ensureAdmin(actor);
-    const { data, error } = await this.clients.admin.rpc('get_room_board_projection', {
+    const { data, error } = await this.clients.admin.rpc('get_room_board_arrival_projection', {
       p_actor_profile_id: actor.profileId,
       p_session_id: verifiedSessionId(actor.accessToken),
       p_service_date: input.serviceDate ?? null,
@@ -1281,7 +1410,7 @@ export class SupabaseRoomService implements RoomService {
 
   async get(actor: Actor, roomId: string): Promise<RoomSummary> {
     ensureAdmin(actor);
-    const { data, error } = await this.clients.admin.rpc('get_room_board_projection', {
+    const { data, error } = await this.clients.admin.rpc('get_room_board_arrival_projection', {
       p_actor_profile_id: actor.profileId,
       p_session_id: verifiedSessionId(actor.accessToken),
       p_service_date: null,

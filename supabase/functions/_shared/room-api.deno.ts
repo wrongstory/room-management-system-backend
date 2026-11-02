@@ -1,4 +1,6 @@
+import { setRoomTypeCleaningFee } from "./room-api.ts";
 import {
+  applyRoomReadyCorrection,
   changeRoomMasterData,
   correctRoomOccupancy,
   createRoomOperationBlock,
@@ -11,14 +13,17 @@ import {
   listRooms,
   listRoomTypes,
   overrideRoomDisplayStatus,
+  previewRoomReadyCorrection,
   recordRoomPinSync,
   releaseRoomOperationBlock,
   reportRoomIssue,
   resolveRoomIssue,
   roomDatabaseError,
   roomDetailIdFromPath,
+  roomFixedMemo,
   roomListServiceDate,
   roomPathIds,
+  roomReadyCorrectionPath,
   setRoomCandleCount,
   toRoomProjections,
 } from "./room-api.ts";
@@ -61,6 +66,211 @@ function readRequest(path = "/v1/room-types"): Request {
     headers: { authorization: `Bearer header.${encoded}.signature` },
   });
 }
+
+Deno.test("room ready preview and commit bind session and preserve safe confirmation effects", async () => {
+  const requestBody = {
+    targetStatus: "READY",
+    reasonCode: "ADMIN_ROOM_READY_CORRECTION",
+  };
+  const proof = {
+    impactFingerprint: "a".repeat(64),
+    evaluatedAt: "2026-10-30T03:00:00.123456Z",
+    expiresAt: "2026-10-30T03:05:00.123456Z",
+  };
+  const preview = {
+    roomId,
+    targetStatus: "READY",
+    roomStateVersion: 5,
+    canApply: true,
+    blockingReasons: [],
+    requiresConfirmation: true,
+    requiresEarningAcknowledgement: true,
+    effects: {
+      cleaningTargets: [{
+        cleaningTargetId: issueId,
+        assignmentId: blockId,
+        attemptId: roomTypeId,
+        attemptStatus: "submitted",
+        hasSubmission: true,
+        fieldCompleted: true,
+        rawPin: "not-returned",
+      }],
+      operationBlockIds: [blockId],
+      roomIssueIds: [issueId],
+      candleCount: 2,
+      displayStatusOverride: "READY",
+    },
+    warnings: [
+      "CANCEL_WITHOUT_NEW_EARNINGS",
+      "APPROVE_BEFORE_CANCEL_TO_PRESERVE_EARNINGS",
+      "PHYSICAL_CANDLE_REMOVAL_REQUIRED",
+    ],
+    ...proof,
+  };
+  const applied = {
+    roomId,
+    targetStatus: "READY",
+    roomStateVersion: 6,
+    recordedAt: "2026-10-30T03:01:00Z",
+    cancelledCleaningTargetIds: [issueId],
+    releasedOperationBlockIds: [blockId],
+    resolvedRoomIssueIds: [issueId],
+    candlesCleared: true,
+    rawPin: "not-returned",
+  };
+  const calls: Array<[string, Record<string, unknown>]> = [];
+  const clients = {
+    admin: {
+      rpc(name: string, args: Record<string, unknown>) {
+        calls.push([name, args]);
+        return Promise.resolve({
+          data: name === "preview_room_ready_correction" ? preview : applied,
+          error: null,
+        });
+      },
+    },
+  } as unknown as EdgeClients;
+  const path = `/v1/rooms/${roomId}/ready-correction`;
+  const read = await previewRoomReadyCorrection(
+    commandRequest(path + "/preview", requestBody),
+    clients,
+    admin,
+    roomId,
+  );
+  assert(
+    read.effects.cleaningTargets[0].hasSubmission &&
+      read.requiresEarningAcknowledgement,
+    "submission and earnings warning preserved",
+  );
+  assert(
+    !JSON.stringify(read).includes("not-returned"),
+    "preview private fields removed",
+  );
+  assert(
+    calls[0][0] === "preview_room_ready_correction" &&
+      calls[0][1].p_session_id === sessionId,
+    "read-only RPC session",
+  );
+  const body = {
+    ...requestBody,
+    expectedRoomVersion: 5,
+    ...proof,
+    confirmed: true,
+    acknowledgeNoNewEarnings: true,
+    confirmPhysicalCandleRemoval: true,
+  };
+  const write = await applyRoomReadyCorrection(
+    commandRequest(path, body),
+    clients,
+    admin,
+    roomId,
+  );
+  assert(
+    !JSON.stringify(write).includes("not-returned") &&
+      write.cancelledCleaningTargetIds[0] === issueId,
+    "safe command result",
+  );
+  assert(
+    calls[1][0] === "apply_room_ready_correction" &&
+      calls[1][1].p_session_id === sessionId &&
+      calls[1][1].p_acknowledge_no_new_earnings === true,
+    "explicit acknowledgements forwarded",
+  );
+  const hash = calls[1][1].p_request_hash;
+  await applyRoomReadyCorrection(
+    commandRequest(path, body, "POST", "different-idempotency-key"),
+    clients,
+    admin,
+    roomId,
+  );
+  assert(
+    calls[2][1].p_request_hash === hash,
+    "idempotency key excluded from semantic hash",
+  );
+  await applyRoomReadyCorrection(
+    commandRequest(path, { ...body, confirmPhysicalCandleRemoval: false }),
+    clients,
+    admin,
+    roomId,
+  );
+  assert(
+    calls[3][1].p_request_hash !== hash,
+    "physical removal consent bound to hash",
+  );
+  const count = calls.length;
+  for (
+    const invalid of [
+      { ...body, confirmed: false },
+      { ...body, expectedRoomVersion: 0 },
+      { ...body, actorProfileId: issueId },
+      { ...body, expiresAt: "2026-10-30T03:05:00.123457Z" },
+    ]
+  ) {
+    const failure = await captureEdgeError(() =>
+      applyRoomReadyCorrection(
+        commandRequest(path, invalid),
+        clients,
+        admin,
+        roomId,
+      )
+    );
+    assert(
+      failure.status === 400 &&
+        failure.code === "ROOM_READY_CORRECTION_INVALID_INPUT",
+      "strict input gate",
+    );
+  }
+  for (
+    const denied of [{ ...admin, role: "maid" as const }, {
+      ...admin,
+      role: "developer" as const,
+    }, { ...admin, mustChangePassword: true }]
+  ) {
+    const failure = await captureEdgeError(() =>
+      applyRoomReadyCorrection(
+        commandRequest(path, body),
+        clients,
+        denied,
+        roomId,
+      )
+    );
+    assert(
+      failure.status === 403,
+      "exact business admin with completed password required",
+    );
+  }
+  assert(calls.length === count, "invalid commands cannot reach RPC");
+  assert(
+    roomReadyCorrectionPath(path + "/preview")?.preview === true &&
+      roomReadyCorrectionPath(path)?.preview === false,
+    "exact routes",
+  );
+  assert(
+    roomReadyCorrectionPath(path + "/preview/sibling") === null,
+    "no sibling prefix capture",
+  );
+});
+
+Deno.test("room ready DB conflicts use safe specific instructions including the legacy READY guard", () => {
+  for (
+    const code of [
+      "ROOM_READY_CONFIRMATION_REQUIRED",
+      "ROOM_READY_EARNING_ACKNOWLEDGEMENT_REQUIRED",
+      "ROOM_READY_CANDLE_CONFIRMATION_REQUIRED",
+      "ROOM_READY_PREVIEW_STALE",
+      "ROOM_READY_CORRECTION_BLOCKED",
+      "ROOM_READY_CORRECTION_LIMIT_EXCEEDED",
+      "ROOM_READY_CORRECTION_REQUIRED",
+    ]
+  ) {
+    const error = roomDatabaseError({ message: `${code}: private raw detail` });
+    assert(
+      error.code === code && error.status === 409 &&
+        !error.message.includes("private raw detail"),
+      "specific safe conflict",
+    );
+  }
+});
 Deno.test("registered reports bind admin session, validate paging and allowlist evidence", async () => {
   const previous = Deno.env.get("INSPECTION_CURSOR_HMAC_SECRET");
   Deno.env.set(
@@ -234,7 +444,7 @@ function operationClients(calls: Array<[string, Record<string, unknown>]>) {
     admin: {
       async rpc(name: string, args: Record<string, unknown>) {
         calls.push([name, args]);
-        if (name === "get_room_board_projection") {
+        if (name === "get_room_board_arrival_projection") {
           return { data: [roomRow], error: null };
         }
         if (name === "change_room_master_data") {
@@ -1343,4 +1553,174 @@ Deno.test("room event timeline maps the bounded safe projection", async () => {
     !JSON.stringify(timeline).includes("must-not-leak"),
     "raw and unknown summary fields removed",
   );
+});
+
+Deno.test("#548 arrival facts survive Edge mapping without private payload", () => {
+  const arrival = {
+    status: "CHECKIN_PENDING",
+    checkInReady: false,
+    reasonCodes: ["CLEANING_REQUIRED"],
+    actualCheckInAt: null,
+    recordedAt: "2026-11-01T09:00:00+09:00",
+  };
+  const mapped = toRoomProjections([{
+    ...roomRow,
+    arrival: { ...arrival, privatePayload: "hidden" },
+  }]);
+  if (JSON.stringify(mapped[0]?.arrival) !== JSON.stringify(arrival)) {
+    throw new Error("ARRIVAL_MAPPING_MISMATCH");
+  }
+});
+
+Deno.test("room fixed memo binds session, sanitizes output and enforces write role", async () => {
+  const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+  const clients = {
+    admin: {
+      rpc: (name: string, args: Record<string, unknown>) => {
+        calls.push({ name, args });
+        return Promise.resolve({
+          data: {
+            roomId,
+            memo: "화요일마다 청소",
+            version: 1,
+            updatedAt: "2026-11-01T01:00:00Z",
+            secret: "strip",
+          },
+          error: null,
+        });
+      },
+    },
+  } as unknown as EdgeClients;
+  const req = readRequest(`/v1/rooms/${roomId}/fixed-memo`);
+  const result = await roomFixedMemo(
+    req,
+    clients,
+    { ...admin, role: "maid" },
+    roomId,
+  );
+  assert(
+    result.memo === "화요일마다 청소" && !Object.hasOwn(result, "secret"),
+    "safe maid projection",
+  );
+  assert(calls[0].args.p_session_id === sessionId, "verified session bound");
+  const headers = new Headers(req.headers);
+  headers.set("content-type", "application/json");
+  headers.set("Idempotency-Key", "memo-key-001");
+  const write = () =>
+    new Request(req.url, {
+      method: "PUT",
+      headers,
+      body: JSON.stringify({ memo: " 화요일마다 청소 ", expectedVersion: 0 }),
+    });
+  await roomFixedMemo(write(), clients, admin, roomId);
+  assert(
+    calls[1].name === "set_room_fixed_memo" &&
+      calls[1].args.p_memo === "화요일마다 청소" &&
+      calls[1].args.p_expected_version === 0,
+    "normalized independent CAS",
+  );
+  const forbidden = await captureEdgeError(() =>
+    roomFixedMemo(write(), clients, { ...admin, role: "maid" }, roomId)
+  );
+  assert(
+    forbidden.status === 403 && calls.length === 2,
+    "maid edit denied before RPC",
+  );
+  const changed = await captureEdgeError(() =>
+    roomFixedMemo(
+      write(),
+      clients,
+      { ...admin, mustChangePassword: true },
+      roomId,
+    )
+  );
+  assert(
+    changed.status === 403 && calls.length === 2,
+    "password gate before RPC",
+  );
+});
+
+Deno.test("room type fee binds admin session, integer price, confirmation and strips private fields", async () => {
+  const base = readRequest(`/v1/room-types/${roomTypeId}/cleaning-fee`);
+  const headers = new Headers(base.headers);
+  headers.set("Content-Type", "application/json");
+  headers.set("Idempotency-Key", "fee577-edge-001");
+  const request = new Request(base, {
+    method: "PUT",
+    headers,
+    body: JSON.stringify({
+      baseCleaningFee: 18000,
+      expectedVersion: 1,
+      confirmFutureTargetsOnly: true,
+    }),
+  });
+  let calls = 0;
+  const clients = {
+    admin: {
+      rpc: (name: string, args: Record<string, unknown>) => {
+        calls++;
+        assert(name === "set_room_type_cleaning_fee", "exact fee RPC");
+        assert(
+          args.p_room_type_id === roomTypeId &&
+            args.p_base_cleaning_fee === 18000 &&
+            args.p_expected_version === 1 &&
+            args.p_confirm_future_targets_only === true &&
+            args.p_session_id === sessionId,
+          "canonical fee/session bindings",
+        );
+        return Promise.resolve({
+          data: {
+            roomTypeId,
+            baseCleaningFee: 18000,
+            version: 2,
+            effectiveFor: "NEW_TARGETS_ONLY",
+            privateField: "hidden",
+          },
+          error: null,
+        });
+      },
+    },
+  } as unknown as EdgeClients;
+  const result = await setRoomTypeCleaningFee(
+    request,
+    clients,
+    admin,
+    roomTypeId,
+  );
+  assert(
+    result.version === 2 && !("privateField" in result) && calls === 1,
+    "safe result",
+  );
+});
+Deno.test("room type fee rejects maid and missing confirmation without RPC", async () => {
+  let calls = 0;
+  const clients = {
+    admin: {
+      rpc: () => {
+        calls++;
+        throw new Error("unexpected RPC");
+      },
+    },
+  } as unknown as EdgeClients;
+  const base = readRequest(`/v1/room-types/${roomTypeId}/cleaning-fee`);
+  for (
+    const [actor, body] of [[{ ...admin, role: "maid" }, {}], [admin, {
+      baseCleaningFee: 18000,
+      expectedVersion: 1,
+    }]] as const
+  ) {
+    const headers = new Headers(base.headers);
+    headers.set("Content-Type", "application/json");
+    headers.set("Idempotency-Key", "fee577-edge-invalid");
+    const request = new Request(base, {
+      method: "PUT",
+      headers,
+      body: JSON.stringify(body),
+    });
+    const error = await captureEdgeError(() =>
+      setRoomTypeCleaningFee(request, clients, actor as EdgeActor, roomTypeId)
+    );
+    assert([400, 403].includes(error.status), "fail closed");
+  }
+  assert(calls === 0, "no unauthorized RPC");
 });

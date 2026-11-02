@@ -1480,6 +1480,18 @@ Deno.test("during-stay room move exposes only bounded stay, segment, cleaning an
 });
 
 Deno.test("reservation database errors redact unknown details", async () => {
+  const replan = reservationDatabaseError({
+    message: "CLEANING_DUE_REPLAN_REQUIRED: private database detail",
+  });
+  assert(
+    replan.status === 409 && replan.code === "CLEANING_DUE_REPLAN_REQUIRED",
+    "cleaning replan is an actionable conflict",
+  );
+  assert(
+    replan.message.includes("배정 일정") &&
+      !replan.message.includes("private database detail"),
+    "safe cleaning replan guidance",
+  );
   const stale = reservationDatabaseError({ message: "STALE_VERSION" });
   const overlap = reservationDatabaseError({
     code: "23P01",

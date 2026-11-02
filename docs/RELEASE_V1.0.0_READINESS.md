@@ -1,0 +1,464 @@
+# v1.0.0 개발·배포 준비 상태
+
+## 2026-11-03 현재 통합148 기준
+
+#577 관리자 타입별 기본 청소 단가와 #579 퇴실 검사 시각 보완, PR581의 Swagger 게시 계약 보완을 포함한다. 현재 source는 migration148개·SQL119파일·upgrade28개·직접 경합13개이며 정상 경로 reset은81회(checkpoint1+upgrade61+static2+경합17)다. workflow 상한은 application20분/DB60분이며 개별 제한·검사 기준은 유지한다. API 계약은0.6.0의161경로/174operation이고 실제 CI 후보 번들은19,961,858 bytes(20,000,000 제한까지38,142 bytes)다.
+
+PR581의 CI41474461400은 Node6,297건/232파일·Python142건 및 application/manifest PASS다. 개발 CI의 실제 DB 단계는 SKIPPED이며 전체 DB 성공을 뜻하지 않는다. 작성 시 진행 중인 FINAL-148-R2/run41472392339는 Swagger 보완 전6bf37e7 입력이다. 그 결과는 변경된 최종 입력의 성공 증거로 사용하지 않는다. 정확한 최종 source/tree/입력 지문·각 실행 결과와 현재 실행 권한은 진행 채팅의 단일 USER_DECISIONS.md로 확인한다. 최종 후보의 전체 DB·main 승격·운영 적용 완료를 이 문서로 선언하지 않는다.
+
+운영 history/pending은 새로 관측하기 전 미확정이며148을 적용 건수로 해석하지 않는다. 운영 migration은 실행 직전 별도 사용자 승인 대상이다. 승인된 DB→API·Swagger→프런트→실사용 확인 순서, 실제 초기화 비활성·사진 삭제 HOLD 및 기존 예약 전용 백업은 유지한다. 아래 날짜별 숫자와147/141 등 이전 후보는 당시 snapshot으로 보존한다.
+
+## 과거 2026-11-02 — 통합147의 소스 정합성 보완
+
+#558은 PR561/dev69dd35c로 보호된 병합을 마쳤다. required CI run41364851930은 application과
+migration 목록 검사 PASS이며 실제 DB 단계는 모두 SKIPPED다. Node6056·Python139,
+후보 번들19,939,264 bytes/여유60,736 bytes는 그 입력의 관측값이다.
+
+#559는 PR556에서 추가한 내부 함수의 미사용 인자와 호출 두 곳만 정리하는 append147을 준비한다.
+기존146개 원문·caller OID/권한/행은 보존하며 private helper의 서명/OID 교체는 의도된 변경이다.
+새 warning 예외는 추가하지 않는다. 과거 날짜 보존과 승인 전/후 동등성 SQL은 정의만 했고 미실행이다.
+
+통합 독립 QA에서 찾은 기존 검사3곳도 현재 주 요청→관리자 승인·다음 주 직접 제출 정책에 맞춘다.
+종료 배정 oracle, 경합의 기존 연결/잠금/대상 날짜/제한을 유지한다. 과거 true 날짜를 보존하고,
+일요일의 다음 주 경로를 구분하며 잘못된 주차 거부를 기대된 업무 충돌로 세지 않는다.
+전체 DB의 실제 경합 성공을 뜻하지 않는다. 최종 source/입력/번들은 이 보완의 CI 후 다시 고정한다.
+
+
+## 2026-11-02 — R3 실패 후 승인된 검사 정책 보완
+
+R3 run41353299781 attempt1은 설치·checkpoint·catalog/HOLD6·template·TLS/atomic21 PASS 후
+strict lint의 추가 경고로 FAIL했다. 후속 SQL·upgrade·경합 및 성공 proof는 미실행이다.
+원시 경고 30건 중 기존 허용9건을 제외한21건을 검토했고, D03-L A 승인에 따라
+불필요한 변수·명시 형변환·immutable 문자열 JSON 생성 보완과 정확 clock10 정책을 준비한다.
+실제 새 DB 검증은 NOT RUN이며 R3 승인은 소모됐다.
+
+최신 dev의 PR556 이번 주 근무가능일 관리자 승인 기능도 후보 통합 대상이다. 그 내부
+미사용 인자는 #559에서 별도 보완하며 검사 예외를 늘리지 않는다. 최종 migration/SQL 목록·
+번들·커밋·입력 지문은 모든 보완과 독립 QA 후 다시 확정한다. 이전144개 계획은 새 입력이 아니다.
+단일 USER_DECISIONS.md에 새1회안을 고정한 뒤 별도 승인을 받는다. 운영 적용도 별도 승인이다.
+
+
+## 2026-11-02 격리 검증 R2 실패와 atomic fixture 보완
+
+승인된 FINAL-144-R2는 PR553/run41348857034 attempt1에서 FAIL로 종료됐다. source3c89df1,
+실제 mergea7bc6a0의 설치·122→144 checkpoint·catalog/HOLD6·template 계약은 PASS다.
+전체 catalog193관계/481FK와 별도 검토범위192/479를 관측했으며 전체 읽기/보호 계획은
+#551 미분류 원장 때문에 차단된 상태다. 전체 초기화·복구·trigger 의미의 성공을 뜻하지 않는다.
+
+TLS 읽기 전용18검사 후 atomic8 Vitest child가 실패했다. 원본 로그는 고정 오류만 남겨
+실제 첫 실패 case와 내부 통과 수를 확인할 수 없다. 후속 lint/backup/SQL·upgrade·경합과
+oracle/proof는 미실행이다. owned TLS 컨테이너 제거와 Supabase stop은 성공했고,
+Supabase volume은 보존됐다. application은 Node5780·Edge65+586+68·Python139 PASS다.
+
+DB 없는 재현에서 fixture가 같은 합성 project/request를 재사용해 supervisor의 요청 소비 및
+실패 후 project 보류 규칙과 충돌함을 확인했다. 제품 가드를 유지하고 기존8개 검사를 각각
+다른 합성 project와 정확한 인증서 SAN으로 격리한다. 현재 case의 정확한 대상만 loopback으로
+연결하고, child 오류는 제한된 보고서의 고정 case ID·상태·개수만 기록한다. 원문 오류·SQL·
+비밀값을 출력하거나 실패를 성공으로 바꾸지 않는다. 실제 R2의 첫 실패 원인으로 단정하지 않는다.
+
+보완한 fixture의 실제 DB 검증은 NOT RUN이다. R2 승인은 소모됐으며 소스 검사·독립 QA·
+보호 dev 반영 후 새 입력과 기존 PR553 동기화1회/새 run attempt1을 USER_DECISIONS.md에
+동결한다. 새 승인 전 release 추가 push·DB 재실행은 없다. 운영 적용은 이후 별도 승인이다.
+
+## 2026-11-02 최종 격리 검증 R1 실패와 진단 보완
+
+#551은 PR552로 dev에 병합됐고, 승인된 FINAL-144-R1은 PR553/run41344850134 attempt1에 사용됐다.
+source122→144 설치/checkpoint와 application은 PASS지만 catalog harness는 FAIL이다. 후속 실제
+SQL·RLS·경합과 oracle/proof는 NOT RUN이다. Supabase stop 성공과 Docker volume 보존을 구분한다.
+
+DB 없는 재현에서 의도적으로 미분류인 메모 원장을 전체 읽기 계획에 넣는 검사 불일치를 확인했다.
+로그가 내부 오류를 숨겼으므로 실행 당시 최초 거부 지점은 확정하지 않는다. 보완 검사는 전체 catalog의
+정확한 #551 미분류 차단을 확인하고, 별도 지문으로 묶은 기존 분류 범위에서 읽기 계획/합성 사진 HOLD
+6개 검사를 유지한다. migration·삭제/보존 정책·제품 실행 코드와 후속 SQL·경합 검사는 바꾸지 않는다.
+
+보완의 소스 검사·독립 QA·dev 반영 뒤 새 후보를 동결한다. 기존 PR553의 추가 push가 유발하는
+새 전체 DB 검증은 별도 승인 전 NOT RUN이며, R1 승인·실패 결과를 재사용하지 않는다.
+현재 main 병합·운영 migration·API/Swagger 배포는 대기한다. 정확한 입력/실행안은 USER_DECISIONS.md를 따른다.
+
+## 2026-11-02 객실 고정 메모 포함 결정
+
+사용자가 #551/PR552를 검토·병합 후 이번 v1.0.0에 포함하도록 선택했다. #548 지연 예약·입실
+표시를 포함한 dev143개에 객실 고정 메모를 더해 source144개·SQL검사116파일을 준비한다.
+이 메모는 #534 배정별 지시 메모와 별개이며 예약·담당 변경 때 자동으로 지우거나 일정/배정을 생성하지 않는다.
+
+고정 메모의 순차 SQL 외에 실제 동시 CAS·같은 키 재전송/내용 충돌·잠금 대기 중 세션 무효화를
+기존 reservation 경합 fixture 구간에서 검사하도록 보완한다. 추가 reset이나 검사 생략은 없다.
+해당 실제 SQL·RLS·경합은 승인된 최종 격리 CI에서 실행할 항목이며 아직 **NOT RUN**이다.
+
+보호 dev 병합 뒤 main 인증 수정 이력을 보존해 로컬 release에 통합하고, source/tree/manifest/전체
+입력 지문·API161경로/174operation·실제 번들 크기를 재대조한다. 기존143개 실행안과 다른 PR의
+성공 proof를 새 입력에 사용하지 않는다. 정확한 최종1회안은 단일 USER_DECISIONS.md에 기록한다.
+release push/PR로 전체 DB를 시작하기 전 승인, 실제 운영 history/pending 확인 후 운영 migration 직전
+별도 승인이 필요하다. DB→API/Swagger→프런트 #268/#270/#290/#291→역할별 확인 순서를 유지한다.
+
+#396 진단·안전장치만 포함/실제 초기화는 운영사 인계 전 후속이라는 선택, 사진 삭제 HOLD,
+이미 운영 완료한 예약 백업 유지도 그대로다. [최종 DB 범위](RELEASE_V1.0.0_FINAL_DB_PLAN.md)와
+[객실 고정 메모 인계](ROOM_FIXED_MEMO_551.md)를 따른다. 아래 날짜별 수치는 당시 준비 이력이다.
+
+## 2026-11-01 #396 범위 확정과 최종 DB 계획
+
+사용자가 **#396은 진단·안전장치만 v1.0.0에 포함하고 실제 초기화는 운영사 인계 전 후속**으로
+확정했다. 이는 아래 10월25일의 전체 초기화 완성 선행 조건과 10월31일의 범위 미확정 상태를
+대체한다. 기존 SQL/업무 연동/검사를 제외하거나 실행 권한을 열지 않는다. 공개 초기화 실행
+비활성·사진 삭제 HOLD·R1/T1/S1/A는 유지하며 #396은 후속 완료까지 OPEN이다.
+
+확인 시점 dev `206c298d3889384e7835c02a5a85d93b5e60f175`와 로컬 release 후보
+`6f562f89ad498a27827f2f47cfcb5b699132219b`는 같은 tree이며 main의 #543도 포함한다.
+142개 source에는 #532 객실 READY 정정, #534 배정 메모와10경합 준비, #543 비밀번호 효과
+완료가 포함됐다. 이는 운영 pending142건이라는 뜻이 아니다. [최종 DB 실행 계획](RELEASE_V1.0.0_FINAL_DB_PLAN.md)에
+검증 입력·순서·승인/중단 조건을 정리했다. 문서 정리 뒤 최종 source SHA와 입력을 재대조한다.
+미통합 #548 등 새 기능을 포함하면 먼저 개발·QA·dev 통합 후 계획을 다시 고정한다.
+
+실제 Full DB 검증·운영 migration·초기화는 아직 NOT RUN이다. release push/PR 생성이 유발하는
+격리 전체 DB1회와 실제 운영 pending 적용은 각각 실행 전에 승인받는다. #396 후속 분리는
+최종 SQL/RLS/경합 검사, H1 운영 이력 기준 확인, 보호 병합·독립 QA를 면제하지 않는다.
+
+## 2026-10-31 #543 main hotfix의 dev 통합
+
+#546까지 포함한 로컬 후보 `6e0edba` 확인 뒤 main은 PR545의 `d3ecff1`로 전진했다.
+사용자 지시에 따라 [#543 비밀번호 효과 완료](PASSWORD_EFFECT_COMPLETION_543.md)를
+별도 dev PR로 백포트한다. 원문 SQL/hash와 기존141개 migration을 보존한 source142이며,
+새 head는 `password_effect_completion`이다. 기존 #534 메모와10경합 준비도 보존한다.
+manifest·upgrade 검사의 정확한 tip/hash와 developer head만 dev 순번에 맞게 통합한다.
+
+일반 dev PR은 source/application/Edge·독립 QA를 수행하고 **Full DB NOT RUN**으로 남긴다.
+보호 병합 후 로컬 release에 통합하고 main hotfix 포함·최종 지문을 다시 고정한다.
+아래 과거 source141/`6d13f13`/`6e0edba` 수치·지문을 새 통합본에 사용하지 않는다.
+PR545의 hotfix124 Full DB 성공도 별도 입력이므로 v1.0.0 proof가 아니다.
+
+당시 이 통합은 #396의 미완성 초기화 범위를 완료하거나 릴리스에서 자동 제외하지 않았다.
+현재 범위는 위 11월1일 사용자 결정으로 분리됐다. 최종 입력 동결 조건을 해소한 뒤에만 전체 DB를 유발하는 release push/PR
+생성·재실행 전에 승인받는다. 격리 전체 DB1회 승인은 기존 fresh/upgrade 재구축·fixture·
+실패 cleanup을 포함해야 한다. 운영 history/baseline·정확한 pending은 별도 확인하고
+운영 적용 직전에 다시 승인받는다. 현재 통합본의 실제 DB·배포·복구/UAT는 미완료다.
+
+## 2026-10-31 #534 최종 DB 검증 범위 보완
+
+#534 배정 메모의 PR539와 #535 비밀번호 hotfix는 후보에 이미 포함되어 있다.
+인계 문서 PR540도 dev에 반영했으며 기능을 중복 구현하지 않는다. 기존141개 migration과
+API·Swagger 계약은 보존한다. 실제 운영 pending 목록은 운영 이력 대조 전 미확정이다.
+
+기존 pgTAP에는 저장·생략·명시 초기화·승계·권한·과거 이력 검사가 있으나,
+기존 경합 runner는 무메모 RPC만 호출했다. 최종 검증에는 메모 전용 draft/change RPC의
+독립 DB 연결 경합, 같은 키의 재전송·내용 충돌, 버전 경쟁, 초기화와 생략의 순서별 이력
+검사를 추가한다. 응답과 실제 저장 revision·메모·원장도 대조한다.
+이 검사는 기존 reservation 경합 runner의 임시 DB와 fixture를 재사용하며 추가 reset은 없다.
+
+실제 SQL·RLS·경합 실행은 아직 **NOT RUN**이다. 소스·합성 검사는 실행 준비의 근거이며
+DB 성공 증거를 대신하지 않는다. 변경된 통합 입력은 이전 성공 증거를 재사용하지 않고,
+정확한 최종1회안을 단일 `USER_DECISIONS.md`에 다시 동결한 뒤 별도 승인을 받는다.
+운영 migration은 그 승인과 분리하며 #534/프런트 #270은 배포·실사용 확인까지 유지한다.
+
+## 이전 준비 검사 — 2026-10-31 PR542 입력
+
+이번 후속 후보는 기존140개를 보존하고 [offline 해결 완료 관측](OFFLINE_RESOLUTION_OPERATION_ADMISSION.md)
+한 경로를 추가한 **141개 source**다. HTTP 성공만으로 완료 처리하지 않고 정확한 기존 원장을
+확인한다. 나머지25개 OPAQUE 경로와 전체 reset 실행 차단은 유지한다.
+[최종 catalog 검사](RESET_FINAL_CATALOG_VALIDATION.md)는 승인된 최종 DB job에서만 실제 schema를
+기존 read-plan·사진 HOLD 부모 보호 검사와 연결하며, 행은 메모리 합성값만 사용한다.
+이141개 준비 이력과 달리 현행144개 진단은 전체 catalog의 미분류 차단과 기존 분류 범위의
+read-plan/HOLD를 구분한다. 상단의 현행 범위와 별도 승인 경계를 우선한다.
+Node212파일/5,662 tests·typecheck/build·manifest141·공개 계약·template-client와
+Edge583/65/68 검사 PASS다. 배포 후보 bundle19,997,042 bytes는 기존20,000,000 상한 안이다.
+실제 SQL/PLpgSQL·DB 경합·보호/복구·전체 초기화·운영 적용은 NOT RUN이다.
+정확한 최종 입력과 실행 승인 범위는 진행 채팅의 단일 USER_DECISIONS.md에서 동결한다.
+
+- [PR539](https://github.com/wrongstory/room-management-system-backend/pull/539)/dev `46e47ed`는
+  READY 정정과 비밀번호 응답 보완에 배정 메모를 더한140개 source다. 전체209파일/5,589 tests·
+  Edge·독립 QA·CI41079932523 PASS이며 최종 v1 Full DB·운영/UAT는 미완료다.
+- [PR537](https://github.com/wrongstory/room-management-system-backend/pull/537)/main `f1fbec94`의
+  비밀번호 hotfix는 별도123개 입력의 CI41074219126에서 Full DB PASS다. prepare SQL은
+  dev의139번째 파일과 동일하며 재구현하지 않는다. 이 proof를141개 후보에 재사용하지 않는다.
+  PR에 기록된 운영 migration·계정 복구·본인 비밀번호 UAT는 아직 NOT RUN이다.
+- 예약 백업은 [캐슬디아트 전용 저장소](https://github.com/yeosucastletheart-cyber/reservation-backup)에서
+  정기 실행·감시·실제 알림을 완료했고 #12/#273은10월27일 종료됐다.
+  [첫 실행·후속 실행 근거](RESERVATION_AUTO_BACKUP.md)와 현장 인계·실제 만료 삭제·전체 복원 한계를 구분한다.
+  기존 백엔드 백업이나 recovery 감시를 중복 설치·활성화하지 않는다.
+
+위 내용은 GitHub·소스 읽기로 대조했다. 운영 DB·Storage·Cron의 새 관측이나 실행은 없다.
+아래 날짜별 source/실행 기록은 당시 checkpoint이며 최신 완료 범위는 위 보정을 우선한다.
+
+## 2026-10-25 공통 개발 checkpoint
+
+2026-10-25 기준. 공통 구현 PR515 이후 **사용자가 선택한 방향의 준비 코드를 dev에 통합했다.**
+현장 사실은 PR517, 선택 정책은 PR518, 과거 이력의 검증 설계는 PR519,
+초기화 대상의 보호 계획은 PR520, 과거 DB 이력의 관측·검증 준비는 PR521,
+함수 선언 호환은 PR522, S1 템플릿 인계 효과·감사 보존은 PR523,
+청소 진행 변경의 완료 관측은 PR524까지 통합했다. 첫 사전검증에 사용한 코드 기준은
+`a17f97a1b54ac0899cc3c31c6e3d4f55c9de128f`다.
+정책별 초기화 실행 구현과 실제 검증·배포가 남아 있으며 릴리스 후보는 아직 동결하지 않았다.
+source/dev 통합, 실제 DB 검증, 운영 배포, 실제 기기 확인을 별도로 기록한다.
+이 문서는 실행 승인이 아니다. 사용자 결정·실행 승인 자료는 현재 진행 채팅의
+`USER_DECISIONS.md` 한 곳에서만 유지한다.
+
+## #526 사전검증 실패와 수정 준비
+
+2026-10-25 사용자가 승인한 D03-P 격리 설치1회는 위 source의 migration126에서
+SQLSTATE42601로 실패했다. helper 두 호출 사이의 미완성 IF 본문이 원인이며 후속
+metadata/13개 회귀는 NOT RUN, 자동 재실행0이다. 신규 자원 정리와 기존 자원 목록 보존은
+대조했고 실제 운영 DB는 변경하지 않았다. #526은 원격 미적용126의 counter 치환을
+한 번에 완결하도록 수정하고 소스 회귀4개를 추가했다. 전체5,383 tests·typecheck/build 및
+dev137/과거 manifest 검사는 PASS다. 새 지문은 manifest와 기존 upgrade의
+정확한126 소스 검사에 함께 반영하며 검사 예외를 넓히지 않는다.
+[원인·직접 수정 근거·검증 한계](PHOTO_UPLOAD_BATCH_411.md)를 따른다.
+수정본 설치와 photo batch SQL 회귀를 포함한 다음 격리 검증은 새 입력의 별도 승인 후에만
+수행한다. 실패한 검증이나 소스 parser 통과를 최종 Full DB 성공 증거로 재사용하지 않는다.
+
+### #528 수정본 R2 설치 실패와 후속 준비
+
+위126 수정은 PR527에서 dev `c12ba7b42195dec7e79ff363ab197ae1d1491bd9`로 보호 병합했다.
+별도 승인된 R2는 같은 Git tree의 source `ad76ddb05bda7753dcbd9e16e8369e87593fb82f`와
+새 격리 프로젝트·14개 회귀를 대상으로 설치1회 실행했으나 migration136 statement1의
+SQLSTATE42601로 실패했다. IF 조건의 괄호 없는 CASE 내부 THEN이 조건 경계로 읽힌 것이
+원인이다. 후속 metadata·14개 SQL 회귀는 NOT RUN이며 자동 재시도0, 승인1회는 소모했다.
+생성 자원·소유 호스트 프로세스0개와 기존10개 container·5개 volume·5개 network·동일 daemon
+보존을 확인했고 정리 독립 QA도 PASS다. 운영 DB·Auth/provider·실제 초기화는 실행하지 않았다.
+
+수정 전 원격 읽기에서 production122·recovery73,136/137 적용0을 확인하여 미적용136의
+생성 원본 CASE에 괄호2문자만 추가하고 SQL·manifest·기존 upgrade의 정확한 지문을 갱신했다.
+수정 전 실패2개를 재현한 회귀와 관련3파일41 tests, 전체200파일/5,385 tests·타입/빌드 및
+과거/dev137 manifest는 PASS다. 소스 AST와 좁은 IF 경계 검사는 전체 PL/pgSQL 컴파일이나
+실제 DB 설치를 증명하지 않는다. [원인·수정 범위·검증 한계](RESET_TEMPLATE_HANDOVER_EFFECT.md)를
+따른다. 수정본 설치·14개 SQL 회귀·최종 Full DB는 NOT RUN이고, 다음 실행은 정확한 새 입력과
+대상·정리 범위를 고정한 별도 승인이 필요하다. 실패한 사전검증으로 남은 #396 개발의 DB
+선행조건이나 v1 출시 gate가 충족됐다고 표시하지 않는다.
+
+## 2026-10-25 추천 방향 선택 후 재개
+
+사용자는 공통 개발 종료 후 제시한 추천안을 선택했고, 실제 DB 실행 승인은 정확한 대상이
+확정된 뒤 따로 확인하도록 했다. 초기화 대상에 한정한 일회 보호·복구 준비, 현재 게시
+템플릿만 새 초안으로 등록한 뒤 검증·게시, 최근 비밀번호 확인 5분을 선택했다. 기존 DB
+이력 공백은 이력을 보존한 별도 검증 정책을 설계한다. 설계 선택은 baseline 수용이 아니다.
+
+백업은 예약 전용·매일03:00 KST·최소15일과 GitHub 알림을 유지한다. 업무 알림 정기 실행,
+서명 호출과 호출 전용 키 교체, 별도 프런트 사진 연동의 준비를 진행한다. 운영 DB 비밀번호나
+백업키 재입력을 요구하지 않는다. 현재 미실행인 SQL·삭제·키·Cron·발송·정기 활성화를
+추천안 선택만으로 실행한 것으로 표시하지 않는다.
+
+사용자가 직접 확인한 현장 사실은 다음과 같다. 실제 실행 직전의 관측과 기기 검증은 별도다.
+
+| 항목 | 확인 내용 | 적용 경계 |
+| --- | --- | --- |
+| 운영 시작 | 현재 자료는 시험·개발 자료만 있음 | DB lifecycle/운영 시작 잠금 전환이나 실제 초기화 승인이 아님 |
+| 기본/최대 인원 | standard2/2, premium2/3, oceanFamily4/6, oceanPremium2/4 | 현행 값 보존, 새 backfill 없음. 이후 developer 영향 미리보기·CAS·예약 충돌 검사로 변경 |
+| 608호 | 차단 유지, 나중에 사용자가 해제 | 영구 invariant/seed를 만들거나 자동 해제하지 않음 |
+| 관리자·메이드 기기 | 우선 갤럭시 | 실제 브라우저/OS·알림 권한·사진/수신 결과는 시험 때 기록 |
+| PIN 시트 | 현재 미사용, 실제 운영에서 사용할 예정 | 아래 production 대상 확인·최소 권한·현재 버전 확인 전 기존 pending 작업을 실행하지 않음 |
+
+### 별도 프런트 연동의 최소 범위
+
+대상 정본은 `makee-ham/room-management-system`이다. 이 백엔드의 범위 정의만으로
+다른 채팅 메시지·프런트 저장소 변경·실기기 검증이 완료됐다고 처리하지 않는다.
+
+| 항목 | 연결할 계약 | 확인할 동작 |
+| --- | --- | --- |
+| 사진 목록 | `GET /v1/photos/{photoId}/thumbnail` | private/no-store 이미지, 미지원 시 실패 표시. 원본 조회는 별도 요청이며 확대는 기존 content |
+| 같은 묶음 두 전송 | 기존 upload-batches 예약 후 최대2개의 binary 전송 | 두 item key·원래 collection revision 고정, 응답 유실은 같은 입력 재사용. 선택 순서 고정은 보장하지 않음 |
+| 갤럭시 실사용 | 기존 1장 경로와 새 경로의 역할/회차 권한·재시도 | 1/5/20장·중단/재접속·오래된 배정·제출 충돌을 구분하고 실제 결과만 기록 |
+
+사진 수량·보존·권한·입력 크기 계약은 [썸네일](PHOTO_THUMBNAIL_411.md)과
+[두 전송](PHOTO_UPLOAD_BATCH_411.md)을 따른다. source 개선을 실제 속도 개선이나
+프런트 연동 완료로 보고하지 않는다. 현재 v1 범위의 source 준비를 마친 뒤
+최종 후보와 검증 입력을 다시 고정하고 필요한 DB 실행 승인만 따로 확인한다.
+전체 초기화 보호·복구·실행 완성은 11월1일 결정에 따라 운영사 인계 전 후속이다.
+
+## 개발 범위와 현재 근거
+
+| 항목 | 통합/검증 근거 | 남은 단계 |
+| --- | --- | --- |
+| #300 비밀번호 변경 원장 검사 | PR482 / dev f107c2e / CI40152473122 | 실제 SQL 회귀 |
+| #345 지연 알림 전달 시각 | PR483 / dev f2f4538 / CI40152896541 | migration123·실제 worker 검사 |
+| #415 배정 카드 묶음 조회 | PR456 / dev fed9331 / CI40154044290 | migration124·동일 조건 성능 측정 |
+| #442 공통 인증 조회 | v0.9.5 이후 운영 반영, v0.9.9 전체 DB CI39911377194 근거는 기존 이슈에 보존 | 동일 조건 p50/p95·호출 수·쓰기 실사용 측정; 재구현하지 않음 |
+| #411 비공개 썸네일 | PR491 / dev a355ba0 / CI40154656657 | 실제 Drive·프런트 연결·기기 확인 |
+| #396 읽기 전용 초기화 미리보기 | PR402 / dev4bb1d72 / CI40155598074 | migration125 실제 SQL; 삭제 기능 아님 |
+| #492 장기 호출 키 대신 서명 호출 | PR493 / devd27d69e / CI40156336314 | 실제 키/SQL/worker/Cron 전환·첫 실행 |
+| #378 유한·원자 운영 변경 실행기 | PR392 / dev9a29044 / CI40157027352 | 실제 PG/TLS·원자성·응답 손실·운영 검증 |
+| #14 배포 크기 보완 | PR495 / devf25e5b6 / CI40158118738, 실제 candidate19,620,587B | 후속 통합에도 기존20MB 제한과 같은 회귀 검사 유지 |
+| #411 안전한 2장 업로드 | PR494 / dev60cd6af / CI40157463321 | migration126·SQL/Drive·프런트 확인 |
+| #396 행/FK 영향 | PR496 / dev80b679f / CI40158707931, app4389/159 | migration127 실제 SQL·Auth ID census·FK 지원 범위 검증; 삭제 권한 없음 |
+| #378 TLS·원자 실행 fixture | PR498 / devae7d759 / CI40159620354 | 준비된 8개 실제 PG fixture 검사 NOT RUN |
+| #396 운영 잠금·재인증 공통 계약 | PR497 / dev943f220 / CI40159977126 | migration128·실제 Auth/DB 검증. 시험 자료/5분 정책은 확정됐으며 실제 control 설정은 별도 |
+| #396 전체 템플릿 inventory | PR499 / dev11e7cf3 / CI40160509940 | migration129 실제 SQL; 확정된 새 초안→검증→게시의 실행 연결 |
+| #396 내용 snapshot | PR500 / dev5776959 / CI40161054266 | 실제 같은 snapshot과 실행 계획의 결합 |
+| #396 실행 관측 receipt | PR501 / devb4422dc / CI40161368759 | 정확한 계획/승인 연결; 순수 모델은 실행 권한 아님 |
+| #396 HTTP 쓰기/감사 진입 제어 | PR502 / dev8b40efd / CI40161793967 | migration130/131 실제 SQL; Auth/외부 효과 UNKNOWN은 별도 종료 증거 필요 |
+| #396 템플릿 재등록 후보 생성 | PR503 / deva97c84e / CI40162887968 | 현재 게시본 선택 확정. 과거 이력 보호와 새 등록·게시의 실제 검증 |
+| #396 알림 worker 진입 제어 | PR504 / dev9abe806 / CI40162316668 | migration132·실제 완료/실패/중단·활성화 검증 |
+| #396 닫힌 읽기 수집기 | PR505 / dev9558ff9 / CI40162619689 | 실제 PG 권한/격리/lock/취소/내용 수집 검증 |
+| #396 논리 참조 20개 표면 검사 | PR506 / dev42c3f4c / CI40163244532 | 같은 실제 snapshot·선택된 계획과 결합; 외부 파일 존재 검증 별도 |
+| #396 native PG 읽기 연결 | PR507 / devdae6987 / CI40163826696, app4834/175 | 실제 TLS/DB 연결·후속 계획 결합 |
+| #396 예약 scheduler 진입 제어 | PR508 / dev9d6428b / CI40164226762, app4845/176·최종관련111 | migration133 실제 SQL·기존 두 transaction의 부분 적용/heartbeat 검증 |
+| #396 PIN 증분 worker 진입 제어 | PR509 / dev1e6557d / CI40164678173, app4896/179 | migration134 실제 SQL·기존 local-only 대상/정확한 시트 입력 검증, full-resync HOLD |
+| #396 사진 삭제 HOLD 진입점 | PR510 / devb60e508 / CI40164986370, app4909/180·Edge65/560/68 | 실제 배포·기존 요청 종료 관측; 삭제/정리 활성화 없음 |
+| #378 기존 history 표현 | PR511 / dev5d4166e / CI40165362275, app4936/180 | 신규 apply 불변, 기존110개 대응·현재 baseline 미완료12개 차단 |
+| #396 영속 receipt 저장 | PR512 / dev80f766f / CI40166052564, app4973/182·Edge65/560/68·독립60 | migration135 실제 SQL·동시성·Auth·저장 결과 검증; 저장 확인은 실행 승인 아님 |
+| #396 동일 snapshot 검토 결합 | PR513 / dev5d59ee8 / CI40166870690, app5019/184·Edge65/560/68·독립255+71/root97 | 명시 정책과 실제 증거 연결·최종 DB/외부 효과 검증 |
+| #396 승인 일회 소비 | PR514 / deva15c6cd / CI40167140701, app5023/183·통합관련358·독립105·compiled import | 실제 승인/보호 증거 발급·지정 대상 실행과 구분 |
+| #396 같은 승인 계획의 재검증 | PR515 / dev5b2d8ed / CI40167731766, app5104/187·compiled import·독립61/root25 | 실제 계획·승인과 효과 연결; 기존 일회 snapshot 지문을 재사용하지 않음 |
+| #396 선택된 인계 정책 | PR518 / dev4d3df96 / CI40171337361, app5133/188·독립116/root54 | R1 5분/T1 현재 게시본/S1 초안→검증→게시의 계획 결합. 실제 설정·등록·게시 NOT RUN |
+| #14 과거 DB 이력 검증 설계 | PR519 / dev53e585a / CI40171913594, app5127/188·통합349+46·root23 | 현재 source 재현8건/별도 원본4건 구분. 실제 catalog 대조·baseline 수용과 실행 권한 없음 |
+| #396 일회 보호 계획 | PR520 / dev91cc525 / CI40172497106, app5173/190·후속111·독립88/root44 | 192개 관계·선택 계획 결합과 사진/이력 FK 부모 충돌 진단. 실제 보호·복구·실행 권한 없음 |
+| #14 과거 DB 이력 관측·검증 준비 | PR521 / dev4ab83ec / CI40174366081, app5288/194·독립264+11/root27 | hash-only metadata 및 승인된 최종 검증의 source122 checkpoint. 실제 DB 관측·baseline 수용·전체 DB NOT RUN |
+| #378 함수 선언 출력 설정 | PR522 / dev8f32a7d / CI40175403534, app5294/194·독립107 | 함수의 정확한 UTC/ISO 선언만 지원. 원문·본문 검토 및 실제 실행 차단 유지 |
+| #396 S1 템플릿 인계 효과·감사 보존 | PR523 / devc8d76e2 / CI40176373907, app5337/197·독립85+7 | source136의 실제 시각·초안 검증·게시·슬롯·감사 readback 준비. 공개 실행 비활성, 실제 DB/보호/복구/초기화 NOT RUN |
+| #396 청소 진행 변경의 완료 관측 | PR524 / deva17f97a / CI40177317552, app5379/199·Edge·독립172 | source137의 단일 경로·세 공개 action만 정확한 기존 원장과 결합. 나머지26 OPAQUE 및 실제 DB/운영 활성화 차단 유지 |
+| #12/#273 예약 전용 백업 | 캐슬디아트 전용 main·App·signed 감시 운영,10월26일 첫 schedule40220823907 및27일40378949741 성공,27일 이슈 종료 | 현장 PC 인계 #6·지속 감시. 실제15일 만료 삭제와 전체 DB/Auth/PIN/사진 복원은 완료 주장 아님 |
+| #112 알림 운영 | 과거 실제 Push 수신 근거 보존 | 현재 heartbeat/Cron·대기 작업·실제 수신 재확인 |
+| #13 역할별 실제 사용 | 자동 검사와 프런트 계약 대조 | 실제 기기/UAT·현장 입력 |
+
+각 dev PR의 migration PASS는 manifest/source 검사다. 별도 승인한 두 격리 설치는 위와 같이
+실패했으며 후속 SQL 회귀는 NOT RUN이다. **최종 전체 DB·운영 migration/reset은 NOT RUN**이다.
+CI 실패를 숨기지 않는다. PR402의 Python 수치 실패,
+PR392의 생성 manifest 입력 hash 실패 등은 후속 source 보완과 새 exact CI로 해결했다.
+과거 PR392의 실제 SQL 회귀 실패는 이번 합성 검사로 성공 처리하지 않는다.
+공통 단계의 전체 애플리케이션 검사는 187파일/5,104 tests PASS였으며,
+후속 PR524 통합에서는 199파일/5,379 tests·typecheck/build가 PASS다.
+PR523 Edge는 65/560/68 tests·report19,906,630B·backup99,006B였으며, 변경된 PR524 입력도
+정본 Edge 검사에 통과했다. PR524 출력에서 전체 suite별 수와 report 크기를 별도 확보하지
+못했으므로 이전 수치로 대신하지 않는다. 기존20MB 제한은 유지했으며 실제 배포 결과가 아니다.
+
+### #396 구현과 아직 완료하지 않은 부분
+
+통합한 구성요소는 [내용 snapshot](RESET_CONTENT_SNAPSHOT.md),
+[읽기 수집기](RESET_READONLY_COLLECTOR.md), [논리 참조](RESET_LOGICAL_REFERENCES.md),
+[템플릿 후보](TEMPLATE_HANDOVER_PLAN_BUILDER.md), [실행 관측 모델](RESET_EXECUTION_RECEIPT.md),
+[영속 저장](RESET_RECEIPT_STORE.md), [같은 snapshot 검토](RESET_REVIEW_COMPOSITION.md),
+[승인 기록 소비](RESET_APPROVAL_CONSUMPTION.md), [계획 재관측](RESET_PLAN_REVALIDATION.md),
+[일회 보호 계획](RESET_PROTECTION_PLAN.md), [S1 효과 준비](RESET_TEMPLATE_HANDOVER_EFFECT.md),
+[운영 안전 장치](DEVELOPER_OPERATION_GATES.md)에 명시돼 있다.
+HTTP와 worker의 source 진입 제어는 실제 운영에 설치된 전체 coverage 증명이 아니다.
+기존 세션·Auth 관리 API·owner SQL·Drive 직접 작업·초기 설치 전 진행 작업을 포함해
+쓰기 가능 경로와 미종료 효과를 확인해야 한다. 기한 경과나 나중의 성공으로 UNKNOWN을
+해제하지 않으며, 미확인 경로가 있으면 초기화는 계속 차단된다.
+
+남은 전체 초기화 구현의 전제는 삭제 대상에 맞는 보호·복구 방식, 실제 FK/catalog와
+사진 보존 부모 충돌을 반영한 행/필드별 계획, Auth/PIN 복구·종료 근거다. S1의 새 초안·검증·게시와
+과거 참조·감사 보존은 source136으로 준비했지만 실제 SQL 및 전체 삭제 효과는 미검증이다.
+운영 상태/재인증 5분의 실제 설정, 정확한 승인 권한과 공개 실행의 연결도 별도로 남는다.
+별도로 정책값을 고정하지 않는 같은 snapshot의 catalog·내용·참조·템플릿·운영 상태 연결과
+신뢰된 영속 원장의 최신 head/CAS는 PR512, snapshot 조립은 PR513으로 통합했다.
+정확한 승인 결합·일회 소비는 PR514, 같은 계획의 별도 비교·재검증 공통부는 PR515로
+정책값을 고정하지 않고 구현·검증·통합했다. 어느 구성요소도 실행 권한을 자동 발급하지 않는다.
+실제 승인·보호 근거의 발급과 구체적 대상 실행·재조정은 선택한 정책·실제 증거를 연결해야 한다.
+순수 검사와 source adapter의 통과를 이 전체 기능의 완성으로 보고하지 않는다.
+선택에 앞서 되돌리기 어려운 삭제 정책이나 허용 기본값을 정하지 않았다.
+
+10월25일에는 전체 초기화 미완성을 이유로 release PR을 검증용으로 만들지 않고 별도
+사전검증 예외를 검토했다. **11월1일 범위 결정으로 이 선행 조건은 대체됐다.** v1에 이미
+포함된 최신 schema/FK/catalog와 source136/137/141 등의 권한·참조·원자적 rollback 검사는
+승인된 최종 릴리스 DB1회에 유지한다. 전체 초기화 후속 완성이나 별도 사전검증을 일반
+배포에 추가로 요구하지 않는다. Full DB proof·H1 baseline 수용·운영 적용·실제 초기화는
+각각 구분하며, 실행 전 승인과 실패/취소 후 재승인 원칙은 바꾸지 않는다.
+
+## 실제 운영과 source의 차이
+
+2026-10-25 읽기 확인에서 production은 migration122, API54, scheduler22,
+notification-delivery13이다. health는200/ok, 공개 OpenAPI는154경로166동작이다.
+API54의 원본 파일 조회는 서버 오류로 실패했으므로 현재 dev/main과의 source 정합성은
+UNKNOWN이다. 배포 번호나 health 성공만으로 소스 일치를 주장하지 않는다.
+
+14:02/14:03 KST의 운영 history metadata 읽기에서122개 이름·순서는 source와 일치했고
+중복·미등록은 없었다. timestamp는45개 일치/77개 차이이며 마지막 운영
+`20261023060721`은 source `20261022135443_post_approval_memo_only.sql`에 대응한다.
+최초 LF 지문 비교 뒤 원시 bytes를 재대조해48개 원문·7개 끝CRLF추가·55개 CRLF변환후
+끝CRLF추가의 정확한 대응을 확인했다. 기존 whole-file 한 원소 history는 신규 apply의
+CLI split 표현과 달라 PR511에서 고정된 과거 표현 비교를 추가했다. 나머지12개는
+현재 baseline 대응이 완료되지 않아 차단한다. 추가 읽기에서12개 중10개의 원인은 exact raw SHA로
+확인했다. 7개는 #458의 유한 timeout·transaction wrapper, 1개는 전체 줄 주석/끝 공백 제거,
+`harden_data_api_grants`는 과거 Git blob, index112는
+[#425에 기록된 실제 wrapper](https://github.com/wrongstory/room-management-system-backend/issues/425#issuecomment-6080544897)와 일치한다.
+`initial_core_schema`와99B의 `complaint_deadlines_non_blocking`은 원본 대응이 미확정이다.
+이 조사로 허용 변환을 늘리거나 현재 source·DB schema와 동등하다고 간주하지 않는다.
+현재 codec의110개 대응과 추가10개 원인 확인은 서로 다른 근거이며,12개 차단은 유지한다.
+두 원본을 복원할 출처가 없으면 현재 catalog·권한·후속 migration의 독립 대조에 기반한
+별도 baseline 검증이 필요하다. 사용자는 H1의 설계·준비를 선택했고
+[검증 설계](MIGRATION_BASELINE_REVIEW_POLICY.md)를 PR519로 통합했다.
+원인 설명10건과 현재 source에서 재현한8건을 구분하며 실제 baseline 수용은 아직 하지 않았다.
+PR521의 [관측·검증 준비](MIGRATION_BASELINE_METADATA.md)는 업무 원문 대신 고정된
+history·catalog·권한의 해시와 건수만 수집한다. 승인된 최종 Full DB 검증의 기존 fresh 단계에서
+source122까지 재구축한 구조를 관측한 뒤 같은 고정 소스의 최종 tip을 적용하도록 준비했다.
+추가 reset을 반복하거나 운영 DB를 변경하지 않는다. 실제 검사는 NOT RUN이며,
+부분 catalog·정의 해시만으로 과거 데이터 효과나 전체 권한의 동등성을 증명하지 않는다.
+이 metadata 대조는 strict history codec·전체 내용·실제 schema 정합의 성공 증거가 아니다.
+전체 mapping과 실행기의 baseline/pre/post 계약을 고정하기 전 history repair나
+이미 적용된 SQL의 재실행으로 차이를 덮지 않는다. 실제 변경은0회다.
+
+[#442 최신 배포 기록](https://github.com/wrongstory/room-management-system-backend/issues/442)은
+공통 인증 조회 통합의 운영 반영을 확인한다. 과거 성능 문서의 구현 후보 표현으로 이 상태를
+되돌리지 않는다. 다른 날짜·API 버전·데이터의 로그 분포를 개선 전후 실측으로 섞지 않는다.
+배포 후 같은 역할·입력·데이터·요청 수로 auth/me, rooms, assignments, payroll,
+notifications와 사진을 구분해 p50/p95·DB 호출 수·오류를 비교한다. 사진은 원본/썸네일,
+1장/2장 전송과 기기·네트워크·이미지 형식을 구분하며 합성 시간은 운영 속도로 보고하지 않는다.
+
+알림 delivery heartbeat가 없고 대기10건은 당시 모두24시간 이상이었다. 활성 Cron은
+reservation-transition-every-minute만 확인했다. 이 과거 집계는 미래 발송 승인이 아니며
+실제 전환 직전에 대상·건수·만료 상태를 다시 확인한다.
+
+12:27 KST 읽기 집계에서 room-pin-sheet-sync11은 worker 상태idle, heartbeat0,
+pending2건이다. 활성 Cron은 여전히 예약 전이 하나다. 배포 목록의 ACTIVE는 함수가
+배포돼 있다는 의미이며 정기 실행 성공을 뜻하지 않는다. 기존 PIN 시트 증분 대기 작업은
+실제 대상·현재 PIN 버전·시트 방향과 현장 사용 여부 확인 전 실행하지 않는다.
+사용자가 현재 미사용·운영 시 사용 예정임을 확인했으므로 기존 증분 경로의 정확한 production
+대상·최소 권한·현재 PIN 버전·실제 시트 방향을 고정해 활성화를 준비한다. 미확인 pending2건을
+유효한 운영 데이터로 가정하지 않는다. 범위에서 제외한 full-resync #137은 확대하지 않는다.
+photo-purge11도 배포 목록에 있으나 사진 삭제 HOLD와 Cron 미활성 경계를 유지한다.
+
+OpenAPI의 기존 계약 표기0.6.0과 npm package 표기0.1.0은 현재 source 값이다.
+현재 source OpenAPI·Pages·계약 검사는161경로174동작이다. 이전 source157/169와 2026-10-25 운영154/166은 과거 snapshot이며 새 운영 배포 상태로 사용하지 않는다.
+[v0.7.0](RELEASE_V0.7.0.md)과 [v0.9.4](RELEASE_V0.9.4_DEPLOYED.md)의 기존 방침대로
+Git 제품 릴리스, HTTP 계약 버전, private npm package 버전을 별도로 관리한다.
+v1 태그를 위해 계약을 임의로 1.0.0으로 올리지 않는다. 최종 릴리스에서는 tag/main SHA,
+DB history/manifest, API·worker의 실제 배포 artifact hash와 공개 계약을 함께 대조한다.
+
+## 최종 검증과 배포 순서
+
+1. 위 공통 source의 애플리케이션/Edge/계약·독립 QA·dev 통합 완료 근거를 확인한다.
+2. 최신 dev의 정확한 source·검증 입력 지문·pending SQL·운영 설치 SQL을 동결하고,
+   사용자 결정 문서에 실제 선택지/추천·영향·비용·미실행 항목을 한 번에 제시한다.
+   결정으로 source가 달라지면 변경 구현·QA·dev 통합을 먼저 마친 뒤 후보를 다시 고정한다.
+   그 전에 아직 모르는 최종 SQL이나 재실행을 포괄 승인받지 않는다.
+3. 해당 source의 `release/v1.0.0 → main` PR 생성/push가 유발하는 전체 DB 검증은
+   **구체적으로 승인된 1회**만 수행한다. 실패/취소/입력 변경 후 재실행은 별도 승인이다.
+   [최종 DB 검증 정책](FINAL_DB_VALIDATION.md)의 동일 PR/입력 성공 proof만 재사용한다.
+4. 보호 조건·전체 검사·독립 QA·미해결 대화를 확인해 release를 main에 반영한다.
+   main의 동일 입력 proof 확인이 성공하기 전 운영 배포하지 않는다.
+5. 실제 운영 history/version/name/내용을 대조한 pending만 별도 실행 승인 범위에서
+   순서대로 적용하고 readback한다. history repair·자동 전체 db push는 사용하지 않는다.
+   APPLIED/NOT_APPLIED/UNKNOWN 판정과 중단은 [실행기 계약](MIGRATION_EXECUTION_RUNTIME.md)을 따른다.
+6. 호환 API/필요 worker·공개 OpenAPI/Swagger를 반영하고 안전 smoke를 확인한다.
+   변경된 DB에 호환되지 않는 옛 API를 단독 복귀시키지 않는다.
+7. 이미 운영 중인 전용 예약 백업·감시의 최신 증거를 확인하고 중복 활성화하지 않는다.
+   별도 승인된 업무 알림·예약 작업의 실행·실패 처리와 역할별 UAT를 확인한다.
+   정확한 source/운영 일치와 인계가 끝난 뒤 v1.0.0 tag/Release를 기록한다.
+
+실제 데이터 초기화는 일반 배포 단계에 섞지 않는다. 별도 보호·복구 범위, 운영 시작 전
+상태, 개발자 재인증, 중단/진행 중 작업 증거, 정확한 대상과 1회 승인까지 충족해야 한다.
+예약 백업은 Auth/PIN/사진/청소/주급을 보호하지 않는다. 사진 삭제 HOLD를 우회하지 않는다.
+
+## 프런트 및 현장 확인 경계
+
+정본은 `makee-ham/room-management-system`이다. 11:35 KST 읽기 기준 main
+`f9fe28d91c2b5b012489273a9756cdaaa5dbef8c`, dev
+`a76f0fee099bdd052d64478cb7c43019c79120f3`의 DOCS32/33/35/37/38/39를 대조했다.
+기존 한 장씩 업로드·같은 키/Blob/CAS 재시도, 인증 사진 조회 동시4개, snapshot 사용 계약을
+보존한다. 새 썸네일·2장 batch는 별도 프런트 연결과 검증이 필요하다.
+
+최소 현장 확인은 관리자/메이드의 사진 실패 후 동일 입력 재시도, 모바일/HEIC·20장,
+배정/오늘·내일/자정 이월, 알림 상세 접근과 권한, PIN Excel preview/apply다.
+Drive PIN import는 현재 프런트에서 OFF인 별도 경계이며 임의로 켜지 않는다.
+실제 PIN 변경·업무 생성·수신자 발송은 안전 읽기 smoke로 취급하지 않는다.
+자동 검사가 사용자의 실제 기기 결과를 대신하지 않는다.
+
+## 운영 인계에서 남겨야 할 증거
+
+- final main/tag·manifest·실제 history mapping·pending 적용별 readback과 호환 배포 hash
+- health/인증거부/권한별 안전 조회·OpenAPI/Swagger의 source 일치
+- 예약 전용 백업 저장·readback·복구 조회·15일 보관·첫 정기 성공·감시와 실제 알림 수신
+- scheduler/알림 heartbeat·실패/재시도/UNKNOWN 중단 절차와 책임 범위
+- UAT 결과와 미확인 현장 값, 초기화/사진 삭제 등 대기 정책
+
+#14의 2026-10-24 범위에서 제외한 사진 purge 활성화 #9, 운영 콘솔 확대 #44,
+Sheets full-resync #137, 근거 없는 성능/CI 확장을 되살리지 않는다.
+
+Refs #14, #13, #12, #112, #378, #396, #411, #492.

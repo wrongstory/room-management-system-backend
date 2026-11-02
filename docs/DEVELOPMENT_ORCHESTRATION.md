@@ -1,5 +1,19 @@
 # 개발 오케스트레이션·source 승인 기준
 
+## 2026-10-25 #487 보안 패치 후보
+
+Zod·fast-uri 및 Edge 생성물 보안을 보완한다. 정상 API 계약과 프런트 연결은 동일하며 운영 미배포다.
+검증·도달 범위·DB 승인 경계는 [보안 기록](./DEPENDENCY_SECURITY_487.md)을 따른다.
+
+
+## 2026-10-25 dev 통합 — #485
+
+운영의 마지막 확인 기록은 [v0.9.9 배포](https://github.com/wrongstory/room-management-system-backend/pull/477#issuecomment-6359461664)의 API53 / migration122 / main3e805249다. 아래 과거의 현재·후보·미배포 표현은 각 checkpoint 당시 상태다.
+이번 변경은 main의 검증·문서 보완을 dev로 복원하며 API 계약·운영 runtime·migration 파일을 변경하지 않는다. dev의 #479/#480 보안 의존성과 #481 PIN 오류 진단은 보존하며 아직 운영 반영과 구분한다.
+Full DB/SQL/upgrade/경합 및 운영 migration은 이번 작업에서 NOT RUN이다. 최종 릴리스의 실제 DB 실행 전에 별도 사용자 승인을 받는다. 프런트 코드 변경이나 새 API 연결은 필요하지 않다.
+세부 검증·인계는 [통합 기록](./RELEASE_VALIDATION_BACKPORT_485.md)을 따른다.
+
+
 > 2026-10-13 최신: [v0.9.5 최종 검증 후보](./RELEASE_V0.9.5.md).
 > 아래 10월10일 이전의 현재/승인 문구는 당시 기록이다. 운영 변경은 별도 승인이다.
 

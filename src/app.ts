@@ -1,15 +1,20 @@
+import { admissionConfig, assertAdmissionTarget, withAdmissionRpc, withAtomicAdmissionRpc } from './modules/developer-reset/http-admission.js';
+import { installHttpAdmission } from './modules/developer-reset/http-admission-node.js';
 import cors from '@fastify/cors';
+import { randomUUID } from 'node:crypto';
+import { roomPinOperation, roomPinFailureDiagnostic } from './lib/room-pin-diagnostic.js';
 import { RoomPinTransfer } from './modules/rooms/room-pin-transfer.js';
 import { GoogleRoomPinImportSource } from './modules/rooms/google-sheets-pin-import.js';
 import { roomPinImportCredentials } from './modules/rooms/google-sheets-pin.js';
 import { roomPinTransferDatabaseError } from './modules/rooms/room-pin-transfer-http.js';
 import { createRoomPinTransferRoutes } from './modules/rooms/room-pin-transfer.routes.js';
+import { createDeveloperResetPreviewRoutes, SupabaseResetPreviewService, type ResetPreviewService } from './modules/developer-reset/reset-preview.routes.js';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { ZodError } from 'zod';
 import type { AppEnv } from './config/env.js';
-import { loggerOptions } from './config/logger.js';
+import { loggerOptions, safeRequestLog } from './config/logger.js';
 import { type Actor, canManageAccounts } from './domain/actor.js';
 import { AppError } from './lib/app-error.js';
 import { apiTimingEligible, apiTimingHeaders } from './lib/api-timing.js';
@@ -89,6 +94,7 @@ export interface AppServices {
   rooms: RoomService;
   roomPinSheetOperations?: RoomPinSheetOperationsService;
   roomPinTransfer?: RoomPinTransfer;
+  resetPreview?: ResetPreviewService;
   reservations: ReservationService;
   payroll: PayrollService;
   complaints?: ComplaintService;
@@ -125,8 +131,13 @@ function bearerToken(authorization: string | undefined): string {
 
 export async function buildApp(options: BuildAppOptions): Promise<FastifyInstance> {
   const app = Fastify({
-    logger: options.logger === false ? false : loggerOptions(options.env.LOG_LEVEL),
-    requestIdHeader: 'x-request-id',
+    logger: options.logger === false ? false : { ...loggerOptions(options.env.LOG_LEVEL), serializers: { req: safeRequestLog } },
+    requestIdHeader: false,
+    genReqId: request => {
+      if (roomPinOperation(request.method ?? '', request.url ?? '')) return randomUUID();
+      const supplied = request.headers['x-request-id'];
+      return typeof supplied === 'string' && supplied ? supplied : randomUUID();
+    },
     trustProxy: true
   });
   const requestStarts = new WeakMap<object, number>();
@@ -145,7 +156,26 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   let services = options.services;
   let submissionService = options.submissionService;
   let runtimeClients: SupabaseClients | undefined;
-  const clientsForRuntime = () => runtimeClients ??= createSupabaseClients(options.env);
+  const operationConfig = admissionConfig(options.env.DEVELOPER_OPERATION_ADMISSION_MODE,
+    options.env.DEVELOPER_OPERATION_TARGET, options.env.DEVELOPER_OPERATION_BUDGET_MS);
+  assertAdmissionTarget(operationConfig, options.env.SUPABASE_URL);
+  const clientsForRuntime = () => {
+    if (!runtimeClients) {
+      runtimeClients = createSupabaseClients(options.env);
+      if (operationConfig) {
+        runtimeClients.operationAdmission = operationAdmission;
+        runtimeClients.admin = withAdmissionRpc(withAtomicAdmissionRpc(runtimeClients.admin, {
+          config: operationConfig,
+          error: () => new AppError(503, 'OPERATION_ATOMIC_RPC_UNAVAILABLE', '현재 작업을 시작할 수 없습니다. 잠시 후 다시 시도해 주세요.'),
+        }), operationAdmission);
+      }
+    }
+    return runtimeClients;
+  };
+  const operationAdmission = installHttpAdmission(app, {
+    config: operationConfig,
+    clients: clientsForRuntime,
+  });
   const photoRuntime = createPhotoRuntimeDependencies(options.env);
   if (!services) {
     const clients = clientsForRuntime();
@@ -153,6 +183,10 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       auth: new SupabaseAuthService(clients, options.env.ACCOUNT_PHONE_PEPPER),
       accounts: new SupabaseAccountService(clients, options.env.ACCOUNT_PHONE_PEPPER),
       availability: new SupabaseAvailabilityService(clients),
+      resetPreview: new SupabaseResetPreviewService(async (name, args, signal) => {
+        const { data, error } = await clients.admin.rpc(name, args).abortSignal(signal);
+        return { data, error };
+      }),
       roomPinTransfer: new RoomPinTransfer(async (name, args) => {
         const { data, error } = await clients.admin.rpc(name, args);
         if (error) throw roomPinTransferDatabaseError(error.message);
@@ -292,6 +326,33 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   });
 
   app.setErrorHandler((error, request, reply) => {
+    const roomReadyCorrection = request.method === 'POST'
+      && ['/v1/rooms/:roomId/ready-correction', '/v1/rooms/:roomId/ready-correction/preview'].includes(request.routeOptions.url ?? '');
+    if (roomReadyCorrection) {
+      // Parsing and authorization can fail before the route sets its response headers.
+      reply.header('Cache-Control', 'no-store');
+      if (error instanceof Error && 'code' in error
+        && (error.code === 'FST_ERR_CTP_INVALID_JSON_BODY' || error.code === 'FST_ERR_CTP_EMPTY_JSON_BODY')) {
+        error = new AppError(400, 'ROOM_READY_CORRECTION_INVALID_INPUT', '객실 상태 변경 입력이 올바르지 않습니다.');
+      }
+    }
+    const roomTypeFee = request.method === 'PUT'
+      && request.routeOptions.url === '/v1/room-types/:roomTypeId/cleaning-fee';
+    if (roomTypeFee) {
+      reply.header('Cache-Control','no-store');
+      if (error instanceof Error && 'code' in error
+        && (error.code === 'FST_ERR_CTP_INVALID_JSON_BODY' || error.code === 'FST_ERR_CTP_EMPTY_JSON_BODY')) {
+        error = new AppError(400,'ROOM_TYPE_CLEANING_FEE_INVALID','청소 단가 입력이 올바르지 않습니다.');
+      }
+    }
+    const pinOperation = roomPinOperation(request.method, request.raw.url ?? '');
+    if (pinOperation) {
+      reply.header('Cache-Control', 'no-store');
+      const diagnostic = roomPinFailureDiagnostic(pinOperation, request.id,
+        error instanceof AppError ? error.statusCode : error instanceof ZodError ? 400 : 500,
+        error instanceof AppError ? error.code : 'INTERNAL_SERVER_ERROR');
+      if (diagnostic) app.log.error(diagnostic, 'PIN request failed');
+    }
     if (error instanceof ZodError) {
       return reply.code(400).send({
         error: {
@@ -316,7 +377,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       });
     }
 
-    request.log.error({ err: error }, 'Unhandled request error');
+    if (!pinOperation) request.log.error({ err: error }, 'Unhandled request error');
     return reply.code(500).send({
       error: { code: 'INTERNAL_SERVER_ERROR', message: '서버 오류가 발생했습니다.' },
       requestId: request.id
@@ -349,6 +410,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     await app.register(createRoomPinTransferRoutes(services.roomPinTransfer), { prefix: '/v1/rooms/pins' });
   }
   await app.register(createDeveloperRoomCatalogRoutes(services.rooms), { prefix: '/v1/developer' });
+  if (services.resetPreview) await app.register(createDeveloperResetPreviewRoutes(services.resetPreview), { prefix: '/v1/developer' });
   if (services.roomPinSheetOperations) {
     await app.register(createRoomPinSheetOperationsRoutes(services.roomPinSheetOperations), {
       prefix: '/v1/room-pin-sheet-sync'
@@ -385,11 +447,9 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   }
   const photoServices = options.photoServices ?? createPhotoHttpServices(clientsForRuntime(), options.env, photoRuntime);
   await app.register(createPhotoRoutes(photoServices));
-  let limitedClients: ReturnType<typeof createSupabaseClients> | undefined;
   await app.register(createLimitedAttemptRoutes(
     options.limitedAttemptService ?? new LimitedAttemptService({ rpc: async (name, args) => {
-      limitedClients ??= createSupabaseClients(options.env);
-      return limitedClients.admin.rpc(name, args);
+      return clientsForRuntime().admin.rpc(name, args);
     } }),
     photoServices.authenticate,
   ));

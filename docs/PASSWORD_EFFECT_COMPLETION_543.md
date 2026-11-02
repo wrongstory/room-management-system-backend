@@ -1,5 +1,36 @@
 # #543 비밀번호 효과 반영 후 완료 기록 누락
 
+## 2026-10-31 dev·v1.0.0 통합
+
+사용자는 #543을 dev와 로컬 v1.0.0 후보에 통합하도록 승인했다. 이는 DB 실행 승인이 아니다.
+main PR545의 `d3ecff164d99eba8837d14d302ca213e4be17353`을 dev `ebd732c`에 백포트하며,
+기존 source1~141을 보존하고 같은 SQL을 142번째에 추가한다. hotfix의 124번째라는 표기는
+별도 main 이력의 순번이며 dev의 기존 124번째 배정 카드 migration을 대체하지 않는다.
+
+- SQL: `20261030183754_password_effect_completion.sql`, LF SHA-256
+  `d376583cce221bfefa07c8839acf2b4b572dacee4428790373d106eefe1974c8` — main 원문 보존.
+- manifest는 생성기로 갱신하고 upgrade 검사의 정확한 파일/hash·허용 tip을142로 연결한다.
+  기존123~141의 검증과 음성 검사는 유지한다. developer 상태와 Node/Deno/SQL fixture의
+  기대 head는 `password_effect_completion`으로 맞춘다.
+- 공개 API/Swagger·권한 grant·prepare/inspect 인증 계약은 변경하지 않는다.
+  메모·READY 정정·운영 보호·offline 관측을 포함한 기존 dev 기능은 보존한다.
+- PR545의 CI41114087909 attempt1은 별도 hotfix124 입력의 실제 Full DB PASS다.
+  그 성공을 이번 dev142 통합본의 DB 성공으로 재사용하지 않는다.
+- 이번 통합본의 실제 SQL/RLS·경합·Full DB·운영 migration·기존 요청 복구는 NOT RUN이다.
+  소스/application·Edge·독립 QA 결과와 dev PR 병합 근거는 #543에 기록한다.
+
+백포트 로컬 검증은 `ci:quality`(214파일/5,676 tests, 타입/빌드/명세/비밀/lint),
+manifest142, template-client, Edge 전체가 PASS다. 실제 보고 기능 후보 번들은19,992,740 bytes로
+20,000,000 제한까지7,260 bytes 여유다. 독립 QA는 관련10파일/375건과 PG15/17 소스 파싱,
+기존141개 해시·main SQL 원문 동일성에 PASS했다. 이 결과는 실제 DB 실행 증거가 아니다.
+
+dev 보호 병합 후 기존 로컬 `release/v1.0.0`에 통합하되, 전체 DB를 유발하는 release
+push/PR 생성·재실행은 최종 입력과 격리 환경·재구축/fixture/정리 범위의 별도 승인 전에는
+진행하지 않는다. main 병합 hotfix 포함 여부와 검증 지문을 다시 확인한다. #396의 기존
+릴리스 범위·초기화 미완성 gate와 운영 history/baseline 차단 조건도 유지한다.
+운영 migration은 최신 이력·정확한 pending 대조 후 별도 승인받는다. 이 통합은 운영 적용이나
+이미 만료된 요청 복구 완료를 뜻하지 않는다. 아래는 긴급 hotfix 개발 당시의 이력이다.
+
 2026-10-31: 변경된 비밀번호로 로그인은 사용자 확인 완료. 재변경은 미완료 receipt 때문에409.
 운영 최근 관리자 요청의 Auth version은 effect marker와 일치하고 원 세션은 존재하지 않는다.
 이는 #535 반환값 누락/미실행 복구와 다른 단계다. 새 문의번호9347eeac-ecd2-4a4b-8634-9520540052d1의 개별로그연결은 미확인이다.

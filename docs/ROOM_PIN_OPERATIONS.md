@@ -1,5 +1,21 @@
 # 객실 PIN Phase A/B/C 및 초기화 운영 인계
 
+## 2026-10-25 현장 사용 확인
+
+사용자는 PIN 시트 동기화를 아직 사용하지 않지만 실제 운영에 들어가면 사용할 예정이라고
+확인했다. 현재 시험·개발 자료뿐이며 관리자·메이드 기기는 우선 갤럭시다. 이는 현재 상태의
+확인이고 시트 쓰기·PIN 변경·기존 대기 작업 재생·정기 실행의 정확한 실행 승인이 아니다.
+
+production 대상의 spreadsheet/tab/environment/project 매핑과 최소 권한, DB 현재 PIN
+버전·outbox·시트 단방향 projection을 고정하고 기존 증분 경로의 실행안을 준비한다.
+source의 local/test synthetic target을 production으로 간주하거나 프런트의 별도 읽기/반입
+설정을 시트 쓰기 대상으로 재사용하지 않는다. 12:27 KST에 관측한 pending2건은 당시 값이며
+실행 직전 다시 확인한다. 대상이 미확정이면 PIN 복호화와 OAuth/provider 호출 전에 차단한다.
+
+이 준비는 별도 범위에서 제외된 full-resync #137의 재개가 아니다. 실제 PIN·시트 셀 내용,
+OAuth 키·credential은 문서/채팅/로그에 남기지 않는다. 정확한 production mapping·호환 worker·
+업무 영향과 실제 검증 횟수가 정해진 뒤 기존 승인 규칙에 따라 진행한다.
+
 ## 범위와 배포 상태
 
 이 문서는 Issue #131 Phase A, Issue #136 Phase B, Issue #137 Phase C, Issue #140 초기화와 Issue #169 자동 생성·현장 확인 계약을 설명한다. 당시 인계 snapshot은 전체 78 migrations / OpenAPI 0.5.1 128 paths / 138 operations / `api` ACTIVE v24이며 최신 배포 상태는 아니다. 이전 PIN 문제 #140은 완료됐지만 2026-09-29 관리자 PIN 조회 503 재발은 아래 #315 장애 기록으로 별도 추적한다. `room-pin-sheet-sync` source/bundle은 존재하지만 production target mapping·Google ACL/Secrets/Cron/hosted full-resync 검증은 별도 pending이다.

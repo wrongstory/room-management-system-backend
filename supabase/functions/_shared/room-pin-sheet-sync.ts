@@ -5,6 +5,8 @@ import {
   RoomPinCryptoError,
   type RoomPinEnvelope,
 } from "./room-pin-crypto.ts";
+import type { OperationWorkerConfig } from "./worker-admission.ts";
+import { withPinIncrementalOperationAdmission } from "./pin-worker-admission.ts";
 import {
   approvedRoomPinSheetTarget,
   assertApprovedRoomPinSheetTarget,
@@ -246,17 +248,20 @@ export class RoomPinSheetSyncWorker {
   readonly #provider: RoomPinSheetProvider;
   readonly #cryptoConfig: RoomPinCryptoConfig;
   readonly #clock: () => number;
+  readonly #operationAdmission: OperationWorkerConfig | undefined;
 
   constructor(
     db: RoomPinSheetRpc,
     provider: RoomPinSheetProvider,
     cryptoConfig: RoomPinCryptoConfig,
     clock: () => number = Date.now,
+    operationAdmission?: OperationWorkerConfig,
   ) {
     this.#db = db;
     this.#provider = provider;
     this.#cryptoConfig = cryptoConfig;
     this.#clock = clock;
+    this.#operationAdmission = operationAdmission;
   }
   #remaining(deadline: number): number {
     return Math.floor(deadline - this.#clock());
@@ -531,6 +536,23 @@ export class RoomPinSheetSyncWorker {
     }
   }
   async run(): Promise<RoomPinSheetSyncResult> {
+    if (this.#operationAdmission) {
+      return withPinIncrementalOperationAdmission(
+        {
+          config: this.#operationAdmission,
+          db: this.#db,
+          budgetMs: ROOM_PIN_SHEET_SYNC_RUN_MS,
+          clock: this.#clock,
+        },
+        (db) =>
+          new RoomPinSheetSyncWorker(
+            db,
+            this.#provider,
+            this.#cryptoConfig,
+            this.#clock,
+          ).run(),
+      );
+    }
     const started = this.#clock(),
       providerDeadline = started + ROOM_PIN_SHEET_SYNC_PROVIDER_MS;
     const settleDeadline = started + ROOM_PIN_SHEET_SYNC_SETTLE_MS,

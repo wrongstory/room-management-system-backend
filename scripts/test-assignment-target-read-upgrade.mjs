@@ -1,3 +1,5 @@
+import { createLegacyUpgradeHistory } from './lib/legacy-upgrade-history.mjs';
+import { assertLegacyImpactRows } from './lib/legacy-impact-contract.mjs';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
@@ -73,11 +75,8 @@ function reset(version) {
   if (version) args.push('--version', version);
   execFileSync(process.execPath, args, { stdio: 'inherit' });
 }
-function digest() {
-  return sql(`select md5(string_agg(tag||':'||data,'|' order by tag,data)) from (
-    ${protectedTables.map((table) => `select '${table}' tag,(to_jsonb(t)-array['reservation_schedule_snapshot','notified_reservation_schedule_snapshot'])::text data from ${table} t`).join(' union all ')}
-    ) history;`);
-}
+const history = createLegacyUpgradeHistory(sql, protectedTables);
+function digest() { return history.snapshot(); }
 const serviceDate = '2041-06-07';
 const commandAt = '2041-06-07 09:00+09';
 const impactSql = `select private.assignment_commit_impact_at('${serviceDate}','${commandAt}');`;
@@ -145,24 +144,20 @@ try {
   const preserved = digest();
   phase = '93-to-current-install';
   execFileSync(process.execPath, [cli, 'migration', 'up', '--local'], { stdio: 'inherit' });
+  history.requireMemoColumn();
   assert.equal(sql('select count(*) from supabase_migrations.schema_migrations;'), String(expectedMigrationCount));
   assert.equal(sql(`select exists(select 1 from supabase_migrations.schema_migrations where version='${added}');`), 't');
-  assert.equal(digest(), preserved, '93→94 leaves exact snapshot/assignment/schedule/receipt/audit/PIN/notification history unchanged');
+  history.assertUnchanged(preserved, '93→94 leaves exact snapshot/assignment/schedule/receipt/audit/PIN/notification history unchanged');
   phase = 'read-only-and-fingerprint';
   const afterImpact = JSON.parse(sql(impactSql));
   assert.equal(afterImpact.impactFingerprint, priorImpact.impactFingerprint,
     'Additive display metadata cannot invalidate unchanged commit impact fingerprint');
-  const stripMetadata = (rows) => rows.map((row) => Object.fromEntries(
-    Object.entries(row).filter(([key]) => !metadataKeys.includes(key))));
-  for (const key of ['committableDrafts', 'blockedDrafts', 'remainingUnassignedTargets']) {
-    assert.deepEqual(stripMetadata(afterImpact[key]), priorImpact[key],
-      'Installation preserves every original impact row field');
-  }
+  assertLegacyImpactRows(priorImpact, afterImpact);
   const afterPreview = JSON.parse(sql(`select private.assignment_preview_snapshot_at('${id(1)}',
     '${serviceDate}','${commandAt}');`));
   assert.deepEqual(afterPreview.sequenceReservations, priorPreview.sequenceReservations,
     'Read metadata does not change occupied sequence reservations');
-  assert.equal(digest(), preserved, 'Projection reads never backfill receipt or source evidence');
+  history.assertUnchanged(preserved, 'Projection reads never backfill receipt or source evidence');
   assert.equal(sql(`select bool_and(not has_function_privilege(role_name,signature,'EXECUTE'))
     from unnest(array['anon','authenticated','service_role']) role_name cross join unnest(array[
     'private.assignment_target_read_metadata(uuid,uuid)','private.assignment_target_read_rows(jsonb)',
@@ -177,12 +172,14 @@ try {
   phase = 'old-receipt-exact-replay';
   assert.deepEqual(JSON.parse(sql(commitSql(1, oldFingerprint, 'assignment-read-upgrade-old-receipt'))), oldReceipt,
     'Pre94 successful commit receipt replays exact response without current metadata hydration');
-  assert.equal(digest(), preserved, 'Exact legacy replay has zero effects and no historical metadata backfill');
+  history.assertUnchanged(preserved, 'Exact legacy replay has zero effects and no historical metadata backfill');
   phase = 'new-response-metadata';
   const newResponse = JSON.parse(sql(commitSql(2, afterImpact.impactFingerprint, 'assignment-read-upgrade-new-receipt')));
   const card = newResponse.notifiedAssignments[0];
   assert.equal(newResponse.notifiedAssignments.length, 1);
   assert(metadataKeys.every((key) => Object.hasOwn(card, key)), 'New commit card has every additive key');
+  assert(Object.hasOwn(card, 'instructionMemo') && card.instructionMemo === null,
+    'Legacy draft new receipt has explicit null memo');
   assert.equal(card.cleaningTargetId, id(1002));
   assert.equal(card.targetAssignmentVersion, 2);
   assert.equal(card.cleaningKind, 'stayover');
@@ -206,13 +203,14 @@ try {
   const afterNewCommand = digest();
   assert.deepEqual(JSON.parse(sql(commitSql(2, afterImpact.impactFingerprint, 'assignment-read-upgrade-new-receipt'))), newResponse,
     'New metadata is frozen in its own receipt on exact replay');
-  assert.equal(digest(), afterNewCommand, 'New exact replay cannot add another assignment, notice, outbox or audit');
+  history.assertUnchanged(afterNewCommand, 'New exact replay cannot add another assignment, notice, outbox or audit');
   console.log(`Assignment target read metadata contract94 / upgrade93→${expectedMigrationCount}: PASS; exact history/old receipt and impact fingerprint preserved, no backfill, new snapshot response verified.`);
 } catch (error) {
   const sourceLine = error instanceof Error ? error.stack?.match(/test-assignment-target-read-upgrade\.mjs:(\d+):\d+/)?.[1] : null;
   console.error(`Assignment metadata upgrade FAIL: ${JSON.stringify({ phase,
     kind: error instanceof assert.AssertionError ? 'ASSERTION_FAILED' : 'VALIDATION_FAILED',
     stable_domain_code: error instanceof Error && knownDomainCodes.has(error.stableDomainCode) ? error.stableDomainCode : null,
+    impactContractCode: /^LEGACY_IMPACT_(committableDrafts|blockedDrafts|remainingUnassignedTargets)_(ARRAY|COUNT|MEMO_NULL|UNASSIGNED_MEMO|ORIGINAL_FIELDS)$/.test(error?.message ?? '') ? error.message : null,
     sourceLine: sourceLine ? Number(sourceLine) : null })}`);
   process.exitCode = 1;
 } finally {

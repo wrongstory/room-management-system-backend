@@ -1,4 +1,12 @@
+import {
+  AssignmentHydrationError,
+  loadAssignmentHydration,
+} from "./assignment-hydration.ts";
 import { idempotencyKey, readJsonBody } from "./account-api.ts";
+import {
+  normalizeInstructionMemo,
+  parseInstructionMemoRead,
+} from "./assignment-instruction-memo.ts";
 import type { EdgeActor, EdgeClients } from "./runtime.ts";
 import {
   type AssignmentScheduleRead,
@@ -35,6 +43,7 @@ interface AssignmentRow {
   notified_room_number_snapshot: string | null;
   ended_at: string | null;
   created_at: string;
+  instruction_memo?: string | null;
 }
 
 interface TargetRow {
@@ -80,6 +89,7 @@ interface MaidRow {
 }
 
 export interface AssignmentProjection {
+  instructionMemo: string | null;
   assignmentId: string;
   cleaningTargetId: string;
   roomId: string | null;
@@ -234,7 +244,7 @@ export async function prestartCommand(
       : []),
   ];
   const optional = action === "change"
-    ? ["availableFrom", "dueAt", "serviceDate"]
+    ? ["availableFrom", "dueAt", "serviceDate", "instructionMemo"]
     : action === "cancellation-requests"
     ? ["reasonDetail"]
     : [];
@@ -310,6 +320,9 @@ export async function prestartCommand(
     payload.p_due_at = body.dueAt === undefined
       ? null
       : timestampValue(body.dueAt, "dueAt");
+    if (Object.hasOwn(body, "instructionMemo")) {
+      payload.p_instruction_memo = instructionMemoInput(body.instructionMemo);
+    }
   }
   if (action === "cancellation-requests") {
     if (
@@ -324,7 +337,7 @@ export async function prestartCommand(
     }
     payload.p_reason_detail = body.reasonDetail ?? null;
   }
-  const rpc = {
+  const baseRpc = {
     change: body.serviceDate === undefined
       ? "change_cleaning_assignment_prestart"
       : "change_cleaning_assignment_for_plan",
@@ -333,6 +346,9 @@ export async function prestartCommand(
     "cancellation-requests": "request_assignment_cancellation",
     decision: "decide_assignment_cancellation_request",
   }[action];
+  const rpc = action === "change" && Object.hasOwn(body, "instructionMemo")
+    ? `${baseRpc}_with_instruction`
+    : baseRpc;
   const hash = await requestHash({ command: rpc, ...payload });
   const { data, error } = await clients.admin.rpc(rpc, {
     ...payload,
@@ -391,6 +407,7 @@ export function prestartDatabaseError(error: { message?: string } | null) {
     "ASSIGNMENT_SCHEDULE_INVALID",
     "ASSIGNMENT_QUERY_INVALID",
     "ASSIGNMENT_INPUT_INVALID",
+    "ASSIGNMENT_INSTRUCTION_INVALID",
     "ASSIGNMENT_REASON_INVALID",
     "CHECKOUT_INCIDENT_OPEN",
     "ADMIN_REQUIRED",
@@ -500,6 +517,7 @@ export async function listAssignmentChangeRequests(
 }
 
 export interface AssignmentCommitCandidate extends AssignmentReadMetadata {
+  instructionMemo: string | null;
   assignmentId: string;
   cleaningTargetId: string;
   roomId: string;
@@ -517,6 +535,7 @@ export interface AssignmentCommitCandidate extends AssignmentReadMetadata {
 
 export interface AssignmentCommitBlockedCandidate
   extends AssignmentReadMetadata {
+  instructionMemo: string | null;
   assignmentId: string;
   cleaningTargetId: string;
   roomId: string;
@@ -581,6 +600,7 @@ const assignmentColumns = [
   "notified_room_number_snapshot",
   "ended_at",
   "created_at",
+  "instruction_memo",
 ].join(",");
 
 const uuidPattern =
@@ -590,6 +610,24 @@ const sha256Pattern = /^[0-9a-f]{64}$/;
 
 function validationError(message: string): never {
   throw new EdgeError(400, "VALIDATION_ERROR", message);
+}
+
+function instructionMemoInput(value: unknown): string | null {
+  try {
+    return normalizeInstructionMemo(value);
+  } catch {
+    validationError(
+      "작업 요청사항은 500자 이하이며 연락처·URL·출입 비밀번호를 포함할 수 없습니다.",
+    );
+  }
+}
+
+function instructionMemoRead(value: unknown): string | null {
+  try {
+    return parseInstructionMemoRead(value);
+  } catch {
+    throw assignmentDatabaseError(null);
+  }
 }
 
 function uuidValue(value: unknown, name: string): string {
@@ -633,8 +671,11 @@ function booleanValue(value: string | null, name: string): boolean {
 function assertOnlyFields(
   body: Record<string, unknown>,
   allowed: readonly string[],
+  optional: readonly string[] = [],
 ): void {
-  const unexpected = Object.keys(body).find((key) => !allowed.includes(key));
+  const unexpected = Object.keys(body).find((key) =>
+    !allowed.includes(key) && !optional.includes(key)
+  );
   if (unexpected) {
     validationError(`허용되지 않은 요청 필드입니다: ${unexpected}`);
   }
@@ -704,6 +745,12 @@ export function assignmentDatabaseError(
 ): EdgeError {
   const message = error?.message ?? "";
   const mappings: Array<[string, number, string, string]> = [
+    [
+      "ASSIGNMENT_INSTRUCTION_INVALID",
+      400,
+      "ASSIGNMENT_INSTRUCTION_INVALID",
+      "작업 요청사항은 500자 이하이며 연락처·URL·출입 비밀번호를 포함할 수 없습니다.",
+    ],
     [
       "CHECKOUT_INCIDENT_OPEN",
       409,
@@ -842,6 +889,7 @@ function toCommitCandidate(value: unknown): AssignmentCommitCandidate {
   const row = objectValue(value);
   return {
     ...commitReadMetadata(row),
+    instructionMemo: instructionMemoRead(row.instructionMemo),
     assignmentId: uuidValue(row.assignmentId, "assignmentId"),
     cleaningTargetId: uuidValue(row.cleaningTargetId, "cleaningTargetId"),
     roomId: uuidValue(row.roomId, "roomId"),
@@ -874,6 +922,7 @@ function toBlockedCandidate(
   const row = objectValue(value);
   return {
     ...commitReadMetadata(row),
+    instructionMemo: instructionMemoRead(row.instructionMemo),
     assignmentId: uuidValue(row.assignmentId, "assignmentId"),
     cleaningTargetId: uuidValue(row.cleaningTargetId, "cleaningTargetId"),
     roomId: uuidValue(row.roomId, "roomId"),
@@ -1053,30 +1102,6 @@ function completeAssignmentRows(result: {
   return result.data;
 }
 
-async function assignmentRelatedRows(
-  clients: EdgeClients,
-  table: string,
-  columns: string,
-  key: string,
-  ids: string[],
-  order?: string,
-): Promise<unknown[]> {
-  const rows: unknown[] = [];
-  for (
-    let offset = 0;
-    offset < ids.length;
-    offset += assignmentHydrationBatchSize
-  ) {
-    let query = clients.admin.from(table).select(columns, { count: "exact" })
-      .in(key, ids.slice(offset, offset + assignmentHydrationBatchSize));
-    if (order) query = query.order(order, { ascending: false });
-    rows.push(
-      ...completeAssignmentRows(await query.limit(assignmentReadLimit)),
-    );
-  }
-  return rows;
-}
-
 function assignmentRolloverSnapshot(
   target: TargetRow,
   row: AssignmentRow,
@@ -1096,42 +1121,6 @@ function assignmentRolloverSnapshot(
   );
 }
 
-async function assignmentAttemptRead(
-  clients: EdgeClients,
-  assignmentIds: string[],
-) {
-  // Submissions depend only on the latest attempts, not on target/profile/history reads.
-  // Keep all attempts for cancellation guards and the final authority RPC in hydration.
-  const attemptRows = await assignmentRelatedRows(
-    clients,
-    "cleaning_attempts",
-    "id,assignment_id,attempt_number,status,started_at",
-    "assignment_id",
-    assignmentIds,
-    "attempt_number",
-  );
-  const attempts = new Map<string, AttemptRow>();
-  const capabilityAttempts = new Map<string, AttemptRow[]>();
-  for (const attempt of attemptRows as AttemptRow[]) {
-    if (!attempts.has(attempt.assignment_id)) {
-      attempts.set(attempt.assignment_id, attempt);
-    }
-    const all = capabilityAttempts.get(attempt.assignment_id) ?? [];
-    all.push(attempt);
-    capabilityAttempts.set(attempt.assignment_id, all);
-  }
-  const attemptIds = [...attempts.values()].map((attempt) => attempt.id);
-  const submissionRows = await assignmentRelatedRows(
-    clients,
-    "cleaning_submissions",
-    "cleaning_attempt_id,version,status",
-    "cleaning_attempt_id",
-    attemptIds,
-    "version",
-  );
-  return { attempts, capabilityAttempts, submissionRows };
-}
-
 async function hydrateAssignments(
   clients: EdgeClients,
   rows: AssignmentRow[],
@@ -1140,57 +1129,70 @@ async function hydrateAssignments(
   includeCurrent: boolean,
 ): Promise<AssignmentCardProjection[]> {
   if (rows.length === 0) return [];
-  const targetIds = [...new Set(rows.map((row) => row.cleaning_target_id))];
-  const maidIds = [...new Set(rows.map((row) => row.maid_profile_id))];
-  const assignmentIds = rows.map((row) => row.id);
-  const [targetRows, maidRows, attemptData, scheduleRows] = await Promise.all([
-    assignmentRelatedRows(
-      clients,
-      "cleaning_targets",
-      "id,room_id,cleaning_kind,source,original_service_date,effective_service_date,carryover_count,status,assignment_version,room_type_snapshot,fee_snapshot,template_snapshot,rooms!inner(room_number)",
-      "id",
-      targetIds,
-    ),
-    assignmentRelatedRows(
-      clients,
-      "profiles",
-      "id,display_name",
-      "id",
-      maidIds,
-    ),
-    assignmentAttemptRead(clients, assignmentIds),
-    assignmentRelatedRows(
-      clients,
-      "cleaning_target_schedule_revisions",
-      "cleaning_target_id,revision,effective_service_date,reason_code",
-      "cleaning_target_id",
-      targetIds,
-      "revision",
-    ),
-  ]);
+  const sessionId = verifiedRequestSessionId(request);
+  let data: Awaited<ReturnType<typeof loadAssignmentHydration>>;
+  try {
+    data = await loadAssignmentHydration(rows, async (ids) => {
+      const response = await clients.admin.rpc(
+        "get_assignment_card_hydration",
+        {
+          p_actor_profile_id: actor.profileId,
+          p_session_id: sessionId,
+          p_assignment_ids: ids,
+          p_expected_actor_role: actor.role,
+        },
+      );
+      if (response.error) {
+        const code = response.error.message;
+        if (code === "ASSIGNMENT_ACCESS_REQUIRED") {
+          throw new EdgeError(403, code, "청소 배정 조회 권한이 필요합니다.");
+        }
+        if (code === "SESSION_REVOKED") {
+          throw new EdgeError(401, code, "다시 로그인해 주세요.");
+        }
+        if (code === "PASSWORD_CHANGE_REQUIRED") {
+          throw new EdgeError(403, code, "비밀번호 변경이 필요합니다.");
+        }
+        throw assignmentDatabaseError(null);
+      }
+      return response.data;
+    });
+  } catch (error) {
+    if (error instanceof AssignmentHydrationError) {
+      throw assignmentDatabaseError(null);
+    }
+    throw error;
+  }
   const targets = new Map(
-    (targetRows as TargetRow[]).map((row) => [
-      row.id,
-      row,
-    ]),
+    (data.targets as unknown as TargetRow[]).map((row) => [row.id, row]),
   );
   const maids = new Map(
-    (maidRows as MaidRow[]).map((row) => [row.id, row]),
+    (data.profiles as unknown as MaidRow[]).map((row) => [row.id, row]),
   );
-  const { attempts, capabilityAttempts, submissionRows } = attemptData;
+  const attempts = new Map<string, AttemptRow>();
+  const capabilityAttempts = new Map<string, AttemptRow[]>();
+  for (const attempt of data.attempts as unknown as AttemptRow[]) {
+    if (!attempts.has(attempt.assignment_id)) {
+      attempts.set(attempt.assignment_id, attempt);
+    }
+    const all = capabilityAttempts.get(attempt.assignment_id) ?? [];
+    all.push(attempt);
+    capabilityAttempts.set(attempt.assignment_id, all);
+  }
+  const submissionRows = data.submissions;
+  const scheduleRows = data.schedules;
   const submissions = new Map<string, SubmissionRow>();
-  for (const submission of submissionRows as SubmissionRow[]) {
+  for (const submission of submissionRows as unknown as SubmissionRow[]) {
     if (!submissions.has(submission.cleaning_attempt_id)) {
       submissions.set(submission.cleaning_attempt_id, submission);
     }
   }
   const schedules = indexAssignmentSchedules(
-    scheduleRows as TargetScheduleRow[],
+    scheduleRows as unknown as TargetScheduleRow[],
   );
   // Revalidate actor/session/exact assignment ownership after bounded
   // hydration. Historical cards never request live reservation facts.
   const scheduleReads = new Map<string, AssignmentScheduleRead>();
-  const sessionId = verifiedRequestSessionId(request);
   for (
     let offset = 0;
     offset < rows.length;
@@ -1259,6 +1261,7 @@ async function hydrateAssignments(
     const scheduleRead = scheduleReads.get(row.id);
     if (!scheduleRead) throw assignmentDatabaseError(null);
     return {
+      instructionMemo: instructionMemoRead(row.instruction_memo),
       assignmentId: row.id,
       cleaningTargetId: row.cleaning_target_id,
       roomId: actor.role === "maid"
@@ -1482,6 +1485,7 @@ function toAssignmentProjection(value: unknown): AssignmentProjection {
   }
   const row = value as Record<string, unknown>;
   return {
+    instructionMemo: instructionMemoRead(row.instructionMemo),
     assignmentId: uuidValue(row.assignmentId, "assignmentId"),
     cleaningTargetId: uuidValue(row.cleaningTargetId, "cleaningTargetId"),
     roomId: uuidValue(row.roomId, "roomId"),
@@ -1519,8 +1523,11 @@ export async function saveAssignmentDraft(
     "maidProfileId",
     "sequenceNumber",
     "expectedAssignmentVersion",
-  ]);
+  ], ["instructionMemo"]);
   const command = {
+    ...(Object.hasOwn(body, "instructionMemo")
+      ? { instructionMemo: instructionMemoInput(body.instructionMemo) }
+      : {}),
     cleaningTargetId: uuidValue(body.cleaningTargetId, "cleaningTargetId"),
     maidProfileId: uuidValue(body.maidProfileId, "maidProfileId"),
     sequenceNumber: integerValue(body.sequenceNumber, "sequenceNumber", 1),
@@ -1537,13 +1544,18 @@ export async function saveAssignmentDraft(
     ...command,
   });
   const { data, error } = await clients.admin.rpc(
-    "save_cleaning_assignment_draft",
+    Object.hasOwn(body, "instructionMemo")
+      ? "save_cleaning_assignment_draft_with_instruction"
+      : "save_cleaning_assignment_draft",
     {
       p_actor_profile_id: actor.profileId,
       p_cleaning_target_id: command.cleaningTargetId,
       p_maid_profile_id: command.maidProfileId,
       p_sequence_number: command.sequenceNumber,
       p_expected_assignment_version: command.expectedAssignmentVersion,
+      ...(Object.hasOwn(body, "instructionMemo")
+        ? { p_instruction_memo: command.instructionMemo }
+        : {}),
       p_idempotency_key: commandKey,
       p_request_hash: commandRequestHash,
     },

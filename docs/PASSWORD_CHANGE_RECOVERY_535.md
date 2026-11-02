@@ -2,7 +2,8 @@
 
 ## 현재 상태
 
-2026-10-30 KST: 수정 후보 작성. 운영 적용·장애 계정 복구·전체 DB 검증은 **NOT RUN**.
+2026-10-31 KST: PR537의 hotfix 123개 입력은 CI 전체 DB 검증 **PASS**다.
+변경된 v1 최종 통합 입력의 전체 DB 검증과 운영 적용·장애 계정 복구·본인 UAT는 **NOT RUN**이다.
 로컬/CI/운영 migration 실행은 매번 사전 승인 대상이다.
 
 ## 원인과 수정
@@ -14,7 +15,7 @@ Auth shadow version 회전 시각은 계정 생성 시각이며 변경 준비보
 
 prepare_password_change의 execute/recover 응답에서 effectMarker가 누락됐다.
 API가 필수 확인값을 검사하는 단계에서 중단됐고 미완료 receipt가 새 요청을 막았다.
-긴급 릴리스의 123번 후보 (dev에서는 139번)는 기존 SQL을 수정하지 않고 위 두 응답에 저장된 marker를 반환한다.
+긴급 릴리스의 123번 후보(dev에서는 139번)는 기존 SQL을 수정하지 않고 위 두 응답에 저장된 marker를 반환한다.
 recover는 재시도에서 새로 제안한 marker가 아니라 원 receipt marker를 반환한다.
 API/Swagger의 공개 요청·응답, 권한, 세션, 비밀번호 정책은 그대로다.
 
@@ -65,16 +66,25 @@ test fixture와 helper를 같은 Supabase tests mount에 두어 승인된 SQL �
   반복하지 않고 운영 확인 안내와 문의 번호를 제공한다. 비밀번호·토큰은 로그/분석/저장소 금지.
 - 이번 수정은 백엔드 원인이다. 프런트 오류 안내·키 수명과 사용자 UAT는 별도 확인한다.
 
-## 검증
+## 개발 후보 작성 당시 검증 기록
 
-- 개발 PR536: dev0bfa04b 병합. required application/migration PASS (run41072210978). migration은 manifest만 검사.
-- 긴급 후보: main5edd1b7의 기존122개 + 비밀번호 함수 수정1개 =123개. dev의 다른16개는 제외.
-- 긴급 후보 ci:quality PASS: Node3,166건, 타입/빌드/비밀정보/공개 계약/lint 검사 완료.
-- 긴급 후보 독립 QA203건 PASS, P0/P1/P2 없음. 기존122 manifest 동일, 새 SQL/helper/fixture는 PR536과 동일.
-- Edge 전체 PASS: 기존542건 + 후보68건, bundle19,431,902 bytes.
-- 실제 DB/pgTAP/경합/운영 migration/복구/UAT: **NOT RUN**. 승인 전 실행하지 않음.
+- Node 인증/소스 27 PASS; Edge 인증 32 PASS; typecheck/build/manifest PASS.
+- ci:quality PASS: Node 전체 5,488건, 타입/빌드/비밀정보/공개 계약/lint 검사 완료.
+- 독립 QA: 인증/계약/소스246건 PASS, PostgreSQL17 최상위 parser PASS, P0/P1/P2 없음.
+- Edge 전체 PASS: 후보 bundle 19,986,598 bytes. 원격 CI는 PR 생성 후 확인.
+- pgTAP 신규 복구 fixture/기존 비밀번호 fixture: 작성, **NOT RUN**.
+- 실제 DB/운영 migration·복구·UAT: **NOT RUN**, 승인 전 실행하지 않음.
 
-- SQL 기존 비밀번호 fixture에는 dev에서 검토한 합성 fixture 안정화도 포함한다(무작위 숫자에 따른 false positive 제거). 실제 SQL 검증은 승인 후 수행한다.
+### 긴급 릴리스 검증 이력과 v1.0.0의 구분
+
+개발 PR536은 `dev@0bfa04b`에 통합됐고 required CI run41072210978은 application/manifest
+PASS다. main5edd1b7의 기존122개에 동일 SQL 한 개만 더한 긴급 후보는 Node3,166건,
+독립 QA203건, Edge 기존542건+후보68건 및 bundle19,431,902 bytes를 검증했다.
+그 뒤 [PR537](https://github.com/wrongstory/room-management-system-backend/pull/537)의
+[run41074219126](https://github.com/wrongstory/room-management-system-backend/actions/runs/41074219126)이
+해당123개 입력의 Full DB를 통과했고 `main@f1fbec94`에 병합됐다. 이 성공을 더 많은 변경을
+포함한 v1.0.0 입력에 재사용하지 않는다. 운영 migration·계정 복구·본인 UAT는 별도이며
+이 문서 통합에서 실행하지 않았다. SQL의 합성 fixture 안정화도 유지한다.
 
 ## 중단 및 복구 원칙
 

@@ -11,9 +11,12 @@ from typing import Any
 import pytest
 
 ROOT = Path(__file__).resolve().parents[3]
-CHECK = runpy.run_path(
+CHECKS = runpy.run_path(
     str(ROOT / "tools/backend-console/scripts/check_business_openapi_codegen.py")
-)["check_post_approval_contract"]
+)
+CHECK = CHECKS["check_post_approval_contract"]
+CHECK_READY = CHECKS["check_room_ready_contract"]
+CHECK_INSTRUCTION = CHECKS["check_assignment_instruction_contract"]
 
 
 @pytest.fixture(scope="module")
@@ -29,16 +32,135 @@ def document() -> dict[str, Any]:
 
 def test_deployed_contract(document: dict[str, Any]) -> None:
     CHECK(document)
+    CHECK_READY(document)
+    CHECK_INSTRUCTION(document)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "required",
+        "null",
+        "empty",
+        "length",
+        "default",
+        "read_optional",
+        "read_null",
+        "deployed",
+        "role",
+        "idempotency",
+        "error",
+    ],
+)
+def test_rejects_assignment_instruction_contract_drift(
+    document: dict[str, Any], mutation: str
+) -> None:
+    candidate = copy.deepcopy(document)
+    schemas = candidate["components"]["schemas"]
+    request = schemas["AssignmentDraftRequest"]
+    memo = request["properties"]["instructionMemo"]
+    operation = candidate["paths"]["/v1/assignments/drafts"]["post"]
+    if mutation == "required":
+        request["required"].append("instructionMemo")
+    elif mutation == "null":
+        memo["type"] = "string"
+    elif mutation == "empty":
+        memo["minLength"] = 1
+    elif mutation == "length":
+        memo["maxLength"] = 501
+    elif mutation == "default":
+        memo["default"] = None
+    elif mutation == "read_optional":
+        schemas["AssignmentCard"]["required"].remove("instructionMemo")
+    elif mutation == "read_null":
+        schemas["AttemptExecution"]["properties"]["instructionMemo"]["type"] = "string"
+    elif mutation == "deployed":
+        memo["description"] = "deployed"
+    elif mutation == "role":
+        operation["x-required-roles"] = ["maid"]
+    elif mutation == "idempotency":
+        operation["parameters"] = []
+    else:
+        schemas["ErrorCode"]["enum"].remove("ASSIGNMENT_INSTRUCTION_INVALID")
+    with pytest.raises(RuntimeError, match="#534"):
+        CHECK_INSTRUCTION(candidate)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "method",
+        "role",
+        "deployed",
+        "preview_key",
+        "query",
+        "cache",
+        "envelope",
+        "additional",
+        "ack",
+        "proof",
+        "confirmed",
+        "version",
+        "fingerprint",
+        "blocker",
+        "error",
+    ],
+)
+def test_rejects_room_ready_contract_drift(document: dict[str, Any], mutation: str) -> None:
+    candidate = copy.deepcopy(document)
+    path = "/v1/rooms/{roomId}/ready-correction"
+    operation = candidate["paths"][path]["post"]
+    schemas = candidate["components"]["schemas"]
+    request = schemas["RoomReadyCorrectionRequest"]
+    if mutation == "method":
+        candidate["paths"][path]["get"] = copy.deepcopy(operation)
+    elif mutation == "role":
+        operation["x-required-roles"] = ["developer"]
+    elif mutation == "deployed":
+        operation["x-release-status"] = "deployed"
+    elif mutation == "preview_key":
+        candidate["paths"][path + "/preview"]["post"]["parameters"].append(
+            operation["parameters"][-1]
+        )
+    elif mutation == "query":
+        operation["parameters"].append({"name": "actorId", "in": "query", "required": False})
+    elif mutation == "cache":
+        operation["responses"]["409"]["headers"] = {}
+    elif mutation == "envelope":
+        operation["responses"]["200"]["content"]["application/json"]["schema"][
+            "additionalProperties"
+        ] = True
+    elif mutation == "additional":
+        request["additionalProperties"] = True
+    elif mutation == "ack":
+        request["required"].remove("acknowledgeNoNewEarnings")
+    elif mutation == "proof":
+        request["required"].remove("impactFingerprint")
+    elif mutation == "confirmed":
+        request["properties"]["confirmed"] = {"type": "boolean"}
+    elif mutation == "version":
+        request["properties"]["expectedRoomVersion"]["minimum"] = 0
+    elif mutation == "fingerprint":
+        request["properties"]["impactFingerprint"]["pattern"] = ".*"
+    elif mutation == "blocker":
+        schemas["RoomReadyPreview"]["properties"]["blockingReasons"]["items"]["enum"].remove(
+            "ASSIGNMENT_CHANGE_PENDING"
+        )
+    else:
+        schemas["ErrorCode"]["enum"].remove("ROOM_READY_PREVIEW_STALE")
+    with pytest.raises(RuntimeError, match="#532"):
+        CHECK_READY(candidate)
 
 
 @pytest.mark.parametrize("mutation", ["missing", "duplicate", "replacement"])
-def test_rejects_auth_error_code_drift(document: dict[str, Any], mutation: str) -> None:
+@pytest.mark.parametrize("code", ["AUTH_CONTEXT_UNAVAILABLE", "AVAILABILITY_APPROVAL_REQUIRED"])
+def test_rejects_auth_error_code_drift(document: dict[str, Any], mutation: str, code: str) -> None:
     candidate = copy.deepcopy(document)
     codes = candidate["components"]["schemas"]["ErrorCode"]["enum"]
     if mutation == "duplicate":
-        codes.append("AUTH_CONTEXT_UNAVAILABLE")
+        codes.append(code)
     else:
-        codes.remove("AUTH_CONTEXT_UNAVAILABLE")
+        codes.remove(code)
         if mutation == "replacement":
             codes.append("UNREVIEWED_ERROR")
     with pytest.raises(RuntimeError, match="#442"):

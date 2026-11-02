@@ -30,6 +30,32 @@ insert into limited_session_caller_extensions values
   ('public.get_post_approval_room_issue_source(uuid,uuid,uuid)','public.get_post_approval_room_issue_source','snapshot','s','service-only'),
   ('private.assert_post_approval_room_issue_actor_fresh(uuid,uuid)','private.assert_post_approval_room_issue_actor_fresh','fresh','v','owner-only');
 -- END APPROVED SESSION CALLER EXTENSIONS
+-- BEGIN APPROVED ROOM READY SESSION EXTENSIONS
+insert into limited_session_caller_extensions values
+  ('public.preview_room_ready_correction(uuid,uuid,uuid,text)','public.preview_room_ready_correction','fresh','v','service-only'),
+  ('public.apply_room_ready_correction(uuid,uuid,uuid,bigint,text,timestamptz,timestamptz,boolean,boolean,boolean,text,text,text)','public.apply_room_ready_correction','fresh','v','service-only');
+-- END APPROVED ROOM READY SESSION EXTENSIONS
+-- BEGIN APPROVED ROOM TYPE FEE SESSION EXTENSION
+insert into limited_session_caller_extensions values
+  ('public.set_room_type_cleaning_fee(uuid,uuid,uuid,bigint,integer,boolean,text,text)','public.set_room_type_cleaning_fee','fresh','v','service-only');
+-- END APPROVED ROOM TYPE FEE SESSION EXTENSION
+-- #551 exact new snapshot/fresh memo signatures, no overload allowance.
+insert into limited_session_caller_extensions values
+  ('public.get_room_fixed_memo(uuid,uuid,uuid)','public.get_room_fixed_memo','snapshot','s','service-only'),
+  ('public.set_room_fixed_memo(uuid,uuid,uuid,bigint,text,text,text)','public.set_room_fixed_memo','fresh','v','service-only');
+-- Exact approved later callers (130/137/141/143), never a name/count wildcard.
+insert into limited_session_caller_extensions values
+  ('public.get_room_board_arrival_projection(uuid,uuid,date,uuid)','public.get_room_board_arrival_projection','snapshot','s','service-only'),
+  ('private.assert_operation_http_identity(jsonb,uuid,uuid,text)','private.assert_operation_http_identity','fresh','v','owner-only'),
+  ('public.acquire_operation_lifecycle_admission(text,bigint,uuid,uuid,text,text,timestamptz,text,text,text)','public.acquire_operation_lifecycle_admission','fresh','v','service-only'),
+  ('public.acquire_operation_offline_resolution_admission(text,bigint,uuid,uuid,text,text,timestamptz,text,text,text)','public.acquire_operation_offline_resolution_admission','fresh','v','service-only'),
+  ('public.complete_operation_offline_resolution_admission(uuid,text,uuid,uuid,text,uuid,text)','public.complete_operation_offline_resolution_admission','fresh','v','service-only');
+select ok((to_regprocedure('public.preview_room_ready_correction(uuid,uuid,uuid,text)') is null
+    and to_regprocedure('public.apply_room_ready_correction(uuid,uuid,uuid,bigint,text,timestamptz,timestamptz,boolean,boolean,boolean,text,text,text)') is null)
+  or (to_regprocedure('public.preview_room_ready_correction(uuid,uuid,uuid,text)') is not null
+    and to_regprocedure('public.apply_room_ready_correction(uuid,uuid,uuid,bigint,text,timestamptz,timestamptz,boolean,boolean,boolean,text,text,text)') is not null
+    and to_regprocedure('private.assert_post_approval_room_issue_actor_fresh(uuid,uuid)') is not null),
+  '#532 preview/apply fresh pair installs atomically after the existing caller inventory');
 select ok(not exists(select 1 from limited_session_caller_extensions e
   join pg_namespace n on n.nspname=split_part(e.qualified_name,'.',1)
   join pg_proc p on p.pronamespace=n.oid and p.proname=split_part(e.qualified_name,'.',2)
@@ -46,11 +72,21 @@ select ok((to_regprocedure('public.get_post_approval_room_issue_source(uuid,uuid
     and to_regprocedure('public.list_room_reports_page(uuid,uuid,uuid,integer,timestamptz,uuid)') is not null),
   'approved #336 snapshot/fresh pair installs atomically after registered reports as exact 8/20 and core2');
 select ok(coalesce((select p.prokind='f' and l.lanname='plpgsql' and p.provolatile::text=e.volatility
-  and p.prosecdef and p.proowner='postgres'::regrole and p.proconfig=array['search_path=""']::text[]
+  and p.prosecdef and p.proowner='postgres'::regrole and p.proconfig=case
+    when e.qualified_name='private.assert_operation_http_identity' then array['search_path=pg_catalog']::text[]
+    when e.qualified_name in('public.acquire_operation_lifecycle_admission',
+      'public.acquire_operation_offline_resolution_admission','public.complete_operation_offline_resolution_admission')
+      then array['search_path=pg_catalog','lock_timeout=2s','statement_timeout=7s']::text[]
+    else array['search_path=""']::text[] end
   and (length(p.prosrc)-length(replace(p.prosrc,case when e.helper_kind='snapshot'
     then 'private.assert_attempt_actor_session(' else 'private.assert_attempt_actor_session_fresh(' end,'')))
     /length(case when e.helper_kind='snapshot' then 'private.assert_attempt_actor_session('
-      else 'private.assert_attempt_actor_session_fresh(' end)=1
+      else 'private.assert_attempt_actor_session_fresh(' end)=case when e.signature in (
+        'public.preview_room_ready_correction(uuid,uuid,uuid,text)',
+        'public.acquire_operation_lifecycle_admission(text,bigint,uuid,uuid,text,text,timestamptz,text,text,text)',
+        'public.acquire_operation_offline_resolution_admission(text,bigint,uuid,uuid,text,text,timestamptz,text,text,text)',
+        'public.complete_operation_offline_resolution_admission(uuid,text,uuid,uuid,text,uuid,text)',
+        'public.apply_room_ready_correction(uuid,uuid,uuid,bigint,text,timestamptz,timestamptz,boolean,boolean,boolean,text,text,text)') then 2 when e.signature='public.set_room_type_cleaning_fee(uuid,uuid,uuid,bigint,integer,boolean,text,text)' then 3 when e.signature='public.set_room_fixed_memo(uuid,uuid,uuid,bigint,text,text,text)' then 3 else 1 end
   and strpos(p.prosrc,case when e.helper_kind='snapshot'
     then 'private.assert_attempt_actor_session_fresh(' else 'private.assert_attempt_actor_session(' end)=0
   and strpos(p.prosrc,'private.assert_attempt_actor_session_at_clock(')=0

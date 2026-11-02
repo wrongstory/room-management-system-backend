@@ -29,11 +29,11 @@ describe('#400 execution and validation dependency boundaries', () => {
   it('keeps all runtime dependencies identical to the frozen validation graph', () => {
     expect(() => validateEdgeRuntimeLock(runtime, validation)).not.toThrow();
     expect(Object.keys(runtime.npm)).toHaveLength(9);
-    expect(validation.npm).toHaveProperty('zod@4.4.3');
+    expect(validation.npm).toHaveProperty('zod@4.6.6');
     expect(validation.npm).toHaveProperty('@types/node@22.5.4');
     expect(validation.npm).toHaveProperty('undici-types@6.19.8');
   });
-  it.each(['zod@4.4.3', '@types/node@22.5.4', 'undici-types@6.19.8', 'unknown@1.0.0'])('rejects non-runtime VFS package %s', name => {
+  it.each(['zod@4.6.6', '@types/node@22.5.4', 'undici-types@6.19.8', 'unknown@1.0.0'])('rejects non-runtime VFS package %s', name => {
     const candidate = structuredClone(runtime);
     candidate.npm[name] = validation.npm[name] ?? { integrity: 'sha512-synthetic' };
     expect(() => validateEdgeRuntimeLock(candidate, validation)).toThrow();
@@ -42,8 +42,8 @@ describe('#400 execution and validation dependency boundaries', () => {
     for (const mutate of [
       (value: typeof runtime) => { delete value.npm['tslib@2.8.1']; },
       (value: typeof runtime) => { value.npm['tslib@2.8.1'].integrity = 'sha512-changed'; },
-      (value: typeof runtime) => { value.specifiers['npm:zod@4.4.3'] = '4.4.3'; },
-      (value: typeof runtime) => { value.workspace.dependencies.push('npm:zod@4.4.3'); }
+      (value: typeof runtime) => { value.specifiers['npm:zod@4.6.6'] = '4.6.6'; },
+      (value: typeof runtime) => { value.workspace.dependencies.push('npm:zod@4.6.6'); }
     ]) {
       const candidate = structuredClone(runtime); mutate(candidate);
       expect(() => validateEdgeRuntimeLock(candidate, validation)).toThrow();

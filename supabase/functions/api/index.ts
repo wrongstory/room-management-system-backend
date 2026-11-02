@@ -1,3 +1,14 @@
+import { setRoomTypeCleaningFee } from "../_shared/room-api.ts";
+import { roomFixedMemo } from "../_shared/room-api.ts";
+import {
+  installAtomicHttpAdmission,
+  prepareHttpAdmission,
+} from "../_shared/http-admission-api.ts";
+import {
+  type AdmissionConfig,
+  type AdmissionRpc,
+  HttpAdmissionError,
+} from "../_shared/http-admission.ts";
 import {
   changeAccountRole,
   changeAccountStatus,
@@ -107,6 +118,7 @@ import {
   notificationReadPath,
 } from "../_shared/notification-api.ts";
 import { openApiResponse, swaggerUiResponse } from "../_shared/openapi.ts";
+import { developerResetPreview } from "../_shared/developer-reset-api.ts";
 import {
   carryForwardPayroll,
   carryLatePayrollEarning,
@@ -158,6 +170,7 @@ import {
   reservationRoomMoveIdFromPath,
 } from "../_shared/reservation-api.ts";
 import {
+  applyRoomReadyCorrection,
   changeRoomMasterData,
   correctRoomOccupancy,
   createRoomOperationBlock,
@@ -170,6 +183,7 @@ import {
   listRooms,
   listRoomTypes,
   overrideRoomDisplayStatus,
+  previewRoomReadyCorrection,
   recordRoomPinSync,
   releaseRoomOperationBlock,
   reportRoomIssue,
@@ -177,6 +191,7 @@ import {
   roomDetailIdFromPath,
   roomListServiceDate,
   roomPathIds,
+  roomReadyCorrectionPath,
   setRoomCandleCount,
 } from "../_shared/room-api.ts";
 import {
@@ -335,6 +350,8 @@ export function configuredPostApprovalHandoverKey(): Uint8Array | undefined {
 }
 
 export interface ApiHandlerDependencies {
+  operationAdmissionConfig?: AdmissionConfig | null;
+  operationAdmissionRpc?: AdmissionRpc;
   createClients: () => EdgeClients;
   authenticateRequest: (
     request: Request,
@@ -393,14 +410,18 @@ async function handleApiRequestCore(
   request: Request,
   dependencies: ApiHandlerDependencies,
 ): Promise<Response> {
-  const id = requestId(request);
+  let id = requestId(request);
   let corsHeaders: Record<string, string> = {};
   let clients: EdgeClients | undefined;
   let actor: EdgeActor | undefined;
   let path = "/";
   try {
-    corsHeaders = cors(request);
     path = routePath(request.url);
+    if (roomPinOperation(request.method, path)) id = crypto.randomUUID();
+    corsHeaders = cors(request);
+    if (path === "/v1/developer/reset/preview") {
+      corsHeaders["cache-control"] = "no-store";
+    }
     const decodedLimitedPath = path.split("/").map((segment) => {
       try {
         return decodeURIComponent(segment);
@@ -568,7 +589,17 @@ async function handleApiRequestCore(
       return swaggerUiResponse(corsHeaders);
     }
 
-    clients = dependencies.createClients();
+    clients = { ...dependencies.createClients() };
+    installAtomicHttpAdmission(clients, dependencies);
+    const requestClients = clients;
+    const prepareAdmission = async () =>
+      prepareHttpAdmission(
+        request,
+        path,
+        requestClients,
+        async () => actor,
+        dependencies,
+      );
     if (supplementalFamily) {
       const handler = dependencies.supplementalRoomIssueHandler ??
         defaultDependencies.supplementalRoomIssueHandler;
@@ -579,6 +610,13 @@ async function handleApiRequestCore(
           "요청한 API 경로를 찾을 수 없습니다.",
         );
       }
+      await prepareHttpAdmission(request, path, clients, async () => {
+        actor ??= await dependencies.authenticateRequest(
+          request,
+          requestClients,
+        );
+        return actor;
+      }, dependencies);
       const supplemental = await handler(
         request,
         path,
@@ -597,6 +635,7 @@ async function handleApiRequestCore(
       );
     }
     if (request.method === "POST" && path === "/v1/auth/login") {
+      await prepareAdmission();
       return jsonResponse(await login(request, clients), 200, corsHeaders);
     }
 
@@ -612,16 +651,21 @@ async function handleApiRequestCore(
       let service = (dependencies.photoService ?? createPhotoService)(
         clients,
       );
-      if (photo.kind === "content") {
+      if (photo.kind === "content" || photo.kind === "thumbnail") {
         actor = await dependencies.authenticateRequest(request, clients);
         requirePasswordChanged(actor);
         service = service.withTiming();
-        const result = await service.content(request, {
-          profileId: actor.profileId,
-          sessionId: verifiedRequestSessionId(request),
-          role: actor.role,
-          profileStatus: "active",
-        }, photo.photoId);
+        const result = await service.content(
+          request,
+          {
+            profileId: actor.profileId,
+            sessionId: verifiedRequestSessionId(request),
+            role: actor.role,
+            profileStatus: "active",
+          },
+          photo.photoId,
+          photo.kind,
+        );
         for (const [key, value] of Object.entries(corsHeaders)) {
           result.headers.set(key, value);
         }
@@ -634,6 +678,7 @@ async function handleApiRequestCore(
       }
       const identity = await authenticateLimitedAttempt(request, clients);
       actor = identity.actor;
+      await prepareAdmission();
       service = service.withTiming();
       const context = {
         profileId: actor.profileId,
@@ -641,7 +686,14 @@ async function handleApiRequestCore(
         role: actor.role,
         profileStatus: identity.profileStatus,
       };
-      const result = photo.kind === "upload"
+      const result = photo.kind === "admit-batch"
+        ? await service.admitBatch(
+          request,
+          context,
+          photo.attemptId,
+          photo.slotId,
+        )
+        : photo.kind === "upload"
         ? await service.upload(
           request,
           context,
@@ -671,6 +723,7 @@ async function handleApiRequestCore(
     if (request.method === "POST" && path === "/v1/offline-events") {
       const identity = await authenticateLimitedAttempt(request, clients);
       actor = identity.actor;
+      await prepareAdmission();
       return jsonResponse(
         await syncOfflineEvent(request, clients, identity),
         200,
@@ -690,6 +743,7 @@ async function handleApiRequestCore(
       }
       const identity = await authenticateLimitedAttempt(request, clients);
       actor = identity.actor;
+      await prepareAdmission();
       return jsonResponse(
         await listLimitedAttempts(request, clients, identity),
         200,
@@ -704,6 +758,7 @@ async function handleApiRequestCore(
     ) {
       const identity = await authenticateLimitedAttempt(request, clients);
       actor = identity.actor;
+      await prepareAdmission();
       const result = limited.action === "read"
         ? await getLimitedAttempt(request, clients, identity, limited.attemptId)
         : await completeLimitedAttempt(
@@ -725,6 +780,7 @@ async function handleApiRequestCore(
         dependencies.authenticateLimitedRequest ?? authenticateLimitedAttempt
       )(request, clients);
       actor = identity.actor;
+      await prepareAdmission();
       return jsonResponse(
         {
           submission: await createSubmission(
@@ -741,6 +797,7 @@ async function handleApiRequestCore(
     }
 
     actor = await dependencies.authenticateRequest(request, clients);
+    await prepareAdmission();
     if (
       (request.method === "GET" && path === "/v1/rooms/pins/export") ||
       (request.method === "POST" &&
@@ -1165,6 +1222,14 @@ async function handleApiRequestCore(
             resetProfileId,
           ),
         },
+        200,
+        corsHeaders,
+      );
+    }
+
+    if (request.method === "GET" && path === "/v1/developer/reset/preview") {
+      return jsonResponse(
+        { preview: await developerResetPreview(request, clients, actor) },
         200,
         corsHeaders,
       );
@@ -1992,9 +2057,41 @@ async function handleApiRequestCore(
       );
     }
 
+    if (
+      request.method === "PUT" &&
+      /^\/v1\/room-types\/[^/]+\/cleaning-fee$/.test(path)
+    ) {
+      const response = jsonResponse(
+        {
+          roomType: await setRoomTypeCleaningFee(
+            request,
+            clients,
+            actor,
+            path.split("/")[3],
+          ),
+        },
+        200,
+        corsHeaders,
+      );
+      response.headers.set("Cache-Control", "no-store");
+      return response;
+    }
     if (request.method === "GET" && path === "/v1/room-types") {
       const response = jsonResponse(
         { items: await listRoomTypes(request, clients, actor) },
+        200,
+        corsHeaders,
+      );
+      response.headers.set("Cache-Control", "no-store");
+      return response;
+    }
+    if (
+      (request.method === "GET" || request.method === "PUT") &&
+      /^\/v1\/rooms\/[^/]+\/fixed-memo$/.test(path)
+    ) {
+      const { roomId } = roomPathIds(path);
+      const response = jsonResponse(
+        { fixedMemo: await roomFixedMemo(request, clients, actor, roomId) },
         200,
         corsHeaders,
       );
@@ -2140,6 +2237,32 @@ async function handleApiRequestCore(
         corsHeaders,
       );
     }
+    const readyCorrectionPath = request.method === "POST"
+      ? roomReadyCorrectionPath(path)
+      : null;
+    if (readyCorrectionPath) {
+      const response = readyCorrectionPath.preview
+        ? {
+          preview: await previewRoomReadyCorrection(
+            request,
+            clients,
+            actor,
+            readyCorrectionPath.roomId,
+          ),
+        }
+        : {
+          correction: await applyRoomReadyCorrection(
+            request,
+            clients,
+            actor,
+            readyCorrectionPath.roomId,
+          ),
+        };
+      return jsonResponse(response, 200, {
+        ...corsHeaders,
+        "cache-control": "no-store",
+      });
+    }
     if (
       request.method === "POST" &&
       path.startsWith("/v1/rooms/") && path.endsWith("/occupancy-corrections")
@@ -2283,6 +2406,13 @@ async function handleApiRequestCore(
       "요청한 API 경로를 찾을 수 없습니다.",
     );
   } catch (error) {
+    if (error instanceof HttpAdmissionError) {
+      error = new EdgeError(
+        error.status,
+        error.code,
+        "현재 작업을 시작할 수 없습니다. 잠시 후 다시 시도해 주세요.",
+      );
+    }
     const photoDiagnostic = photoFailureDiagnostic(error, id);
     if (photoDiagnostic) console.error(JSON.stringify(photoDiagnostic));
     const safeError =
@@ -2312,6 +2442,26 @@ async function handleApiRequestCore(
         responseError = activityError;
       }
     }
+    const pinOperation = roomPinOperation(request.method, path);
+    if (pinOperation) {
+      const diagnostic = roomPinFailureDiagnostic(
+        pinOperation,
+        id,
+        responseError instanceof EdgeError ? responseError.status : 500,
+        responseError instanceof EdgeError
+          ? responseError.code
+          : "INTERNAL_SERVER_ERROR",
+      );
+      if (diagnostic) console.error(JSON.stringify(diagnostic));
+      // The generic handler must not emit a second unbounded error record.
+      if (!(responseError instanceof EdgeError)) {
+        responseError = new EdgeError(
+          500,
+          "INTERNAL_SERVER_ERROR",
+          "서버 오류가 발생했습니다.",
+        );
+      }
+    }
     return errorResponse(responseError, id, corsHeaders);
   }
 }
@@ -2320,3 +2470,7 @@ if (import.meta.main) {
   Deno.serve((request) => handleApiRequest(request));
 }
 import { roomPinTransferResponse } from "../_shared/room-pin-transfer-api.ts";
+import {
+  roomPinFailureDiagnostic,
+  roomPinOperation,
+} from "../_shared/room-pin-diagnostic.ts";

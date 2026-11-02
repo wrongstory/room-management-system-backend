@@ -65,6 +65,7 @@ describe('limited discovery public contract', () => {
 
 const identity: PhotoIdentity = { profileId: id(90), sessionId: id(91), role: 'maid', profileStatus: 'deactivation_pending' };
 const attempt = () => ({ attemptId: id(1), cleaningTargetId: id(5), assignmentId: id(2), maidProfileId: id(90),
+  instructionMemo: null,
   assignmentRevision: 3, executionVersion: 2, status: 'in_progress', startedAt: '2026-10-03T00:00:00Z',
   fieldCompletedAt: null, endedAt: null, effectiveAt: '2026-10-03T00:00:00Z', recordedAt: '2026-10-03T00:00:00Z' });
 const single = () => ({ attempt: attempt(), capability: { attemptId: id(1), assignmentId: id(2), assignmentRevision: 3,
@@ -85,6 +86,19 @@ async function appFor(data: unknown = page(), options: { identity?: PhotoIdentit
   return { app, calls };
 }
 describe('Fastify existing-session limited routes', () => {
+  it('#534 exposes only the exact authorized attempt memo and preserves legacy null', async () => {
+    const data = { ...single(), attempt: { ...attempt(), instructionMemo: '수건 5. 물 캡슐 2.' } };
+    const { app, calls } = await appFor(data);
+    const response = await app.inject({ method: 'GET', url: `/v1/limited/attempts/${id(1)}?assignmentRevision=3` });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().attempt.instructionMemo).toBe(data.attempt.instructionMemo);
+    expect(calls).toHaveLength(1);
+    await app.close();
+    const legacy = { ...attempt() } as Record<string, unknown>;
+    delete legacy.instructionMemo;
+    expect(projectLimitedAttempt({ ...single(), attempt: legacy }, id(90)).attempt.instructionMemo).toBeNull();
+    expect(() => projectLimitedAttempt({ ...single(), attempt: { ...attempt(), instructionMemo: 'x'.repeat(501) } }, id(90))).toThrow();
+  });
   it('registers discovery and passes only verified actor/session; no-store strips private data', async () => {
     const { app, calls } = await appFor({ ...page(), pin: 'private', items: [{ ...item(), sessionId: 'private' }] });
     const response = await app.inject({ method: 'GET', url: '/v1/limited/attempts' });

@@ -132,16 +132,34 @@ try {
   rejected(await race(full(120,19,120,0,4), full(121,19,121,0,4), 'cap'), 'PHOTO_COLLECTION_VERSION_CONFLICT');
   assert.deepEqual(state(4), { revision: 20, active: 20, photos: 20, accepted: 20, changes: 20, ordinary: 0 });
   assert.equal(sql(`select count(*) from private.photo_upload_operations where cleaning_attempt_id='${id(504)}';`),'20');
+  phase = 'batch_sibling_finalizers';
+  sql(`${helpers} select public.admit_photo_collection_upload_batch('${id(2)}','${id(902)}','${id(501)}','${id(401)}',2,
+    pg_temp.slot(1,'cleaning-proof'),5,jsonb_build_array(
+      jsonb_build_object('photoItemId','${id(10150)}','expectedItemRevision',0,'keyDigest',lpad('150',64,'0')),
+      jsonb_build_object('photoItemId','${id(10151)}','expectedItemRevision',0,'keyDigest',lpad('151',64,'0'))),
+    repeat('f',64),repeat('a',64));`);
+  const firstBatch = JSON.parse(sql(`${helpers} select pg_temp.open_upload(1,150,'cleaning-proof',150,5);`));
+  const secondBatch = JSON.parse(sql(`${helpers} select pg_temp.open_upload(1,151,'cleaning-proof',151,5);`));
+  for (const value of [firstBatch, secondBatch]) assert(/^[0-9a-f-]{36}$/.test(value.operationId));
+  assert.notEqual(firstBatch.operationId,secondBatch.operationId);
+  const jsonSql = value => `'${JSON.stringify(value).replaceAll("'", "''")}'::jsonb`;
+  const sibling = await race(`select pg_temp.finish_upload(1,151,${jsonSql(secondBatch)});`,
+    `select pg_temp.finish_upload(1,150,${jsonSql(firstBatch)});`, 'batch_siblings');
+  assert.equal(sibling.exitCode,0); assert.equal(JSON.parse(sibling.output).status,'accepted');
+  assert.equal(JSON.parse(sibling.output).collectionRevision,7);
+  assert.deepEqual(state(), { revision: 7, active: 4, photos: 6, accepted: 6, changes: 7, ordinary: 0 });
+  assert.equal(sql(`select count(*) from private.photo_upload_operations where id in
+    ('${firstBatch.operationId}','${secondBatch.operationId}') and expected_photo_revision=5;`),'2');
   phase = 'password_and_session';
-  const opened = JSON.parse(sql(`${helpers} select pg_temp.open_upload(1,200,'cleaning-proof',200,5);`));
+  const opened = JSON.parse(sql(`${helpers} select pg_temp.open_upload(1,200,'cleaning-proof',200,7);`));
   assert(/^[0-9a-f-]{36}$/.test(opened.operationId));
   const context = `select public.get_photo_provider_context('${id(2)}','${id(902)}','${opened.operationId}',1,repeat('c',64));`;
   rejected(await race(`update public.profiles set must_change_password=true where id='${id(2)}';`,context,'password'), 'PASSWORD_CHANGE_REQUIRED');
   sql(`update public.profiles set must_change_password=false where id='${id(2)}';`);
   rejected(await race(`delete from auth.sessions where id='${id(902)}';`,context,'session'), 'SESSION_REVOKED');
   assert.equal(sql(`select count(*) from private.photo_drive_identities where operation_id='${opened.operationId}';`),'0');
-  assert.deepEqual(state(), { revision: 5, active: 2, photos: 4, accepted: 4, changes: 5, ordinary: 0 });
-  console.log('Photo collection provider context concurrency PASS: 7 observed two-session lock races; append/cap CAS, identical accepted retry, both replacement/delete orders, password/session freshness; no duplicate acceptance or denied identity.');
+  assert.deepEqual(state(), { revision: 7, active: 4, photos: 6, accepted: 6, changes: 7, ordinary: 0 });
+  console.log('Photo collection provider context concurrency PASS: 8 observed two-session lock races; append/cap CAS, identical accepted retry, both replacement/delete orders, reverse batch sibling finalizers, password/session freshness; no duplicate acceptance or denied identity.');
 } catch (error) {
   console.error(`Photo collection provider context concurrency FAIL: ${JSON.stringify({ phase, kind: error instanceof assert.AssertionError ? 'ASSERTION_FAILED' : 'VALIDATION_FAILED' })}`);
   process.exitCode = 1;

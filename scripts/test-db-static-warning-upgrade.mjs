@@ -339,7 +339,7 @@ try {
   assert.deepEqual(JSON.parse(sql(replayCommand)), replay);
   assert.equal(sql(rowsQuery), rows, 'Old command replay creates no duplicate effect');
   phase = 'exact9-gate';
-  execFileSync(process.execPath, [join(root, 'scripts/check-db-lint-baseline.mjs')], { cwd: root, stdio: 'inherit', timeout: 90000 });
+  execFileSync(process.execPath, [join(root, 'scripts/check-db-lint-compatibility-baseline.mjs')], { cwd: root, stdio: 'inherit', timeout: 90000 });
   console.log('DB static warning upgrade100→101 PASS: four LF/known-CRLF combinations, fifteen unauthorized-body rejections, actual CLI last-source atomic rollback including history/raw CRLF; seven canonical source-only changes, one owner-only helper; all rows/catalog/OID/ACL/RLS/receipts and replay preserved; raw17→9, exact baseline gate PASS.');
 } catch (error) {
   const line = error instanceof Error ? error.stack?.match(/test-db-static-warning-upgrade\.mjs:(\d+):\d+/)?.[1] : null;

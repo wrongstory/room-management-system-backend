@@ -16,9 +16,17 @@ try {
   if (!safe.referencesValid || safe.executionEnabled || safe.counts?.rows !== 4 || safe.counts?.edges !== 1) {
     throw new Error('unexpected preservation result');
   }
+  const omitted = structuredClone(preserved);
+  omitted.rows = omitted.rows.filter((row: { key: string }) => row.key !== 'optional');
+  const coverage = inspectResetReferencePlan(omitted);
+  if (omitted.rows.length !== 3 || coverage.referencesValid || coverage.executionEnabled ||
+      JSON.stringify(coverage.blockers) !== JSON.stringify(['ROW_COUNT_MISMATCH'])) {
+    throw new Error('unexpected omission result');
+  }
   process.stdout.write(`${JSON.stringify({
     scope: 'local-temporary-synthetic-reference-fixture',
     sqlConflictCheck: 'PASS', inMemoryPreservationVariant: 'PASS',
+    independentSqlCountsOmissionCheck: 'PASS',
     executionEnabled: false, applicationDataChanged: false,
   })}\n`);
 } catch {

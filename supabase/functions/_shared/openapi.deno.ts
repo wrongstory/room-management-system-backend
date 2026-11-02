@@ -355,6 +355,11 @@ Deno.test("photo OpenAPI collection operations retain raw body boundary, CAS and
       .join() === "admin,maid",
     "developer original read denied",
   );
+  assert(
+    document.paths["/v1/photos/{photoId}/thumbnail"].get["x-required-roles"]
+      .join() === "admin,maid",
+    "thumbnail shares original content roles",
+  );
   const schemas = document.components.schemas;
   assert(
     upload.responses["408"].description.includes("PHOTO_BODY_TIMEOUT"),
@@ -411,13 +416,13 @@ Deno.test("photo OpenAPI collection operations retain raw body boundary, CAS and
     "limited cannot read original ID",
   );
   assert(
-    Object.keys(document.paths).length === 154 &&
+    Object.keys(document.paths).length === 161 &&
       Object.values(document.paths).flatMap((item) =>
           Object.keys(item).filter((method) =>
             ["get", "post", "put", "patch", "delete"].includes(method)
           )
-        ).length === 166,
-    "combined source contract 154/166 (not hosted deployment)",
+        ).length === 174,
+    "combined source contract 161/174 (not hosted deployment)",
   );
 });
 
@@ -1135,10 +1140,13 @@ Deno.test("OpenAPI publishes bearer and idempotency contracts", async () => {
     "assignment draft and commit concurrency errors must be documented",
   );
   assert(
-    serialized.includes('"AVAILABILITY_WEEK_OUT_OF_RANGE"') &&
+    document.components.schemas.ErrorCode.enum.includes(
+      "AVAILABILITY_APPROVAL_REQUIRED",
+    ) &&
+      serialized.includes('"AVAILABILITY_WEEK_OUT_OF_RANGE"') &&
       serialized.includes('"PAST_AVAILABILITY_DATE_NOT_ALLOWED"') &&
       serialized.includes('"STALE_VERSION"'),
-    "availability KST week, past-date, and CAS errors must be documented",
+    "availability approval, KST week, past-date, and CAS errors must be documented",
   );
   assert(
     serialized.includes('"#/components/schemas/ReservationDetail"') &&
@@ -1854,7 +1862,7 @@ Deno.test("lifecycle OpenAPI separates admin CAS, limited session actions and fu
     );
   }
   assert(
-    doc.components.schemas.DeveloperAuditEventType.enum.length === 74,
+    doc.components.schemas.DeveloperAuditEventType.enum.length === 75,
     "actual audit allowlist count",
   );
   assert(

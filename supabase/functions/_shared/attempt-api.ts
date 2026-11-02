@@ -1,4 +1,5 @@
 import { idempotencyKey, readJsonBody } from "./account-api.ts";
+import { parseInstructionMemoRead } from "./assignment-instruction-memo.ts";
 import {
   type EdgeActor,
   type EdgeClients,
@@ -22,6 +23,7 @@ const statuses = [
 ] as const;
 
 export interface AttemptProjection {
+  instructionMemo: string | null;
   attemptId: string;
   cleaningTargetId: string;
   assignmentId: string;
@@ -150,8 +152,15 @@ export function projectAttempt(
     !validTime(row.effectiveAt) || !validTime(row.recordedAt) ||
     row.maidProfileId !== actor.profileId
   ) throw attemptDatabaseError(null);
+  let instructionMemo: string | null;
+  try {
+    instructionMemo = parseInstructionMemoRead(row.instructionMemo);
+  } catch {
+    throw attemptDatabaseError(null);
+  }
   // DB raw snapshot/template/PII가 추가되더라도 명시한 공개 필드만 반환한다.
   return {
+    instructionMemo,
     attemptId: row.attemptId as string,
     cleaningTargetId: row.cleaningTargetId as string,
     assignmentId: row.assignmentId as string,

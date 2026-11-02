@@ -1,0 +1,4 @@
+basicConstraints=critical,CA:FALSE
+keyUsage=critical,digitalSignature,keyEncipherment
+extendedKeyUsage=serverAuth
+subjectAltName=DNS:localhost,IP:127.0.0.1,IP:::1,DNS:db.aaaaaaaaaaaaaaaaaaaa.supabase.co,DNS:db.bbbbbbbbbbbbbbbbbbbb.supabase.co,DNS:db.cccccccccccccccccccc.supabase.co,DNS:db.dddddddddddddddddddd.supabase.co,DNS:db.eeeeeeeeeeeeeeeeeeee.supabase.co,DNS:db.ffffffffffffffffffff.supabase.co,DNS:db.gggggggggggggggggggg.supabase.co,DNS:db.hhhhhhhhhhhhhhhhhhhh.supabase.co

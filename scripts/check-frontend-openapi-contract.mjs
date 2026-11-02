@@ -32,8 +32,12 @@ const effectiveParameters = (pathItem, operation) => {
 
 assert(document.openapi === '3.1.1', `Frontend generator requires OpenAPI 3.1.1, received ${document.openapi}.`);
 assert(document.info.version === '0.6.0', `Unexpected source API version ${document.info.version}.`);
-assert(Object.keys(document.paths).length === 154, 'Update the frontend contract snapshot and reviewed path inventory.');
-assert(operations.length === 166, 'Update the frontend contract snapshot and reviewed operation inventory.');
+assert(Object.keys(document.paths).length === 161, 'Update the frontend contract snapshot and reviewed path inventory.');
+assert(operations.length === 174, 'Update the frontend contract snapshot and reviewed operation inventory.');
+const fee = document.paths['/v1/room-types/{roomTypeId}/cleaning-fee']?.put;
+assert(fee?.operationId==='setRoomTypeCleaningFee' && fee['x-required-roles']?.join(',')==='admin', 'Admin fee contract is missing.');
+const feeBody=fee.requestBody.content['application/json'].schema;
+assert(feeBody.additionalProperties===false && feeBody.properties.confirmFutureTargetsOnly.const===true && feeBody.properties.baseCleaningFee.maximum===1073741823, 'Fee input scope or integer bounds changed.');
 const remittanceBatch = document.paths['/v1/payroll/remittance-markers']?.get;
 assert(remittanceBatch?.operationId === 'listPayrollRemittanceMarkers', 'Bounded remittance batch contract is missing.');
 const batchIds = remittanceBatch.parameters.find((parameter) => parameter.name === 'maidProfileIds');
@@ -65,7 +69,7 @@ for (const [area, pattern] of Object.entries(requiredAreas)) assert(operations.s
 const allowedWithoutIdempotency = new Set([
   'previewRoomPinImport', 'login', 'runDeveloperDiagnostics', 'syncOfflineCompletion', 'previewAssignments',
   'previewDeveloperRoomTypeCapacity', 'previewDeveloperRoomDeactivation',
-  'previewReservationBookability', 'previewReservationRoomMove',
+  'previewReservationBookability', 'previewReservationRoomMove', 'previewRoomReadyCorrection',
   'confirmAssignmentDurationPolicy', 'markNotificationRead', 'revealRoomPin',
 ]);
 const missingIdempotency = [];

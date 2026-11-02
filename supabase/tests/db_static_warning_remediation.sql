@@ -30,12 +30,13 @@ begin
 end $$;
 create temp table warning_checkpoints(label text primary key,value text);
 
--- #376: the exact LF canonical output is the same for either authorized pre101 line-ending variant.
+-- Final source includes #532's exact READY-cancellation filter after #376 remediation.
+-- The isolated100->101 runner retains the original LF/CRLF canonical fingerprints.
 select is((select md5(prosrc) from pg_proc where oid=signature::regprocedure),expected_md5,
-  'CRLF-compatible remediation installs the exact canonical source: '||signature)
+  'final canonical source preserves remediation and approved later changes: '||signature)
 from (values
   ('public.list_cleaning_inspections_page(uuid,uuid,timestamptz,uuid,integer)',
-   'a8138f7f69f796fc0dd1d8d7d8b72569'),
+   '69f85dd6e4dc95fd1b17973e7fe8e5cc'),
   ('public.get_developer_room_catalog(uuid)','f9bd73161810abfaec749042fa8be758'))canonical(signature,expected_md5);
 select ok((select strpos(prosrc,chr(13))=0 from pg_proc where oid=signature::regprocedure),
   'CRLF-compatible remediation leaves no CR in canonical source: '||signature)

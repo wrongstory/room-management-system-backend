@@ -136,8 +136,8 @@ describe('GitHub Pages Swagger portal', () => {
     expect(workflow).toContain("if: github.ref == 'refs/heads/main'");
     expect(workflow).toMatch(/PUBLIC_API_BASE_URL: \$\{\{ vars\.PUBLIC_API_BASE_URL \}\}/);
     expect(workflow).toContain('EXPECTED_OPENAPI_VERSION: "0.6.0"');
-    expect(workflow).toContain('EXPECTED_OPENAPI_PATH_COUNT: "154"');
-    expect(workflow).toContain('EXPECTED_OPENAPI_OPERATION_COUNT: "166"');
+    expect(workflow).toContain('EXPECTED_OPENAPI_PATH_COUNT: "161"');
+    expect(workflow).toContain('EXPECTED_OPENAPI_OPERATION_COUNT: "174"');
     expect(workflow).toContain('--expected-version "$EXPECTED_OPENAPI_VERSION"');
     expect(workflow).toContain('--expected-path-count "$EXPECTED_OPENAPI_PATH_COUNT"');
     expect(workflow).toContain('--expected-operation-count "$EXPECTED_OPENAPI_OPERATION_COUNT"');
@@ -209,6 +209,9 @@ describe('GitHub Pages Swagger portal', () => {
   });
 
   it('builds the exact current source contract and rejects stale release and production counts', async () => {
+    const workflow = (await readFile(workflowUrl, 'utf8')).replaceAll('\r\n', '\n');
+    const configuredValue = (key: string) =>
+      workflow.match(new RegExp(`^ {6}${key}: "([^"\\r\\n]+)"$`, 'm'))?.[1] ?? '';
     const directory = await mkdtemp(join(tmpdir(), 'swagger-v08-release-'));
     temporaryDirectories.push(directory);
     const sourceFile = join(directory, 'release-openapi.json');
@@ -216,21 +219,25 @@ describe('GitHub Pages Swagger portal', () => {
     const outputDirectory = join(directory, 'portal');
     const args = [
       scriptPath, '--source-file', sourceFile, '--api-base-url', apiBaseUrl,
-      '--expected-version', '0.6.0', '--output-dir', outputDirectory
+      '--expected-version', configuredValue('EXPECTED_OPENAPI_VERSION'), '--output-dir', outputDirectory
     ];
     const result = await execFileAsync(process.execPath, [
-      ...args, '--expected-path-count', '154', '--expected-operation-count', '166'
+      ...args, '--expected-path-count', configuredValue('EXPECTED_OPENAPI_PATH_COUNT'),
+      '--expected-operation-count', configuredValue('EXPECTED_OPENAPI_OPERATION_COUNT')
     ]);
-    expect(result.stdout).toContain('version=0.6.0 paths=154 operations=166');
+    expect(result.stdout).toContain('version=0.6.0 paths=161 operations=174');
     const manifest = JSON.parse(await readFile(join(outputDirectory, 'portal-manifest.json'), 'utf8'));
     expect(manifest).toMatchObject({
-      apiVersion: '0.6.0', pathCount: 154, operationCount: 166, readOnly: true
+      apiVersion: '0.6.0', pathCount: 161, operationCount: 174, readOnly: true
     });
     await expect(execFileAsync(process.execPath, [
       ...args, '--expected-path-count', '131', '--expected-operation-count', '141'
     ])).rejects.toThrow(/path 수가 release 계약/);
     await expect(execFileAsync(process.execPath, [
       ...args, '--expected-path-count', '137', '--expected-operation-count', '148'
+    ])).rejects.toThrow(/path 수가 release 계약/);
+    await expect(execFileAsync(process.execPath, [
+      ...args, '--expected-path-count', '160', '--expected-operation-count', '173'
     ])).rejects.toThrow(/path 수가 release 계약/);
   });
 

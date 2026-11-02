@@ -1,0 +1,97 @@
+/** Strict aggregate-only DTO from the trusted SQL collector. This is diagnostic
+ * evidence, never an authorization token, backup proof or all-path drain proof. */
+export function summarizeOperationGates(input: unknown) {
+  const unavailable = () => {
+    throw new Error("OPERATION_GATES_UNAVAILABLE");
+  };
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    return unavailable();
+  }
+  const value = input as Record<string, unknown>;
+  const names = [
+    "format",
+    "lifecycle",
+    "controlVersion",
+    "maintenance",
+    "policyConfigured",
+    "unfinishedAdmissions",
+    "expiredUnfinishedAdmissions",
+    "unresolvedPasswordChanges",
+    "preparedPasswordResets",
+    "coverage",
+    "recentReauthentication",
+    "executionEnabled",
+  ];
+  if (
+    Object.keys(value).length !== names.length ||
+    names.some((name) => !(name in value)) ||
+    value.format !== "developer-operation-gates-v1" ||
+    value.executionEnabled !== false ||
+    !["UNKNOWN", "PROVISIONING", "STARTED"].includes(
+      value.lifecycle as string,
+    ) ||
+    !["UNKNOWN", "OPEN", "REQUESTED"].includes(value.maintenance as string) ||
+    value.coverage !== "NOT_INTEGRATED" ||
+    value.recentReauthentication !== "NOT_EVALUATED" ||
+    typeof value.policyConfigured !== "boolean" ||
+    (value.controlVersion !== null &&
+      (typeof value.controlVersion !== "string" ||
+        !/^[1-9][0-9]{0,18}$/.test(value.controlVersion) ||
+        BigInt(value.controlVersion) > 9223372036854775807n))
+  ) return unavailable();
+  const counts = [
+    "unfinishedAdmissions",
+    "expiredUnfinishedAdmissions",
+    "unresolvedPasswordChanges",
+    "preparedPasswordResets",
+  ] as const;
+  for (const name of counts) {
+    if (!Number.isSafeInteger(value[name]) || (value[name] as number) < 0) {
+      return unavailable();
+    }
+  }
+  if (
+    (value.expiredUnfinishedAdmissions as number) >
+      (value.unfinishedAdmissions as number) ||
+    (value.controlVersion !== null) !== value.policyConfigured ||
+    (value.policyConfigured
+      ? value.maintenance === "UNKNOWN"
+      : value.lifecycle !== "UNKNOWN" || value.maintenance !== "UNKNOWN")
+  ) return unavailable();
+  const blockers = [
+    "ADMISSION_COVERAGE_NOT_INTEGRATED",
+    "RECENT_REAUTHENTICATION_NOT_EVALUATED",
+  ];
+  if (value.lifecycle === "UNKNOWN") {
+    blockers.push("PRE_OPERATION_STATE_UNKNOWN");
+  }
+  if (value.lifecycle === "STARTED") blockers.push("OPERATION_ALREADY_STARTED");
+  if (!value.policyConfigured) blockers.push("OPERATION_POLICY_UNCONFIGURED");
+  if (value.maintenance !== "REQUESTED") {
+    blockers.push("MAINTENANCE_NOT_REQUESTED");
+  }
+  if ((value.unfinishedAdmissions as number) > 0) {
+    blockers.push("ADMISSIONS_NOT_DRAINED");
+  }
+  if ((value.expiredUnfinishedAdmissions as number) > 0) {
+    blockers.push("ADMISSION_EFFECT_UNKNOWN");
+  }
+  if (
+    (value.unresolvedPasswordChanges as number) +
+        (value.preparedPasswordResets as number) > 0
+  ) blockers.push("AUTH_OPERATION_NOT_DRAINED");
+  return {
+    lifecycle: value.lifecycle as "UNKNOWN" | "PROVISIONING" | "STARTED",
+    maintenance: value.maintenance as "UNKNOWN" | "OPEN" | "REQUESTED",
+    policyConfigured: value.policyConfigured,
+    controlVersion: value.controlVersion as string | null,
+    unfinishedAdmissions: value.unfinishedAdmissions as number,
+    expiredUnfinishedAdmissions: value.expiredUnfinishedAdmissions as number,
+    unresolvedPasswordChanges: value.unresolvedPasswordChanges as number,
+    preparedPasswordResets: value.preparedPasswordResets as number,
+    coverage: "NOT_INTEGRATED" as const,
+    recentReauthentication: "NOT_EVALUATED" as const,
+    executionEnabled: false as const,
+    blockers,
+  };
+}

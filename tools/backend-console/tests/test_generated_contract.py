@@ -904,7 +904,8 @@ def test_payroll_payment_result_audit_and_error_codes_are_generated() -> None:
 
 def test_room_status_correction_audit_contract_is_generated_exactly() -> None:
     event_values = {event.value for event in DeveloperAuditEventType}
-    assert len(event_values) == 74
+    assert len(event_values) == 75
+    assert "room.ready_corrected" in event_values
     assert {
         "room.occupancy_corrected",
         "room.display_status_overridden",
@@ -927,6 +928,14 @@ def test_room_status_correction_audit_contract_is_generated_exactly() -> None:
     override_summary = {"displayStatusOverride": None, "roomStateVersion": 12}
     assert DeveloperAuditEventSummary.from_dict(occupied_summary).to_dict() == occupied_summary
     assert DeveloperAuditEventSummary.from_dict(override_summary).to_dict() == override_summary
+    ready_summary = {
+        "roomStateVersion": 13,
+        "cancelledCleaningCount": 1,
+        "releasedOperationBlockCount": 2,
+        "resolvedRoomIssueCount": 3,
+        "candlesCleared": True,
+    }
+    assert DeveloperAuditEventSummary.from_dict(ready_summary).to_dict() == ready_summary
 
 
 def test_assignment_unavailability_audit_contract_is_generated_without_raw_state() -> None:

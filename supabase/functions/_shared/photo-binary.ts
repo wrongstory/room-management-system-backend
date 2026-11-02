@@ -675,6 +675,14 @@ export function checkPhotoEnvelope(
   else webpShape(bytes, clean);
 }
 
+/** Provider-generated preview only; bounded envelope validation never decodes the original. */
+export function checkPhotoThumbnail(bytes: Uint8Array): void {
+  if (bytes.length === 0 || bytes.length > 65536) invalid();
+  jpegShape(bytes, true, undefined, (width, height) => {
+    if (width > 512 || height > 512) invalid();
+  });
+}
+
 function heicShape(bytes: Uint8Array): void {
   if (bytes.length < 24) invalid();
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);

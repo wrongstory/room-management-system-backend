@@ -1,5 +1,31 @@
 # API 구현·Edge 배포·운영 사용 상태 정본
 
+## 2026-11-03 현재 통합148 기준
+
+#577 관리자 타입별 기본 청소 단가와 #579 퇴실 검사 시각 보완, PR581의 Swagger 게시 계약 보완을 포함한다. 현재 source는 migration148개·SQL119파일·upgrade28개·직접 경합13개이며 정상 경로 reset은81회(checkpoint1+upgrade61+static2+경합17)다. workflow 상한은 application20분/DB60분이며 개별 제한·검사 기준은 유지한다. API 계약은0.6.0의161경로/174operation이고 실제 CI 후보 번들은19,961,858 bytes(20,000,000 제한까지38,142 bytes)다.
+
+PR581의 CI41474461400은 Node6,297건/232파일·Python142건 및 application/manifest PASS다. 개발 CI의 실제 DB 단계는 SKIPPED이며 전체 DB 성공을 뜻하지 않는다. 작성 시 진행 중인 FINAL-148-R2/run41472392339는 Swagger 보완 전6bf37e7 입력이다. 그 결과는 변경된 최종 입력의 성공 증거로 사용하지 않는다. 정확한 최종 source/tree/입력 지문·각 실행 결과와 현재 실행 권한은 진행 채팅의 단일 USER_DECISIONS.md로 확인한다. 최종 후보의 전체 DB·main 승격·운영 적용 완료를 이 문서로 선언하지 않는다.
+
+운영 history/pending은 새로 관측하기 전 미확정이며148을 적용 건수로 해석하지 않는다. 운영 migration은 실행 직전 별도 사용자 승인 대상이다. 승인된 DB→API·Swagger→프런트→실사용 확인 순서, 실제 초기화 비활성·사진 삭제 HOLD 및 기존 예약 전용 백업은 유지한다. 아래 날짜별 숫자와147/141 등 이전 후보는 당시 snapshot으로 보존한다.
+
+## 과거 2026-10-31 준비 snapshot — 개발과 운영 상태 분리
+
+현재 진행은 [v1.0.0 개발·배포 준비](RELEASE_V1.0.0_READINESS.md)를 따른다.
+아래 2026-10-07 이하 수치는 당시 검증 이력이며 현재 source나 운영 배포 현황을 뜻하지 않는다.
+
+| 구분 | 확인된 상태 |
+| --- | --- |
+| 개발 통합 | PR539/dev46e47ed의 기존140개를 보존한 후속 후보141개. offline 해결 한 경로의 완료 원장 연결과 최종 catalog 검사 준비, Node212파일/5,662 tests·typecheck/build·manifest PASS. 전체 초기화 실행은 차단 상태이며 정확한 PR/최종 입력은 준비 기록과 진행 채팅의 승인 문서 참조 |
+| 운영 조회 이력 | 2026-10-25 읽기 당시 migration122, API54, scheduler22, notification-delivery13. 이번에는 운영 DB를 재조회하지 않았으므로 최신 배포 상태로 사용하지 않음 |
+| Git main과 DB 검증 | PR537/mainf1fbec94의 비밀번호 hotfix는 정확123개 입력의 전체 DB CI41074219126 PASS. 이 증거는 v1의141개 입력에 재사용하지 않음. 해당 PR의 운영 적용·계정 복구·UAT는 미실행 기록 |
+| 공개 계약 | 10월25일 운영 health200/ok·OpenAPI154/166, API54 원본 다운로드 실패는 과거 관측. 현재 source159/171과 운영 artifact 일치는 별도 확인 필요 |
+| v1 DB 검증 | source/manifest 및 DB 없는 합성 검사만 PASS. 최신141개 최종 전체 DB·운영 적용 NOT RUN. 두 실행은 각각 사전 승인 필요 |
+| 예약 백업 | 캐슬디아트 전용 저장소의 정기 백업·독립 감시·실제 알림 완료로 #12/#273 종료. [날짜별 근거와 한계](RESERVATION_AUTO_BACKUP.md). 기존 wrongstory 백업은 비활성 유지 |
+| 운영 후속 | 업무 알림·예약 scheduler 전환, source와 배포 산출물 일치, 역할별 실제 기기 확인. 백업 현장 인계와 실제15일 만료 삭제는 정기 백업 완료와 구분 |
+
+개발 통합을 운영 활성화로 표시하지 않는다. 실행 승인과 미확정 정책은 자동개발 뒤
+현재 진행 채팅의 단일 `USER_DECISIONS.md`로 확인한다.
+
 ## 2026-10-07 #336 정식 source 등록 후보
 
 최신31차: 종결 GET/list 보완 후 Node2,524·SQL5,568·fresh111·실제110→111 upgrade·18경합·

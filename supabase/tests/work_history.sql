@@ -35,13 +35,20 @@ insert into public.availability_days(availability_version_id,work_date,available
 select pg_temp.wid(303), day::date, day::date = '2026-09-18'
 from generate_series('2026-09-14'::date,'2026-09-20'::date,'1 day') day;
 
-insert into public.cleaning_assignments(
-  id,cleaning_target_id,maid_profile_id,service_date,sequence_number,revision,is_current,notified_at,ended_at,changed_by
-) values
+-- Replica-mode history fixture: explicit NULL bypasses only the internal
+-- inheritance default, while CHECK constraints remain enabled. Unknown JSON
+-- memo key is ignored by the pre140 row type used by historical consumers.
+with assignment_fixture_rows(id,cleaning_target_id,maid_profile_id,service_date,sequence_number,revision,is_current,notified_at,ended_at,changed_by) as (
+values
   (pg_temp.wid(401),pg_temp.wid(501),pg_temp.wid(2),'2026-09-14',1,1,true,'2026-09-13 18:00+09',null,pg_temp.wid(1)),
   (pg_temp.wid(402),pg_temp.wid(502),pg_temp.wid(2),'2026-09-16',1,1,false,'2026-09-13 18:01+09','2026-09-13 18:02+09',pg_temp.wid(1)),
   (pg_temp.wid(403),pg_temp.wid(502),pg_temp.wid(3),'2026-09-16',1,2,true,'2026-09-13 18:03+09',null,pg_temp.wid(1)),
-  (pg_temp.wid(404),pg_temp.wid(504),pg_temp.wid(2),'2026-09-17',2,1,true,null,null,pg_temp.wid(1));
+  (pg_temp.wid(404),pg_temp.wid(504),pg_temp.wid(2),'2026-09-17',2,1,true,null,null,pg_temp.wid(1))
+)
+insert into public.cleaning_assignments
+select (jsonb_populate_record(null::public.cleaning_assignments,
+  to_jsonb(assignment_fixture_rows)||jsonb_build_object('instruction_memo',null,'created_at',now()))).*
+from assignment_fixture_rows;
 
 insert into public.cleaning_attempts(
   id,cleaning_target_id,assignment_id,maid_profile_id,attempt_number,status,assignment_revision,

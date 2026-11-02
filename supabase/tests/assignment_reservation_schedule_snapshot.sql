@@ -284,6 +284,64 @@ select throws_ok($$select notified_reservation_schedule_snapshot from public.cle
 select throws_ok($$select reservation_schedule_snapshot from public.cleaning_target_schedule_revisions$$,
   '42501',null,'anon cannot expose raw creation JSON');
 reset role;
+-- #415 bounded hydration candidate. These are real SQL assertions for the
+-- approved final DB run, not evidence that SQL was executed during development.
+create temp table hydration_case(value jsonb);
+insert into hydration_case select public.get_assignment_card_hydration(
+  pg_temp.schedule_id(2),pg_temp.schedule_id(202),
+  array[(select assignment_id from schedule_cases where label='checkout')],'maid');
+select is((select count(*)::int from jsonb_object_keys((select value from hydration_case))),6,
+  'hydration exposes bindings and exactly five display relations');
+select is((select jsonb_array_length(value->'assignments') from hydration_case),1,
+  'hydration returns the exact selected assignment binding');
+select ok((select bool_and((value->relation->>'count')::int=jsonb_array_length(value->relation->'rows'))
+  from hydration_case cross join unnest(array['targets','profiles','attempts','submissions','schedules']) relation),
+  'every bounded relation has an exact completeness count');
+select is((select value->'profiles'->'rows' from hydration_case),
+  (select jsonb_build_array(jsonb_build_object('id',id,'display_name',display_name))
+    from public.profiles where id=pg_temp.schedule_id(2)), 'profile projection contains only the selected display identity');
+select is((select value->'schedules'->'rows' from hydration_case),
+  (select coalesce(jsonb_agg(to_jsonb(r) order by r.revision desc,r.cleaning_target_id),'[]'::jsonb) from (
+    select cleaning_target_id,revision,effective_service_date,reason_code from public.cleaning_target_schedule_revisions
+    where cleaning_target_id=(select target_id from schedule_cases where label='checkout')) r),
+  'all schedule evidence is preserved without raw reservation snapshots');
+select ok(not (select value ?| array['currentDeparture','scheduleSnapshot'] from hydration_case),
+  'intermediate hydration cannot replace the final schedule and authority boundary');
+select throws_ok(format('select public.get_assignment_card_hydration(%L,%L,array[%L::uuid],%L)',
+  pg_temp.schedule_id(3),pg_temp.schedule_id(203),(select assignment_id from schedule_cases where label='checkout'),'maid'),
+  '42501','ASSIGNMENT_ACCESS_REQUIRED','another maid cannot read related data with a known assignment ID');
+select throws_ok(format('select public.get_assignment_card_hydration(%L,%L,array[%L::uuid],%L)',
+  pg_temp.schedule_id(1),pg_temp.schedule_id(201),(select assignment_id from schedule_cases where label='checkout'),'maid'),
+  '42501','ASSIGNMENT_ACCESS_REQUIRED','hydration rejects stale adapter role');
+select throws_ok(format('select public.get_assignment_card_hydration(%L,%L,array[%L::uuid],%L)',
+  pg_temp.schedule_id(2),pg_temp.schedule_id(9999),(select assignment_id from schedule_cases where label='checkout'),'maid'),
+  '42501','SESSION_REVOKED','hydration requires the current actor session');
+select throws_ok(format('select public.get_assignment_card_hydration(%L,%L,array[]::uuid[],%L)',
+  pg_temp.schedule_id(1),pg_temp.schedule_id(201),'admin'),
+  '22023','ASSIGNMENT_SCHEDULE_QUERY_INVALID','hydration rejects an empty batch');
+select throws_ok(format('select public.get_assignment_card_hydration(%L,%L,array[%L::uuid,%L::uuid],%L)',
+  pg_temp.schedule_id(1),pg_temp.schedule_id(201),(select assignment_id from schedule_cases where label='checkout'),
+  (select assignment_id from schedule_cases where label='checkout'),'admin'),
+  '22023','ASSIGNMENT_SCHEDULE_QUERY_INVALID','hydration rejects duplicated identities');
+select throws_ok(format('select public.get_assignment_card_hydration(%L,%L,array(select pg_temp.schedule_id(n) from generate_series(1,101)n),%L)',
+  pg_temp.schedule_id(1),pg_temp.schedule_id(201),'admin'),
+  '22023','ASSIGNMENT_SCHEDULE_QUERY_INVALID','hydration rejects 101 identities before reading partial data');
+select ok((select bool_and(not has_function_privilege(role_name,
+  'public.get_assignment_card_hydration(uuid,uuid,uuid[],text)','EXECUTE'))
+  from unnest(array['anon','authenticated']) role_name),'hydration is not browser callable');
+select ok(has_function_privilege('service_role','public.get_assignment_card_hydration(uuid,uuid,uuid[],text)','EXECUTE'),
+  'only the application service role can execute hydration');
+select ok((select provolatile='s' and prosecdef and proconfig=array['search_path=""']
+  from pg_proc where oid='public.get_assignment_card_hydration(uuid,uuid,uuid[],text)'::regprocedure),
+  'hydration uses one stable snapshot and an empty search path');
+set local role service_role;
+select lives_ok($$select public.get_assignment_card_hydration(pg_temp.schedule_id(2),pg_temp.schedule_id(202),
+  array[pg_temp.schedule_id(2001)],'maid')$$,'actual service role can read only an authorized batch');
+reset role;
+set local role authenticated;
+select throws_ok($$select public.get_assignment_card_hydration(pg_temp.schedule_id(2),pg_temp.schedule_id(202),
+  array[pg_temp.schedule_id(2001)],'maid')$$,'42501',null,'actual browser role cannot bypass the adapter');
+reset role;
 create temp table schedule_read_digest(value text);
 insert into schedule_read_digest select md5(string_agg(data,'|' order by data)) from (
   select to_jsonb(t)::text data from public.cleaning_targets t union all
@@ -295,6 +353,8 @@ insert into schedule_read_digest select md5(string_agg(data,'|' order by data)) 
 ) evidence;
 select pg_temp.schedule_read(pg_temp.schedule_id(2),pg_temp.schedule_id(202),
   array[(select assignment_id from schedule_cases where label='checkout')],true);
+select public.get_assignment_card_hydration(pg_temp.schedule_id(2),pg_temp.schedule_id(202),
+  array[(select assignment_id from schedule_cases where label='checkout')],'maid');
 select is((select md5(string_agg(data,'|' order by data)) from (
   select to_jsonb(t)::text data from public.cleaning_targets t union all
   select to_jsonb(t)::text from public.cleaning_assignments t union all
@@ -302,6 +362,6 @@ select is((select md5(string_agg(data,'|' order by data)) from (
   select to_jsonb(t)::text from public.audit_events t union all
   select to_jsonb(t)::text from private.command_executions t union all
   select to_jsonb(t)::text from public.notifications t
-) evidence),(select value from schedule_read_digest),'schedule read changes zero business or side-effect rows');
+) evidence),(select value from schedule_read_digest),'schedule and hydration reads change zero business or side-effect rows');
 select * from finish();
 rollback;

@@ -2,6 +2,7 @@ import { Readable } from 'node:stream';
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import type { AppEnv } from '../../config/env.js';
 import type { SupabaseClients } from '../../lib/supabase.js';
+import { AppError } from '../../lib/app-error.js';
 import { PhotoError, PHOTO_INPUT_MAX_BYTES } from './photo-binary.js';
 import { PhotoService, photoError, photoRoute, type PhotoIdentity } from './photo-service.js';
 import { createPhotoRuntimeDependencies, type PhotoRuntimeDependencies } from './photo.runtime.js';
@@ -10,6 +11,11 @@ export interface PhotoHttpServices {
   service: PhotoService;
   authenticate(request: Request, read: boolean): Promise<PhotoIdentity>;
   denied(identity: PhotoIdentity, code: string): Promise<void>;
+}
+function admissionFailure(error: unknown): PhotoError | undefined {
+  return error instanceof AppError && error.statusCode === 503 && [
+    'OPERATION_ADMISSION_UNAVAILABLE', 'OPERATION_MAINTENANCE_REQUESTED', 'OPERATION_ATOMIC_RPC_UNAVAILABLE',
+  ].includes(error.code) ? new PhotoError(503, error.code) : undefined;
 }
 export function createPhotoHttpServices(clients: SupabaseClients, env: AppEnv,
   runtime: PhotoRuntimeDependencies = createPhotoRuntimeDependencies(env)): PhotoHttpServices {
@@ -56,34 +62,37 @@ export function createPhotoRoutes(services: PhotoHttpServices): FastifyPluginAsy
     app.setErrorHandler(async (error, request, reply) => {
       const frameworkCode = error && typeof error === 'object' && 'code' in error ? error.code : null;
       let safe = frameworkCode === 'FST_ERR_CTP_BODY_TOO_LARGE' ? new PhotoError(413, 'PHOTO_TOO_LARGE')
-        : frameworkCode === 'FST_ERR_CTP_INVALID_CONTENT_LENGTH' ? new PhotoError(400, 'INVALID_PHOTO_BINARY') : photoError(error);
+        : frameworkCode === 'FST_ERR_CTP_INVALID_CONTENT_LENGTH' ? new PhotoError(400, 'INVALID_PHOTO_BINARY') : admissionFailure(error) ?? photoError(error);
       const identity = identities.get(request);
       if (identity && ['PHOTO_ACCESS_REQUIRED', 'CAPABILITY_ACCESS_REQUIRED'].includes(safe.code)) {
-        try { await services.denied(identity, safe.code); } catch { safe = new PhotoError(500, 'ACTIVITY_RECORD_FAILED'); }
+        try { await services.denied(identity, safe.code); } catch (auditError) { safe = admissionFailure(auditError) ?? new PhotoError(500, 'ACTIVITY_RECORD_FAILED'); }
       }
       return reply.code(safe.statusCode).header('cache-control', 'no-store').send({ error: { code: safe.code, message: '사진 작업 조건을 확인해 주세요.' }, requestId: request.id });
     });
     const routes = [
       ['POST', '/v1/attempts/:attemptId/photo-slots/:slotId/upload'],
       ['POST', '/v1/attempts/:attemptId/photo-slots/:slotId/photos/:photoItemId/upload'],
+      ['POST', '/v1/attempts/:attemptId/photo-slots/:slotId/upload-batches'],
       ['DELETE', '/v1/attempts/:attemptId/photo-slots/:slotId/photos/:photoItemId'],
       ['GET', '/v1/attempts/:attemptId/photo-slots'],
       ['GET', '/v1/photo-uploads/:operationId'],
-      ['GET', '/v1/photos/:photoId/content']
+      ['GET', '/v1/photos/:photoId/content'],
+      ['GET', '/v1/photos/:photoId/thumbnail']
     ] as const;
     for (const [method, url] of routes) app.route({ method, url, bodyLimit: method === 'POST' ? PHOTO_INPUT_MAX_BYTES : 307200, logLevel: 'silent',
-      onRequest: async request => { identities.set(request, await services.authenticate(webRequest(request), url.endsWith('/content'))); },
+      onRequest: async request => { identities.set(request, await services.authenticate(webRequest(request), url.endsWith('/content') || url.endsWith('/thumbnail'))); },
       handler: async (request, reply) => {
         const web = webRequest(request, method === 'POST'), route = photoRoute(method, new URL(web.url).pathname), identity = identities.get(request);
         if (!route || !identity) throw new PhotoError(404, 'ROUTE_NOT_FOUND');
         const service = services.service.withTiming();
-        if (route.kind === 'content') {
-          const result = await service.content(web, identity, route.photoId);
+        if (route.kind === 'content' || route.kind === 'thumbnail') {
+          const result = await service.content(web, identity, route.photoId, route.kind);
           result.headers.forEach((value, name) => { reply.header(name, value); });
           reply.header('server-timing', service.timingHeader() ?? '').header('access-control-expose-headers', 'Content-Disposition, Server-Timing');
           return reply.code(result.status).send(Buffer.from(await result.arrayBuffer()));
         }
-        const result = route.kind === 'upload' ? await service.upload(web, identity, route.attemptId, route.slotId, route.photoItemId)
+        const result = route.kind === 'admit-batch' ? await service.admitBatch(web, identity, route.attemptId, route.slotId)
+          : route.kind === 'upload' ? await service.upload(web, identity, route.attemptId, route.slotId, route.photoItemId)
           : route.kind === 'delete-item' ? await service.deleteItem(web, identity, route.attemptId, route.slotId, route.photoItemId)
           : route.kind === 'slots' ? await service.slots(web, identity, route.attemptId) : await service.status(web, identity, route.operationId);
         reply.header('server-timing', service.timingHeader() ?? '').header('access-control-expose-headers', 'Server-Timing');

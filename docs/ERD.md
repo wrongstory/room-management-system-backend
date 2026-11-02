@@ -1,4 +1,26 @@
+## #577 타입별 단가 변경
+
+room_types의 기존 base_cleaning_fee/version과 audit_events/command receipt를 사용한다. 새 관계나 원장 대체는 없다. admin만 catalog를 수정하고 이미 생성된 cleaning_targets.fee_snapshot/earnings/payroll은 보존한다. 실제 DB 검증·운영 적용은 별도 승인 전 미실행이다. [계약](ROOM_TYPE_CLEANING_FEE_577.md).
+
 # Room Management System ERD 초안
+
+## #534 청소 배정 메모 — 미배포 후보
+
+`public.cleaning_assignments.instruction_memo` nullable text를 추가한다. 기존 행은 null이며
+메모는 assignment ID/revision과 기존 `changed_by`/`created_at`을 통해 작성 이력을 식별한다.
+과거 revision은 불변이다. 동일 target의 후속 revision에서 생략 시 최신 메모를 계승하고,
+명시적 null/빈 입력으로 지운 이력도 계승한다. 다른 target으로 복사하지 않는다.
+기존 admin/실제 통보받은 maid RLS와 조회 인덱스를 재사용하며 검색 인덱스는 추가하지 않는다.
+감사·알림 payload에는 메모 원문을 추가하지 않는다. 적용·전체 DB 검증은 승인 전 NOT RUN이다.
+[#534 계약](./ASSIGNMENT_INSTRUCTION_MEMO_534.md).
+
+## #532 예약 가능 상태 정정 — 미배포 후보
+
+새 업무 테이블 없이 기존 target/checkout obligation/assignment의 취소·종료와 immutable
+`audit_events`의 `room.ready_corrected` 근거, command receipt를 같은 transaction으로 연결한다.
+현장 완료·제출/사진·검수·수익은 보존한다. 미래 계획·기존 예약/투숙을 일괄 종료하지 않는다.
+이력 보존된 완료 회차를 후속 활성작업에서 제외하려면 exact 정정 근거가 있어야 한다.
+실제 DB 검증·운영 적용은 별도 승인 전 NOT RUN이며 [정정 계약](./ROOM_READY_CORRECTION_532.md)을 따른다.
 
 > 2026-10-07 최신 #336: dev `ac8c775` 기반111 migration/source API150 paths·162 operations
 > 후보는 기본 Fastify/Edge 등록과 전체 로컬 SQL·동시성·fresh 검증을 완료했다. 아래 과거
@@ -757,6 +779,9 @@ inactive/임시 비밀번호/self-action도 inbox에는 남지만 typed delivery
 deferred event/enrollment/notice/outbox trigger가 수신자별 정확히 한 inbox와 비자기 push intent를
 같은 commit에서 요구한다. 별도 singleton cursor는 mutable 기술 projection이며 100건씩 회전한다.
 알림은 informational history이고 업무 완료 뒤에도 원장·알림을 삭제하거나 다시 쌓지 않는다.
+
+#345 source 후보는 신규 수신자의 outbox 시각만 기존 `enrolled_at`에 결합한다.
+새 테이블이나 과거 이력 backfill은 없다. [검증·배포 상태](./CLEANING_OVERDUE_DELIVERY_CLOCK_345.md).
 
 #308 3차의 dev 통합 계약(PR #340)은 새 테이블 없이 기존 attempt와 immutable `cleaning.attempt_started` 감사에
 정상 청소 시작 알림을 결합한다. 관리자의 informational inbox와 비자기 push intent는
@@ -1533,3 +1558,64 @@ active-only fresh wrapper1개뿐이며, 선행 실제7/19 chain 뒤 **source 예
 ## #452 PIN 가져오기
 
 private.room_pin_revisions.source에 sheet_import를 추가한다. 신규 public table 없이 current CAS·기존 nonce/entitlement trigger를 재사용한다. 상세 계약은 [ROOM_PIN_TRANSFER.md](./ROOM_PIN_TRANSFER.md)를 따른다.
+
+## #415 배정 카드 조회 통합 후보
+
+service-only `get_assignment_card_hydration`은100개 assignment의 표시 관계를 묶으며
+기존 final actor/session/ownership·schedule RPC는 모든 hydration 이후 유지한다.
+public base table/RLS/원장 변경 없이 migration124 함수만 추가한다.
+[계약·완전성·DB 미실행 경계](./ASSIGNMENT_HYDRATION_COST_BASELINE.md)를 따른다.
+
+## #411 두 사진 전송 후보
+
+private.photo_upload_batches와 photo_upload_batch_members는 불변 예약 metadata다.
+actor/key UNIQUE와 admission FK를 사용하며 사진·보존·제출 원장을 복사하지 않는다.
+같은 두 member의 accepted change만 collection CAS 진행의 근거가 된다.
+설계·미실행 SQL은 [사진 묶음 계약](./PHOTO_UPLOAD_BATCH_411.md)을 따른다.
+
+## #396 운영 안전 장치 후보
+
+128의 private.developer_operation_control/reauth/admissions/events는 초기화 보존 후보인
+운영 상태·재인증·작업 입장·감사 관계다. 계정 cascade FK는 없고 event→reauth만 참조한다.
+marker/TTL seed 없이 UNKNOWN으로 시작하며 STARTED 잠금은 일반 전환으로 해제되지 않는다.
+실제 DB는 NOT RUN이며 [운영 안전 계약](./DEVELOPER_OPERATION_GATES.md)을 따른다.
+
+130은 admissions에 nullable HTTP route/actor/Auth/session digest/password version 및
+command/key digest/hash를 결합한다. 세션/key 원문과 raw 요청은 보관하지 않는다.
+131은 새 관계 없이 기존 admission과 감사/알림 읽음을 한 transaction에서 완료한다.
+두 방식 모두 HTTP 응답만으로 외부 효과를 완료하지 않으며 계정 cascade FK를 추가하지 않는다.
+[HTTP 원장 계약](./OPERATION_HTTP_ADMISSION.md)과 [원자 감사 계약](./OPERATION_ATOMIC_AUDIT.md)을 따른다.
+
+134는 같은 admissions context에 PIN 증분 claim/fence/outbox version과 같은 transaction에서
+관측한 결과·마지막 heartbeat를 기록한다. 이전 UNKNOWN은 최신 PIN/후속 성공으로 해제하지
+않는다. 새 관계 없이 claim UUID UNIQUE를 추가하며 hosted mapping/전체 재동기화는 HOLD다.
+실제 SQL NOT RUN이며 [PIN 증분 계약](./OPERATION_PIN_ADMISSION.md)을 따른다.
+
+132는 같은 admissions 관계에 nullable worker_kind/worker_context를 추가한다. 알림 claim과
+동일 transaction에서 실제 attempt/target/leaseVersion/claim digest만 저장하며 민감 payload는
+보관하지 않는다. 만료나 나중 시도의 성공은 이전 unknown 효과를 완료하지 않는다.
+[Worker 입장 계약](./OPERATION_WORKER_ADMISSION.md)의 실제 DB 미실행·기본 비활성 경계를 따른다.
+
+133은 같은 admissions.worker_kind/context의 예약 scheduler 형식만 추가한다. 새 relation이나 source127 분류는 없다.
+context에는 actor/invocation bucket/request ID와 command digest만 저장하며 민감 업무 payload를 저장하지 않는다.
+partial unique request ID와 exact immutable command_executions 2개·scheduler heartbeat 연결로 완료를 검증한다.
+
+135는 `private.developer_reset_receipt_heads/events`를 명시 보존 후보로 추가한다.
+head는 actor/project/key UNIQUE와 불변 header, CAS version/hash를 가지며 events의 head FK/sequence PK가
+전체 이력을 보존한다. Auth/profile cascade FK는 없고 직접 table 권한은 닫혀 있다.
+실제 SQL NOT RUN이며 [영속 원장 계약](./RESET_RECEIPT_STORE.md)을 따른다.
+
+
+## #548 예약 지연 등록·입실 상태 읽기 후보
+
+새 테이블/업무 원장 쓰기 없이 service-role 전용 `get_room_board_arrival_projection` 읽기 RPC를 추가한다. 기존 날짜별 projection을 보존하며 LIVE의 실제 입실 상태·예약 등록 시각·예약별 준비 사유를 추가한다. [계약 및 미실행 DB gate](./LATE_RESERVATION_548.md)를 따른다.
+
+
+## #551 객실 고정 메모 후보
+
+`private.room_fixed_memo_revisions(room_id,revision)`은 객실별 append-only 안내 원장이다. 관리자 수정, 실제 통보된 현재 담당 메이드 조회, 별도 CAS/멱등성, room/profile RESTRICT FK와 actor index를 사용한다. 배정·일정 자동 생성 없음. API·권한·마이그레이션 미실행 경계와 #396 미분류 차단은 [상세 인계](./ROOM_FIXED_MEMO_551.md)를 따른다.
+
+
+### 2026-11-02 이번 주 가능일 승인 요청
+
+`availability_change_requests.availability_version_id`는 미제출자의 최초 요청에 한해 nullable이고 `source_version=0`과 묶인 CHECK로 제한한다. 기존 요청의 composite source FK와 메이드·주차 pending unique index는 유지한다. 최초 승인 전에는 availability version/day/candidate를 생성하지 않는다. 승인 시 새 version, 7개 day, 결정·감사·receipt를 한 transaction으로 기록한다. 현재 주 직접 submit은 차단하며 다음 주 submit은 유지한다. 지난 날짜는 양방향 변경 금지, 승인 시 활성 메이드·현재 주·CAS·통보 배정을 재검증한다. 반려는 stale/지난 주 요청도 sourceVersion에 맞게 종결할 수 있다. 이 변경은 개발 migration 후보이며 Full DB NOT RUN이다.

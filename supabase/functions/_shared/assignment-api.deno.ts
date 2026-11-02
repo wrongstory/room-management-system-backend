@@ -133,6 +133,9 @@ function prestartClients(errorMessage?: string) {
             notifiedAt: null,
             endedAt: null,
             createdAt: "2026-09-05T00:00:00Z",
+            ...(Object.hasOwn(args, "p_instruction_memo")
+              ? { instructionMemo: args.p_instruction_memo }
+              : {}),
             raw: "hidden",
           },
           error: null,
@@ -723,6 +726,70 @@ function readClients(
     }),
     admin: {
       rpc: async (name: string, args: Record<string, unknown>) => {
+        if (name === "get_assignment_card_hydration") {
+          await options.beforeRead?.(name);
+          const ids = args.p_assignment_ids as string[];
+          const selected = ids.map((id) =>
+            [...rows, ...(options.overdue ?? [])].find((raw) =>
+              (raw as Record<string, unknown>).id === id
+            ) as Record<string, unknown>
+          );
+          const targetIds = [
+            ...new Set(selected.map((row) => row.cleaning_target_id)),
+          ];
+          const maidIds = [
+            ...new Set(selected.map((row) => row.maid_profile_id)),
+          ];
+          const pack = async (
+            source: ReturnType<typeof queryResult>,
+            key: string,
+            values: unknown[],
+            countOverride?: number | null,
+          ) => {
+            const result = await source.query.in(key, values).limit(1000);
+            const filtered = (result.data as Record<string, unknown>[]).filter(
+              (row) => values.includes(row[key]),
+            );
+            return {
+              rows: filtered,
+              count: countOverride === undefined
+                ? filtered.length
+                : countOverride,
+            };
+          };
+          const attemptRows = await pack(
+            attempts,
+            "assignment_id",
+            ids,
+            options.attemptCount,
+          );
+          attemptRows.rows.sort((a, b) =>
+            Number(b.attempt_number) - Number(a.attempt_number)
+          );
+          const latest = new Map();
+          for (const row of attemptRows.rows) {
+            if (!latest.has(row.assignment_id)) {
+              latest.set(row.assignment_id, row.id);
+            }
+          }
+          return {
+            data: {
+              assignments: selected.map((
+                { id, cleaning_target_id, maid_profile_id },
+              ) => ({ id, cleaning_target_id, maid_profile_id })),
+              targets: await pack(targets, "id", targetIds),
+              profiles: await pack(maids, "id", maidIds),
+              attempts: attemptRows,
+              submissions: latest.size
+                ? await pack(submissions, "cleaning_attempt_id", [
+                  ...latest.values(),
+                ], options.submissionCount)
+                : { rows: [], count: 0 },
+              schedules: await pack(schedules, "cleaning_target_id", targetIds),
+            },
+            error: null,
+          };
+        }
         assert(
           name === "get_assignment_schedule_read_for_plan",
           "exact read-only RPC",
@@ -768,73 +835,55 @@ function readClients(
   };
 }
 
-for (
-  const slowTable of [
-    "cleaning_targets",
-    "profiles",
-    "cleaning_target_schedule_revisions",
-  ]
-) {
-  Deno.test(`assignment submissions overlap slow ${slowTable}, final authority remains last`, async () => {
-    let release = () => {};
-    const gate = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    let reached = () => {};
-    const submitted = new Promise<void>((resolve) => {
-      reached = resolve;
-    });
-    const events: string[] = [];
-    const { clients } = readClients([assignmentRow()], {
-      beforeRead: async (table) => {
-        events.push(`start:${table}`);
-        if (table === slowTable) await gate;
-        events.push(`end:${table}`);
-        if (table === "cleaning_submissions") reached();
-      },
-      scheduleRead: () => {
-        events.push("authority");
-        return { data: null, error: { message: "SESSION_REVOKED" } };
-      },
-    });
-    const pending = captureEdgeError(() =>
-      listAssignments(
-        request("/v1/assignments?serviceDate=2026-09-04"),
-        clients,
-        admin,
-      )
-    );
-    let timeout: number | undefined;
-    try {
-      await Promise.race([
-        submitted,
-        new Promise((_, reject) => {
-          timeout = setTimeout(
-            () => reject(new Error("submissions blocked by unrelated read")),
-            2000,
-          );
-        }),
-      ]);
-      assert(
-        !events.includes(`end:${slowTable}`),
-        "unrelated read still blocked",
-      );
-      assert(
-        !events.includes("authority"),
-        "authority must wait for all hydration",
-      );
-    } finally {
-      clearTimeout(timeout);
-      release();
-    }
-    const error = await pending;
-    assert(
-      error.status === 401 && error.code === "SESSION_REVOKED",
-      "late revocation rejects whole response",
-    );
-    assert(events.at(-1) === "authority", "final DB authority remains last");
+Deno.test("complete bounded hydration precedes the final authority RPC", async () => {
+  let release = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
   });
-}
+  let entered = () => {};
+  const started = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const events: string[] = [];
+  const { clients } = readClients([assignmentRow()], {
+    beforeRead: async (name) => {
+      if (name !== "get_assignment_card_hydration") return;
+      events.push("hydration");
+      entered();
+      await gate;
+      events.push("hydrated");
+    },
+    scheduleRead: () => {
+      events.push("authority");
+      return { data: null, error: { message: "SESSION_REVOKED" } };
+    },
+  });
+  const pending = captureEdgeError(() =>
+    listAssignments(
+      request("/v1/assignments?serviceDate=2026-09-04"),
+      clients,
+      admin,
+    )
+  );
+  await started;
+  try {
+    assert(
+      JSON.stringify(events) === '["hydration"]',
+      "final authority cannot precede hydration",
+    );
+  } finally {
+    release();
+  }
+  const error = await pending;
+  assert(
+    error.status === 401 && error.code === "SESSION_REVOKED",
+    "late revocation rejects all cards",
+  );
+  assert(
+    JSON.stringify(events) === '["hydration","hydrated","authority"]',
+    "authority is last",
+  );
+});
 
 Deno.test("pipelined submissions retain exact-count failure and empty-attempt behavior", async () => {
   for (const submissionCount of [null, 1001, 2]) {
@@ -1376,10 +1425,8 @@ Deno.test("card cancellation is advisory admin/current only and checks all relev
       "no future date or live catalog fallback",
     );
     assert(
-      attempts.filters.some(([key, value]) =>
-        key === "select" && String(value).includes("started_at")
-      ),
-      "start proof selected",
+      attempts.filters.some(([key]) => key === "assignment_id"),
+      "all attempt evidence remains bound to the selected assignments",
     );
   }
   for (const actor of [admin, maid]) {
@@ -2188,4 +2235,400 @@ Deno.test("assignment commit database failures use stable redacted codes", () =>
   ) {
     assert(assignmentDatabaseError({ message: code }).code === code, code);
   }
+});
+
+Deno.test("assignment memo draft omission preserves legacy RPC hash and explicit clearing has a distinct identity", async () => {
+  const { clients, calls } = prestartClients();
+  const draft = {
+    cleaningTargetId: targetId,
+    maidProfileId: maid.profileId,
+    sequenceNumber: 1,
+    expectedAssignmentVersion: 2,
+  };
+  const variants = [
+    {},
+    { instructionMemo: " 142호 수건 5개\n물캡슐 2개 " },
+    { instructionMemo: "142호 수건 5개\n물캡슐 2개" },
+    { instructionMemo: null },
+    { instructionMemo: "\uFEFF \n\u3000" },
+    { instructionMemo: "쓰레기만 치워주세요" },
+  ];
+  const results = [];
+  for (const variant of variants) {
+    results.push(
+      await saveAssignmentDraft(
+        request("/v1/assignments/drafts", "POST", { ...draft, ...variant }),
+        clients,
+        admin,
+      ),
+    );
+  }
+  assert(
+    calls[0].name === "save_cleaning_assignment_draft",
+    "legacy RPC retained",
+  );
+  assert(
+    !Object.hasOwn(calls[0].args, "p_instruction_memo"),
+    "omission remains absent",
+  );
+  assert(
+    calls[0].args.p_request_hash ===
+      "13241e06b8bc4390bb1709b6ba67ca429cd3f658cb3237ac8d451a2c2f68fce1",
+    "legacy hash unchanged",
+  );
+  assert(
+    results[0].instructionMemo === null,
+    "legacy missing receipt remains empty",
+  );
+  assert(
+    calls.slice(1).every((call) =>
+      call.name === "save_cleaning_assignment_draft_with_instruction"
+    ),
+    "explicit values use memo RPC",
+  );
+  assert(
+    results[1].instructionMemo === "142호 수건 5개\n물캡슐 2개",
+    "normalized memo returned",
+  );
+  assert(
+    calls[1].args.p_request_hash === calls[2].args.p_request_hash,
+    "equivalent trimmed retries share identity",
+  );
+  assert(
+    calls[3].args.p_instruction_memo === null &&
+      calls[4].args.p_instruction_memo === null,
+    "null and blank both clear",
+  );
+  assert(
+    calls[3].args.p_request_hash === calls[4].args.p_request_hash,
+    "clear has canonical identity",
+  );
+  assert(
+    new Set(
+      [calls[0], calls[1], calls[3], calls[5]].map((call) =>
+        call.args.p_request_hash
+      ),
+    ).size === 4,
+    "inherit, memo, clear, changed memo cannot share a receipt",
+  );
+  await saveAssignmentDraft(
+    request(
+      "/v1/assignments/drafts",
+      "POST",
+      { ...draft, ...variants[1] },
+      "different-idempotency-key",
+    ),
+    clients,
+    admin,
+  );
+  assert(
+    calls[6].args.p_request_hash === calls[1].args.p_request_hash,
+    "idempotency key excluded from content hash",
+  );
+});
+
+Deno.test("prestart instruction memo reaches exact legacy or planning RPC and is version scoped", async () => {
+  for (const planning of [false, true]) {
+    const { clients, calls } = prestartClients();
+    const input = {
+      ...prestartBody,
+      maidProfileId: maid.profileId,
+      sequenceNumber: 1,
+      ...(planning ? { serviceDate: "2026-09-05" } : {}),
+    };
+    const base = planning
+      ? "change_cleaning_assignment_for_plan"
+      : "change_cleaning_assignment_prestart";
+    await prestartCommand(
+      request("/test", "POST", input),
+      clients,
+      admin,
+      targetId,
+      "change",
+    );
+    const updated = await prestartCommand(
+      request("/test", "POST", { ...input, instructionMemo: " 수건 5개 " }),
+      clients,
+      admin,
+      targetId,
+      "change",
+    );
+    await prestartCommand(
+      request("/test", "POST", { ...input, instructionMemo: null }),
+      clients,
+      admin,
+      targetId,
+      "change",
+    );
+    await prestartCommand(
+      request("/test", "POST", { ...input, instructionMemo: " " }),
+      clients,
+      admin,
+      targetId,
+      "change",
+    );
+    assert(
+      calls[0].name === base &&
+        !Object.hasOwn(calls[0].args, "p_instruction_memo"),
+      "legacy unchanged",
+    );
+    assert(
+      calls[1].name === `${base}_with_instruction` &&
+        calls[1].args.p_instruction_memo === "수건 5개",
+      "explicit memo binds selected RPC",
+    );
+    assert(
+      "instructionMemo" in updated && updated.instructionMemo === "수건 5개",
+      "revision response retained",
+    );
+    assert(
+      calls.every((call) =>
+        call.args.p_expected_current_assignment_id === assignmentId &&
+        call.args.p_expected_assignment_version === 2
+      ),
+      "exact revision CAS retained",
+    );
+    assert(
+      new Set(calls.slice(0, 3).map((call) => call.args.p_request_hash))
+        .size === 3,
+      "omit/update/clear hashes differ",
+    );
+    assert(
+      calls[2].args.p_request_hash === calls[3].args.p_request_hash,
+      "clear retries canonical",
+    );
+  }
+});
+
+Deno.test("invalid assignment instruction input is rejected without RPC or text reflection", async () => {
+  const { clients, calls } = prestartClients();
+  const draft = {
+    cleaningTargetId: targetId,
+    maidProfileId: maid.profileId,
+    sequenceNumber: 1,
+    expectedAssignmentVersion: 2,
+  };
+  for (
+    const instructionMemo of [
+      false,
+      23,
+      {},
+      [],
+      "가".repeat(501),
+      "😀".repeat(251),
+      "\u0000",
+      "\ud800",
+      "010-1234-5678",
+      "person@example.invalid",
+      "https://example.invalid",
+      "비밀번호 1234",
+    ]
+  ) {
+    for (const action of ["draft", "change"]) {
+      const error = await captureEdgeError(() =>
+        action === "draft"
+          ? saveAssignmentDraft(
+            request("/test", "POST", { ...draft, instructionMemo }),
+            clients,
+            admin,
+          )
+          : prestartCommand(
+            request("/test", "POST", {
+              ...prestartBody,
+              maidProfileId: maid.profileId,
+              sequenceNumber: 1,
+              instructionMemo,
+            }),
+            clients,
+            admin,
+            targetId,
+            "change",
+          )
+      );
+      assert(
+        error.status === 400 && error.code === "VALIDATION_ERROR",
+        "fixed input failure",
+      );
+      assert(
+        error.message ===
+          "작업 요청사항은 500자 이하이며 연락처·URL·출입 비밀번호를 포함할 수 없습니다.",
+        "one fixed message without input reflection",
+      );
+    }
+  }
+  const denied = await captureEdgeError(() =>
+    prestartCommand(
+      request("/test", "POST", {
+        ...prestartBody,
+        instructionMemo: "수건 5개",
+      }),
+      clients,
+      admin,
+      targetId,
+      "unassign",
+    )
+  );
+  assert(
+    denied.status === 400 && calls.length === 0,
+    "other commands do not accept memo",
+  );
+  for (const mapper of [assignmentDatabaseError, prestartDatabaseError]) {
+    assert(
+      mapper({ message: "ASSIGNMENT_INSTRUCTION_INVALID" }).status === 400,
+      "SQL validation mapped safely",
+    );
+    assert(
+      !mapper({ message: "ASSIGNMENT_INSTRUCTION_INVALID raw secret" }).message
+        .includes("raw secret"),
+      "unrecognized SQL never reflected",
+    );
+  }
+});
+
+Deno.test("assignment memo visibility follows each notified revision and never current target hydration", async () => {
+  const rows = [
+    assignmentRow({
+      id: "70000000-0000-4000-8000-000000000010",
+      is_current: false,
+      revision: 1,
+      instruction_memo: "이전 수건 5개",
+    }),
+    assignmentRow({ instruction_memo: "현재 물캡슐 2개" }),
+    assignmentRow({
+      notified_at: null,
+      revision: 3,
+      instruction_memo: "미통보",
+    }),
+    assignmentRow({
+      maid_profile_id: otherMaid.profileId,
+      revision: 4,
+      instruction_memo: "다른 메이드",
+    }),
+  ];
+  const { clients } = readClients(rows, {
+    target: { instruction_memo: "잘못된 현재 대상 값" },
+  });
+  const result = await assignmentHistory(
+    request(`/v1/assignments/${targetId}/history`),
+    clients,
+    maid,
+    targetId,
+  );
+  assert(
+    result.length === 2 && result[0].instructionMemo === "이전 수건 5개" &&
+      result[1].instructionMemo === "현재 물캡슐 2개",
+    "own exact notified revisions only",
+  );
+  const legacyClients = readClients([assignmentRow()], {
+    target: { instruction_memo: "새로운 메모" },
+  });
+  const legacy = await listAssignments(
+    request("/v1/assignments?serviceDate=2026-09-04"),
+    legacyClients.clients,
+    maid,
+  );
+  assert(
+    legacy[0].instructionMemo === null,
+    "missing historical field never filled from newer source",
+  );
+  const invalid = readClients([
+    assignmentRow({ instruction_memo: " malformed " }),
+  ]);
+  const error = await captureEdgeError(() =>
+    listAssignments(
+      request("/v1/assignments?serviceDate=2026-09-04"),
+      invalid.clients,
+      maid,
+    )
+  );
+  assert(
+    error.code === "ASSIGNMENT_COMMAND_FAILED" && error.status === 500,
+    "malformed stored memo fails closed",
+  );
+});
+
+Deno.test("commit impact and historical receipts retain revision memo without fresh hydration", async () => {
+  const candidate = commitCandidate({
+    instructionMemo: "수건 5개",
+    rawMemo: "hidden",
+  });
+  const blocked = commitCandidate({
+    instructionMemo: null,
+    currentAvailabilityVersion: null,
+    reasonCodes: ["ASSIGNMENT_DRAFT_STALE_SCHEDULE"],
+  });
+  let payload: Record<string, unknown> = {
+    serviceDate: "2026-09-04",
+    impactFingerprint: fingerprint,
+    committableDrafts: [candidate],
+    blockedDrafts: [blocked],
+    remainingUnassignedTargets: [],
+  };
+  let rpcCalls = 0;
+  const clients = {
+    admin: {
+      rpc: async () => {
+        rpcCalls++;
+        return { data: payload, error: null };
+      },
+    },
+  } as unknown as EdgeClients;
+  const impact = await assignmentCommitImpact(
+    request("/v1/assignments/commit-impact?serviceDate=2026-09-04"),
+    clients,
+    admin,
+  );
+  assert(
+    impact.committableDrafts[0].instructionMemo === "수건 5개" &&
+      impact.blockedDrafts[0].instructionMemo === null,
+    "impact carries exact draft memos",
+  );
+  payload = {
+    serviceDate: "2026-09-04",
+    impactFingerprint: fingerprint,
+    notifiedAssignments: [
+      { ...candidate, notifiedAt: "2026-09-03T12:00:00Z" },
+      { ...commitCandidate(), notifiedAt: "2026-09-03T12:00:00Z" },
+    ],
+    remainingDrafts: [candidate],
+    blockedDrafts: [blocked],
+    unassignedTargets: [],
+  };
+  const input = {
+    serviceDate: "2026-09-04",
+    expectedImpactFingerprint: fingerprint,
+    items: [{
+      cleaningTargetId: targetId,
+      expectedAssignmentVersion: 2,
+      expectedAvailabilityVersion: 3,
+    }],
+  };
+  const first = await commitAssignments(
+    request("/v1/assignments/commit", "POST", input),
+    clients,
+    admin,
+  );
+  const replay = await commitAssignments(
+    request("/v1/assignments/commit", "POST", input),
+    clients,
+    admin,
+  );
+  assert(
+    first.notifiedAssignments[0].instructionMemo === "수건 5개" &&
+      first.notifiedAssignments[1].instructionMemo === null,
+    "legacy receipt stays null and new receipt keeps stored memo",
+  );
+  assert(
+    first.remainingDrafts[0].instructionMemo === "수건 5개" &&
+      first.blockedDrafts[0].instructionMemo === null,
+    "every assignment collection preserved",
+  );
+  assert(
+    rpcCalls === 3 && JSON.stringify(first) === JSON.stringify(replay),
+    "no current DB hydration",
+  );
+  assert(
+    !JSON.stringify(first).includes("rawMemo"),
+    "private columns stripped",
+  );
 });

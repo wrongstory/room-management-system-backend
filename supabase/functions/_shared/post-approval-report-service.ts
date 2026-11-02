@@ -1,5 +1,5 @@
 // Generated from src/modules/post-approval-room-issues/post-approval-room-issue.service.ts. DO NOT EDIT.
-import { z } from "npm:zod@4.4.3";
+import { z } from "npm:zod@4.6.6";
 import type { Actor } from "./post-approval-report-actor.ts";
 import { AppError } from "./post-approval-report-error.ts";
 import { Buffer } from "node:buffer";

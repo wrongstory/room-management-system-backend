@@ -195,19 +195,75 @@ const localInput = { args: [], env: {}, config, endpoint: JSON.stringify('unix:/
     project: 'room-management-system-backend', ports: { '5432/tcp': [{ HostIp: '127.0.0.1', HostPort: '54322' }] } }) };
 
 describe('#336 isolated110->111 source/preflight only (no DB PASS claim)', () => {
-  it('pins completion124 and rejects a rehashed replacement', () => {
-    const changed=clone(entries), changedManifest=clone(manifest), tail=changed[123], record=changedManifest.migrations[123];
-    if (!tail || !record) throw new Error('EXPECTED124');
-    tail.raw=Buffer.from('select 1;\n'); record.sha256=createHash('sha256').update(tail.raw).digest('hex');
-    expect(()=>validatePostApprovalUpgradeSource(changedManifest,changed)).toThrow('Only the source-reviewed password-completion124 tail');
+  it('accepts the preserved146 prefix and exact reviewed147 extension', () => {
+    expect(source.entries[146]?.file).toBe('20261101235415_availability_guard_unused_parameter.sql');
+    expect(source.entries[146]?.sha256).toBe('a3d9e37ce45ebe1f1f6b5ad68e63feb79b401ffb4eb26c389520e9c18aec7d3f');
+    const historical = clone(manifest) as typeof manifest & { head: string; pending: { head: string; count: number } };
+    historical.totalCount = 146;
+    historical.head = 'db_lint_source_corrections';
+    historical.pending.head = historical.head;
+    historical.pending.count = 146 - 78;
+    historical.migrations = historical.migrations.slice(0, 146);
+    expect(validatePostApprovalUpgradeSource(historical, entries.slice(0, 146)).entries)
+      .toEqual(source.entries.slice(0, 146));
+    expect(execFileSync).not.toHaveBeenCalled();
   });
-  it('pins password effect123 without accepting a self-rehashed replacement', () => {
+  it('rejects self-rehashed147 helper replacements and timestamp renames', () => {
     const changed = clone(entries), changedManifest = clone(manifest);
-    const tail = changed[122], record = changedManifest.migrations[122];
-    if (!tail || !record) throw new Error('EXPECTED123_TAIL');
+    const tail = changed[146], record = changedManifest.migrations[146];
+    if (!tail || !record) throw new Error('EXPECTED147_TAIL');
     tail.raw = Buffer.from('select 1;\n');
     record.sha256 = createHash('sha256').update(tail.raw).digest('hex');
-    expect(() => validatePostApprovalUpgradeSource(changedManifest, changed)).toThrow('Only the source-reviewed password-effect123 tail');
+    expect(() => validatePostApprovalUpgradeSource(changedManifest, changed)).toThrow('Only reviewed availability-guard147 tail');
+    const renamed = clone(entries), renamedTail = renamed[146];
+    if (!renamedTail) throw new Error('EXPECTED147_TAIL');
+    renamedTail.file = renamedTail.file.replace('20261101235415_', '20261101235416_');
+    expect(() => validatePostApprovalUpgradeSource(manifest, renamed)).toThrow();
+  });
+
+  it('accepts the unchanged historical145 prefix and exact reviewed146 extension', () => {
+    expect(source.entries).toHaveLength(148);
+    expect(source.entries[145]?.file).toBe('20261101235131_db_lint_source_corrections.sql');
+    expect(source.entries[145]?.sha256).toBe('b7f6834b471877e8a209116e669c566320bd2d67894952947abb351149377282');
+    const historical = clone(manifest) as typeof manifest & { head: string; pending: { head: string; count: number } };
+    historical.totalCount = 145;
+    historical.head = 'current_week_availability_approval';
+    historical.pending.head = historical.head;
+    historical.pending.count = 145 - 78;
+    historical.migrations = historical.migrations.slice(0, 145);
+    expect(validatePostApprovalUpgradeSource(historical, entries.slice(0, 145)).entries)
+      .toEqual(source.entries.slice(0, 145));
+    expect(execFileSync).not.toHaveBeenCalled();
+  });
+  it('rejects a self-rehashed lint146 body replacement without weakening the historical prefix', () => {
+    const changed = clone(entries), changedManifest = clone(manifest);
+    const tail = changed[145], record = changedManifest.migrations[145];
+    if (!tail || !record) throw new Error('EXPECTED146_TAIL');
+    tail.raw = Buffer.from('select 1;\n');
+    record.sha256 = createHash('sha256').update(tail.raw).digest('hex');
+    expect(() => validatePostApprovalUpgradeSource(changedManifest, changed)).toThrow('Only reviewed lint-correction146 tail');
+  });
+  it('rejects renamed146 timestamps even with identical body and manifest hash', () => {
+    const changed = clone(entries), tail = changed[145];
+    if (!tail) throw new Error('EXPECTED146_TAIL');
+    tail.file = tail.file.replace('20261101235131_', '20261101235132_');
+    expect(() => validatePostApprovalUpgradeSource(manifest, changed)).toThrow();
+  });
+  it('pins completion142 and rejects a rehashed replacement', () => {
+    const changed = clone(entries), changedManifest = clone(manifest);
+    const tail = changed[141], record = changedManifest.migrations[141];
+    if (!tail || !record) throw new Error('EXPECTED142_TAIL');
+    tail.raw = Buffer.from('select 1;\n');
+    record.sha256 = createHash('sha256').update(tail.raw).digest('hex');
+    expect(() => validatePostApprovalUpgradeSource(changedManifest, changed)).toThrow('Only the source-reviewed password-completion142 tail');
+  });
+  it('pins offline resolution141 without accepting a self-rehashed replacement', () => {
+    const changed = clone(entries), changedManifest = clone(manifest);
+    const tail = changed[140], record = changedManifest.migrations[140];
+    if (!tail || !record) throw new Error('EXPECTED141_TAIL');
+    tail.raw = Buffer.from('select 1;\n');
+    record.sha256 = createHash('sha256').update(tail.raw).digest('hex');
+    expect(() => validatePostApprovalUpgradeSource(changedManifest, changed)).toThrow('Only the source-reviewed offline-resolution141 tail');
   });
   it('pins photo finalize121 without accepting a rehashed replacement', () => {
     const changed = clone(entries), last = changed[120];
@@ -224,6 +280,142 @@ describe('#336 isolated110->111 source/preflight only (no DB PASS claim)', () =>
     last.raw = Buffer.from('select 1;\n');
     record.sha256 = createHash('sha256').update(last.raw).digest('hex');
     expect(() => validatePostApprovalUpgradeSource(changedManifest, changed)).toThrow('Only the source-reviewed photo-retry120 tail');
+  });
+  it('pins reset row-impact127 without accepting a rehashed replacement', () => {
+    const changed = clone(entries), changedManifest = clone(manifest);
+    const tail = changed[126], record = changedManifest.migrations[126];
+    if (!tail || !record) throw new Error('EXPECTED127_TAIL');
+    tail.raw = Buffer.from('select 1;\n');
+    record.sha256 = createHash('sha256').update(tail.raw).digest('hex');
+    expect(() => validatePostApprovalUpgradeSource(changedManifest, changed)).toThrow('Only the source-reviewed read-only row-impact127 tail');
+  });
+  it('pins HTTP admission130 without accepting a rehashed replacement', () => {
+    const changed = clone(entries), changedManifest = clone(manifest);
+    const tail = changed[129], record = changedManifest.migrations[129];
+    if (!tail || !record) throw new Error('EXPECTED130_TAIL');
+    tail.raw = Buffer.from('select 1;\n');
+    record.sha256 = createHash('sha256').update(tail.raw).digest('hex');
+    expect(() => validatePostApprovalUpgradeSource(changedManifest, changed)).toThrow('Only the source-reviewed HTTP-admission130 tail');
+  });
+  it('pins atomic audit131 without accepting a rehashed replacement', () => {
+    const changed = clone(entries), changedManifest = clone(manifest);
+    const tail = changed[130], record = changedManifest.migrations[130];
+    if (!tail || !record) throw new Error('EXPECTED131_TAIL');
+    tail.raw = Buffer.from('select 1;\n');
+    record.sha256 = createHash('sha256').update(tail.raw).digest('hex');
+    expect(() => validatePostApprovalUpgradeSource(changedManifest, changed)).toThrow('Only the source-reviewed atomic-audit131 tail');
+  });
+  it('pins finite lifecycle admission137 without accepting a rehashed replacement', () => {
+    const changed = clone(entries), changedManifest = clone(manifest);
+    const tail = changed[136], record = changedManifest.migrations[136];
+    if (!tail || !record) throw new Error('EXPECTED137_TAIL');
+    tail.raw = Buffer.from('select 1;\n');
+    record.sha256 = createHash('sha256').update(tail.raw).digest('hex');
+    expect(() => validatePostApprovalUpgradeSource(changedManifest, changed)).toThrow('Only the source-reviewed lifecycle-admission137 tail');
+  });
+  it('pins room ready correction138 without accepting a self-rehashed replacement', () => {
+    const changed = clone(entries), changedManifest = clone(manifest);
+    const tail = changed[137], record = changedManifest.migrations[137];
+    if (!tail || !record) throw new Error('EXPECTED138_TAIL');
+    tail.raw = Buffer.from('select 1;\n');
+    record.sha256 = createHash('sha256').update(tail.raw).digest('hex');
+    expect(() => validatePostApprovalUpgradeSource(changedManifest, changed)).toThrow('Only the source-reviewed room-ready138 tail');
+  });
+  it('pins assignment instruction140 without accepting a self-rehashed replacement', () => {
+    const changed = clone(entries), changedManifest = clone(manifest);
+    const tail = changed[139], record = changedManifest.migrations[139];
+    if (!tail || !record) throw new Error('EXPECTED140_TAIL');
+    tail.raw = Buffer.from('select 1;\n');
+    record.sha256 = createHash('sha256').update(tail.raw).digest('hex');
+    expect(() => validatePostApprovalUpgradeSource(changedManifest, changed)).toThrow('Only the source-reviewed assignment-instruction140 tail');
+  });
+  it('pins password effect139 without accepting a self-rehashed replacement', () => {
+    const changed = clone(entries), changedManifest = clone(manifest);
+    const tail = changed[138], record = changedManifest.migrations[138];
+    if (!tail || !record) throw new Error('EXPECTED139_TAIL');
+    tail.raw = Buffer.from('select 1;\n');
+    record.sha256 = createHash('sha256').update(tail.raw).digest('hex');
+    expect(() => validatePostApprovalUpgradeSource(changedManifest, changed)).toThrow('Only the source-reviewed password-effect139 tail');
+  });
+  it('pins inactive template handover136 without accepting a rehashed replacement', () => {
+    const changed = clone(entries), changedManifest = clone(manifest);
+    const tail = changed[135], record = changedManifest.migrations[135];
+    if (!tail || !record) throw new Error('EXPECTED136_TAIL');
+    tail.raw = Buffer.from('select 1;\n');
+    record.sha256 = createHash('sha256').update(tail.raw).digest('hex');
+    expect(() => validatePostApprovalUpgradeSource(changedManifest, changed)).toThrow('Only the source-reviewed template-handover136 tail');
+  });
+  it('pins durable reset receipt135 without accepting a rehashed replacement', () => {
+    const changed = clone(entries), changedManifest = clone(manifest);
+    const tail = changed[134], record = changedManifest.migrations[134];
+    if (!tail || !record) throw new Error('EXPECTED135_TAIL');
+    tail.raw = Buffer.from('select 1;\n');
+    record.sha256 = createHash('sha256').update(tail.raw).digest('hex');
+    expect(() => validatePostApprovalUpgradeSource(changedManifest, changed)).toThrow('Only the source-reviewed reset-receipt135 tail');
+  });
+  it('pins incremental PIN worker134 without accepting a rehashed replacement', () => {
+    const changed = clone(entries), changedManifest = clone(manifest);
+    const tail = changed[133], record = changedManifest.migrations[133];
+    if (!tail || !record) throw new Error('EXPECTED134_TAIL');
+    tail.raw = Buffer.from('select 1;\n');
+    record.sha256 = createHash('sha256').update(tail.raw).digest('hex');
+    expect(() => validatePostApprovalUpgradeSource(changedManifest, changed)).toThrow('Only the source-reviewed pin-worker134 tail');
+  });
+  it('pins scheduler worker133 without accepting a rehashed replacement', () => {
+    const changed = clone(entries), changedManifest = clone(manifest);
+    const tail = changed[132], record = changedManifest.migrations[132];
+    if (!tail || !record) throw new Error('EXPECTED133_TAIL');
+    tail.raw = Buffer.from('select 1;\n');
+    record.sha256 = createHash('sha256').update(tail.raw).digest('hex');
+    expect(() => validatePostApprovalUpgradeSource(changedManifest, changed)).toThrow('Only the source-reviewed scheduler-worker133 tail');
+  });
+  it('pins notification worker132 without accepting a rehashed replacement', () => {
+    const changed = clone(entries), changedManifest = clone(manifest);
+    const tail = changed[131], record = changedManifest.migrations[131];
+    if (!tail || !record) throw new Error('EXPECTED132_TAIL');
+    tail.raw = Buffer.from('select 1;\n');
+    record.sha256 = createHash('sha256').update(tail.raw).digest('hex');
+    expect(() => validatePostApprovalUpgradeSource(changedManifest, changed)).toThrow('Only the source-reviewed notification-worker132 tail');
+  });
+  it('pins template inventory129 without accepting a rehashed replacement', () => {
+    const changed = clone(entries), changedManifest = clone(manifest);
+    const tail = changed[128], record = changedManifest.migrations[128];
+    if (!tail || !record) throw new Error('EXPECTED129_TAIL');
+    tail.raw = Buffer.from('select 1;\n');
+    record.sha256 = createHash('sha256').update(tail.raw).digest('hex');
+    expect(() => validatePostApprovalUpgradeSource(changedManifest, changed)).toThrow('Only the source-reviewed template-inventory129 tail');
+  });
+  it('pins operation gates128 without accepting a rehashed replacement', () => {
+    const changed = clone(entries), changedManifest = clone(manifest);
+    const tail = changed[127], record = changedManifest.migrations[127];
+    if (!tail || !record) throw new Error('EXPECTED128_TAIL');
+    tail.raw = Buffer.from('select 1;\n');
+    record.sha256 = createHash('sha256').update(tail.raw).digest('hex');
+    expect(() => validatePostApprovalUpgradeSource(changedManifest, changed)).toThrow('Only the source-reviewed operation-gates128 tail');
+  });
+  it('pins photo batch126 without accepting a rehashed replacement', () => {
+    const changed = clone(entries), changedManifest = clone(manifest);
+    const tail = changed[125], record = changedManifest.migrations[125];
+    if (!tail || !record) throw new Error('EXPECTED126_TAIL');
+    tail.raw = Buffer.from('select 1;\n');
+    record.sha256 = createHash('sha256').update(tail.raw).digest('hex');
+    expect(() => validatePostApprovalUpgradeSource(changedManifest, changed)).toThrow('Only the source-reviewed bounded photo-batch126 tail');
+  });
+  it('pins the read-only preview125 tail without accepting a rehashed replacement', () => {
+    const changed = clone(entries), changedManifest = clone(manifest);
+    const tail = changed[124], record = changedManifest.migrations[124];
+    if (!tail || !record) throw new Error('EXPECTED125_TAIL');
+    tail.raw = Buffer.from('select 1;\n');
+    record.sha256 = createHash('sha256').update(tail.raw).digest('hex');
+    expect(() => validatePostApprovalUpgradeSource(changedManifest, changed)).toThrow('Only the source-reviewed read-only reset-preview tail');
+  });
+  it('pins the hydration124 tail without accepting a rehashed replacement', () => {
+    const changed = clone(entries), changedManifest = clone(manifest);
+    const tail = changed[123], record = changedManifest.migrations[123];
+    if (!tail || !record) throw new Error('EXPECTED124_TAIL');
+    tail.raw = Buffer.from('select 1;\n');
+    record.sha256 = createHash('sha256').update(tail.raw).digest('hex');
+    expect(() => validatePostApprovalUpgradeSource(changedManifest, changed)).toThrow('Only the source-reviewed card-hydration124 tail');
   });
   it('pins the midnight118 tail without accepting a rehashed replacement', () => {
     const changed = clone(entries), last = changed[117];

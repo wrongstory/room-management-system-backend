@@ -747,6 +747,13 @@ export function reservationDatabaseError(
   roomMoveCommand = false,
 ): EdgeError {
   const message = error?.message ?? "";
+  if (message.includes("CLEANING_DUE_REPLAN_REQUIRED")) {
+    return new EdgeError(
+      409,
+      "CLEANING_DUE_REPLAN_REQUIRED",
+      "이전 청소의 배정 일정이 새 예약과 충돌합니다. 객실 상태 변경에서 청소를 확인·취소하거나 배정 일정을 다시 조정해 주세요.",
+    );
+  }
   const mappings: Array<[string, number, string, string]> = [
     [
       "VALIDATION_ERROR",

@@ -1,0 +1,765 @@
+{
+  "fingerprint": "bf8bfdf62cc1e77687a02f227d1f8f6bcf5fddc516c5d2b8ad7880cdb850ded2",
+  "rules": [
+    {
+      "relation": "auth.users",
+      "expression": "case (select p.role::text from public.profiles p where p.auth_user_id={alias}.id) when 'developer' then 'preserve' when 'admin' then 'resetCandidate' when 'maid' then 'resetCandidate' else 'unresolved' end"
+    },
+    {
+      "relation": "private.actor_activity_aggregates",
+      "expression": "'preserve'::text"
+    },
+    {
+      "relation": "private.actor_activity_events",
+      "expression": "case (select p.role::text from public.profiles p where p.id={alias}.actor_profile_id) when 'developer' then 'preserve' when 'admin' then 'resetCandidate' when 'maid' then 'resetCandidate' else 'unresolved' end"
+    },
+    {
+      "relation": "private.actor_authorization_denial_aggregates",
+      "expression": "case (select p.role::text from public.profiles p where p.id={alias}.actor_profile_id) when 'developer' then 'preserve' when 'admin' then 'resetCandidate' when 'maid' then 'resetCandidate' else 'unresolved' end"
+    },
+    {
+      "relation": "private.assignment_activation_scan_cursor",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "private.assignment_unavailability_cancellations",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "private.attempt_capability_grants",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "private.attempt_capability_revocations",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "private.attempt_capability_session_roots",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "private.attempt_handover_events",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "private.attempt_photo_changes",
+      "expression": "'photoHold'::text"
+    },
+    {
+      "relation": "private.attempt_photo_collection_changes",
+      "expression": "'photoHold'::text"
+    },
+    {
+      "relation": "private.attempt_photo_collection_items",
+      "expression": "'photoHold'::text"
+    },
+    {
+      "relation": "private.attempt_photo_collection_states",
+      "expression": "'photoHold'::text"
+    },
+    {
+      "relation": "private.attempt_photo_current",
+      "expression": "'photoHold'::text"
+    },
+    {
+      "relation": "private.attempt_photo_purge_states",
+      "expression": "'photoHold'::text"
+    },
+    {
+      "relation": "private.attempt_photo_versions",
+      "expression": "'photoHold'::text"
+    },
+    {
+      "relation": "private.attempt_room_issue_reports",
+      "expression": "'photoHold'::text"
+    },
+    {
+      "relation": "private.auth_password_versions",
+      "expression": "case (select p.role::text from public.profiles p where p.auth_user_id={alias}.auth_user_id) when 'developer' then 'preserve' when 'admin' then 'resetCandidate' when 'maid' then 'resetCandidate' else 'unresolved' end"
+    },
+    {
+      "relation": "private.bomb_room_decisions",
+      "expression": "'photoHold'::text"
+    },
+    {
+      "relation": "private.bomb_room_report_evidence",
+      "expression": "'photoHold'::text"
+    },
+    {
+      "relation": "private.bomb_room_report_seals",
+      "expression": "'photoHold'::text"
+    },
+    {
+      "relation": "private.bomb_room_reports",
+      "expression": "'photoHold'::text"
+    },
+    {
+      "relation": "private.cleaning_overdue_events",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "private.cleaning_overdue_recipients",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "private.cleaning_overdue_scan_cursor",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "private.command_executions",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "private.complaint_response_attention_events",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "private.complaint_response_attention_recipients",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "private.complaint_response_attention_scan_cursor",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "private.developer_catalog_previews",
+      "expression": "case (select p.role::text from public.profiles p where p.id={alias}.actor_profile_id) when 'developer' then 'preserve' when 'admin' then 'resetCandidate' when 'maid' then 'resetCandidate' else 'unresolved' end"
+    },
+    {
+      "relation": "private.developer_diagnostic_rate_limits",
+      "expression": "case (select p.role::text from public.profiles p where p.id={alias}.actor_profile_id) when 'developer' then 'preserve' when 'admin' then 'resetCandidate' when 'maid' then 'resetCandidate' else 'unresolved' end"
+    },
+    {
+      "relation": "private.developer_operation_admissions",
+      "expression": "'preserve'::text"
+    },
+    {
+      "relation": "private.developer_operation_control",
+      "expression": "'preserve'::text"
+    },
+    {
+      "relation": "private.developer_operation_events",
+      "expression": "'preserve'::text"
+    },
+    {
+      "relation": "private.developer_operation_reauth",
+      "expression": "'preserve'::text"
+    },
+    {
+      "relation": "private.flat_evidence_migration_receipts",
+      "expression": "'photoHold'::text"
+    },
+    {
+      "relation": "private.limited_session_eligibility",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "private.limited_session_roots",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "private.login_rate_limit_windows",
+      "expression": "'preserve'::text"
+    },
+    {
+      "relation": "private.notification_delivery_attempt_results",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "private.notification_delivery_attempts",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "private.notification_delivery_events",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "private.notification_delivery_heartbeat",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "private.notification_delivery_jobs",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "private.notification_delivery_outbox",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "private.notification_delivery_permits",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "private.notification_delivery_targets",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "private.notification_event_catalog",
+      "expression": "'preserve'::text"
+    },
+    {
+      "relation": "private.notification_groups",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "private.notification_outbox",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "private.offline_completion_events",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "private.offline_event_resolutions",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "private.offline_work_lease_revocations",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "private.offline_work_leases",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "private.password_change_commands",
+      "expression": "case (select p.role::text from public.profiles p where p.id={alias}.actor_profile_id) when 'developer' then 'preserve' when 'admin' then 'resetCandidate' when 'maid' then 'resetCandidate' else 'unresolved' end"
+    },
+    {
+      "relation": "private.password_reset_auth_markers",
+      "expression": "case (select p.role::text from public.profiles p where p.id={alias}.actor_profile_id) when 'developer' then 'preserve' when 'admin' then 'resetCandidate' when 'maid' then 'resetCandidate' else 'unresolved' end"
+    },
+    {
+      "relation": "private.password_verification_rate_limits",
+      "expression": "case (select p.role::text from public.profiles p where p.id={alias}.actor_profile_id) when 'developer' then 'preserve' when 'admin' then 'resetCandidate' when 'maid' then 'resetCandidate' else 'unresolved' end"
+    },
+    {
+      "relation": "private.payroll_payment_projection_transitions",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "private.payroll_remittance_marker_revisions",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "private.payroll_remittance_markers",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "private.photo_cleanup_events",
+      "expression": "'photoHold'::text"
+    },
+    {
+      "relation": "private.photo_collection_commands",
+      "expression": "'photoHold'::text"
+    },
+    {
+      "relation": "private.photo_drive_folder_bindings",
+      "expression": "'photoHold'::text"
+    },
+    {
+      "relation": "private.photo_drive_folder_identities",
+      "expression": "'photoHold'::text"
+    },
+    {
+      "relation": "private.photo_drive_identities",
+      "expression": "'photoHold'::text"
+    },
+    {
+      "relation": "private.photo_folder_purge_jobs",
+      "expression": "'photoHold'::text"
+    },
+    {
+      "relation": "private.photo_orphan_purge_jobs",
+      "expression": "'photoHold'::text"
+    },
+    {
+      "relation": "private.photo_provider_identity_tombstones",
+      "expression": "'photoHold'::text"
+    },
+    {
+      "relation": "private.photo_provider_objects",
+      "expression": "'photoHold'::text"
+    },
+    {
+      "relation": "private.photo_purge_heartbeat",
+      "expression": "'photoHold'::text"
+    },
+    {
+      "relation": "private.photo_purge_jobs",
+      "expression": "'photoHold'::text"
+    },
+    {
+      "relation": "private.photo_quota_pending",
+      "expression": "'photoHold'::text"
+    },
+    {
+      "relation": "private.photo_retention_links",
+      "expression": "'photoHold'::text"
+    },
+    {
+      "relation": "private.photo_retention_records",
+      "expression": "'photoHold'::text"
+    },
+    {
+      "relation": "private.photo_storage_names",
+      "expression": "'photoHold'::text"
+    },
+    {
+      "relation": "private.photo_storage_quota_snapshot",
+      "expression": "'photoHold'::text"
+    },
+    {
+      "relation": "private.photo_template_slots",
+      "expression": "'templateSource'::text"
+    },
+    {
+      "relation": "private.photo_upload_acceptances",
+      "expression": "'photoHold'::text"
+    },
+    {
+      "relation": "private.photo_upload_admission_bindings",
+      "expression": "'photoHold'::text"
+    },
+    {
+      "relation": "private.photo_upload_admission_limits",
+      "expression": "'photoHold'::text"
+    },
+    {
+      "relation": "private.photo_upload_admissions",
+      "expression": "'photoHold'::text"
+    },
+    {
+      "relation": "private.photo_upload_batch_members",
+      "expression": "'photoHold'::text"
+    },
+    {
+      "relation": "private.photo_upload_batches",
+      "expression": "'photoHold'::text"
+    },
+    {
+      "relation": "private.photo_upload_events",
+      "expression": "'photoHold'::text"
+    },
+    {
+      "relation": "private.photo_upload_operations",
+      "expression": "'photoHold'::text"
+    },
+    {
+      "relation": "private.photo_upload_rate_limits",
+      "expression": "'photoHold'::text"
+    },
+    {
+      "relation": "private.photo_upload_states",
+      "expression": "'photoHold'::text"
+    },
+    {
+      "relation": "private.post_approval_issue_collections",
+      "expression": "'photoHold'::text"
+    },
+    {
+      "relation": "private.post_approval_issue_delete_barriers",
+      "expression": "'photoHold'::text"
+    },
+    {
+      "relation": "private.post_approval_issue_evidence_acceptances",
+      "expression": "'photoHold'::text"
+    },
+    {
+      "relation": "private.post_approval_issue_evidence_items",
+      "expression": "'photoHold'::text"
+    },
+    {
+      "relation": "private.post_approval_issue_folder_bindings",
+      "expression": "'photoHold'::text"
+    },
+    {
+      "relation": "private.post_approval_issue_identity_tombstones",
+      "expression": "'photoHold'::text"
+    },
+    {
+      "relation": "private.post_approval_issue_provider_objects",
+      "expression": "'photoHold'::text"
+    },
+    {
+      "relation": "private.post_approval_issue_purge_jobs",
+      "expression": "'photoHold'::text"
+    },
+    {
+      "relation": "private.post_approval_issue_purge_scan",
+      "expression": "'photoHold'::text"
+    },
+    {
+      "relation": "private.post_approval_issue_quota_pending",
+      "expression": "'photoHold'::text"
+    },
+    {
+      "relation": "private.post_approval_issue_quota_permit_uses",
+      "expression": "'photoHold'::text"
+    },
+    {
+      "relation": "private.post_approval_issue_quota_permits",
+      "expression": "'photoHold'::text"
+    },
+    {
+      "relation": "private.post_approval_issue_quota_refreshes",
+      "expression": "'photoHold'::text"
+    },
+    {
+      "relation": "private.post_approval_issue_report_closures",
+      "expression": "'photoHold'::text"
+    },
+    {
+      "relation": "private.post_approval_issue_report_seals",
+      "expression": "'photoHold'::text"
+    },
+    {
+      "relation": "private.post_approval_issue_upload_admissions",
+      "expression": "'photoHold'::text"
+    },
+    {
+      "relation": "private.post_approval_issue_upload_events",
+      "expression": "'photoHold'::text"
+    },
+    {
+      "relation": "private.post_approval_issue_upload_handovers",
+      "expression": "'photoHold'::text"
+    },
+    {
+      "relation": "private.post_approval_issue_upload_operations",
+      "expression": "'photoHold'::text"
+    },
+    {
+      "relation": "private.post_approval_issue_upload_states",
+      "expression": "'photoHold'::text"
+    },
+    {
+      "relation": "private.post_approval_room_issue_draft_revisions",
+      "expression": "'photoHold'::text"
+    },
+    {
+      "relation": "private.post_approval_room_issue_drafts",
+      "expression": "'photoHold'::text"
+    },
+    {
+      "relation": "private.post_approval_room_issue_reports",
+      "expression": "'photoHold'::text"
+    },
+    {
+      "relation": "private.preparation_proof_usages",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "private.reservation_room_move_events",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "private.reservation_stays",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "private.room_current_pin",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "private.room_display_status_overrides",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "private.room_occupancy_corrections",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "private.room_pin_access_scheduled_revocations",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "private.room_pin_assignment_entitlements",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "private.room_pin_change_leases",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "private.room_pin_nonce_reservations",
+      "expression": "'preserve'::text"
+    },
+    {
+      "relation": "private.room_pin_reveal_leases",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "private.room_pin_revisions",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "private.room_pin_sheet_full_resync_items",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "private.room_pin_sheet_full_resync_runs",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "private.room_pin_sheet_sync_heartbeat",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "private.room_pin_sheet_sync_outbox",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "private.room_pin_sheet_sync_worker_state",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "private.scheduler_invocation_heartbeats",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "private.stay_room_segments",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "private.stay_segment_checkout_obligations",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "private.submission_current_pointers",
+      "expression": "'photoHold'::text"
+    },
+    {
+      "relation": "private.submission_photo_binding_sets",
+      "expression": "'photoHold'::text"
+    },
+    {
+      "relation": "private.submission_photo_bindings",
+      "expression": "'photoHold'::text"
+    },
+    {
+      "relation": "private.target_photo_slot_snapshots",
+      "expression": "'photoHold'::text"
+    },
+    {
+      "relation": "private.target_photo_snapshot_contracts",
+      "expression": "'photoHold'::text"
+    },
+    {
+      "relation": "private.web_push_registration_limits",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "private.web_push_subscription_events",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "private.web_push_subscription_revisions",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "private.web_push_subscription_secrets",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "private.web_push_subscriptions",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "public.assignment_change_requests",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "public.assignment_duration_policy_versions",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "public.audit_events",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "public.availability_change_requests",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "public.availability_days",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "public.availability_versions",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "public.checkout_cleaning_obligations",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "public.checkout_presence_incident_decisions",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "public.checkout_presence_incidents",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "public.cleaning_assignments",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "public.cleaning_attempts",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "public.cleaning_submissions",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "public.cleaning_target_schedule_revisions",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "public.cleaning_targets",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "public.cleaning_template_versions",
+      "expression": "'templateSource'::text"
+    },
+    {
+      "relation": "public.compensation_entitlements",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "public.complaint_case_events",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "public.complaint_cases",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "public.complaint_compensation_decisions",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "public.complaint_decisions",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "public.complaint_maid_responses",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "public.earnings",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "public.inspection_decisions",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "public.login_aliases",
+      "expression": "case (select p.role::text from public.profiles p where p.id={alias}.profile_id) when 'developer' then 'preserve' when 'admin' then 'resetCandidate' when 'maid' then 'resetCandidate' else 'unresolved' end"
+    },
+    {
+      "relation": "public.notifications",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "public.payroll_adjustment_books",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "public.payroll_adjustment_items",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "public.payroll_adjustments",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "public.payroll_carry_items",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "public.payroll_cycles",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "public.payroll_events",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "public.payroll_items",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "public.payroll_offset_settlements",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "public.payroll_payment_attempts",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "public.payroll_payment_results",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "public.payroll_residual_carries",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "public.preparation_obligations",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "public.profiles",
+      "expression": "case {alias}.role::text when 'developer' then 'preserve' when 'admin' then 'resetCandidate' when 'maid' then 'resetCandidate' else 'unresolved' end"
+    },
+    {
+      "relation": "public.reservation_schedule_revisions",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "public.reservations",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "public.room_candle_events",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "public.room_issues",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "public.room_occupancy_events",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "public.room_operation_blocks",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "public.room_pin_access_leases",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "public.room_pin_sync_events",
+      "expression": "'resetCandidate'::text"
+    },
+    {
+      "relation": "public.room_types",
+      "expression": "'preserve'::text"
+    },
+    {
+      "relation": "public.rooms",
+      "expression": "'roomBaseline'::text"
+    },
+    {
+      "relation": "public.submission_photos",
+      "expression": "'photoHold'::text"
+    }
+  ]
+}

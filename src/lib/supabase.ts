@@ -1,7 +1,8 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { AppEnv } from '../config/env.js';
+import type { AdmissionAwareClient } from '../modules/developer-reset/http-admission.js';
 
-export interface SupabaseClients {
+export interface SupabaseClients extends AdmissionAwareClient {
   admin: SupabaseClient;
   publicClient: SupabaseClient;
   forAccessToken(accessToken: string): SupabaseClient;

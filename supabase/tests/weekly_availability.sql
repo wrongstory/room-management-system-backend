@@ -133,13 +133,29 @@ begin
         and week_start = '2026-08-31')
   );
 
-  perform private.submit_weekly_availability_at(
+  begin
+    perform private.submit_weekly_availability_at(
+      '22000000-0000-4000-8000-000000000002', '2026-08-31',
+      array['2026-08-31'::date, '2026-09-03'::date], 2,
+      'availability-direct-blocked', '2026-08-31 00:00:00+09'
+    );
+    insert into availability_test_results values (28, 'current-week direct edits require approval', false);
+  exception when insufficient_privilege then
+    insert into availability_test_results values (28, 'current-week direct edits require approval', sqlerrm = 'AVAILABILITY_APPROVAL_REQUIRED');
+  end;
+  select (private.request_availability_change_at(
     '22000000-0000-4000-8000-000000000002', '2026-08-31',
-    array['2026-08-31'::date, '2026-09-03'::date], 2,
-    'availability-boundary-monday', '2026-08-31 00:00:00+09'
+    array['2026-08-31'::date, '2026-09-03'::date], 'WORK_SCHEDULE', 2,
+    'availability-boundary-request', '2026-08-31 00:00:00+09'
+  )).id into v_change_id;
+  insert into availability_test_results values (29, 'pending edits preserve the effective version',
+    (select version = 2 from public.availability_versions where maid_profile_id='22000000-0000-4000-8000-000000000002' and is_current));
+  perform private.decide_availability_change_at(
+    '22000000-0000-4000-8000-000000000001', v_change_id, 'approved', 'ADMIN_APPROVED', 2,
+    'availability-boundary-approve', '2026-08-31 00:00:01+09'
   );
   insert into availability_test_results values (
-    8, 'Monday direct resubmission creates a new current version',
+    8, 'Monday approved change creates a new current version',
     (select count(*) = 3 and count(*) filter (where is_current and version = 3) = 1
       from public.availability_versions
       where maid_profile_id = '22000000-0000-4000-8000-000000000002'
@@ -147,9 +163,9 @@ begin
   );
 
   begin
-    perform private.submit_weekly_availability_at(
+    perform private.request_availability_change_at(
       '22000000-0000-4000-8000-000000000002', '2026-08-31',
-      array['2026-08-31'::date, '2026-09-01'::date], 3,
+      array['2026-08-31'::date, '2026-09-01'::date], 'WORK_SCHEDULE', 3,
       'availability-retroactive-past', '2026-09-02 09:00:00+09'
     );
     insert into availability_test_results values (9, 'a past unavailable date cannot be made available retroactively', false);
@@ -186,26 +202,35 @@ begin
     );
   end;
 
-  perform private.submit_weekly_availability_at(
+  select (private.request_availability_change_at(
     '22000000-0000-4000-8000-000000000003', '2026-08-24',
-    array['2026-08-26'::date, '2026-08-28'::date], 0,
+    array['2026-08-26'::date, '2026-08-28'::date], 'WORK_SCHEDULE', 0,
     'availability-weekday-new-hire', '2026-08-26 09:00:00+09'
+  )).id into v_change_id;
+  insert into availability_test_results values (30, 'first current-week request keeps availability absent until approval', not exists(select 1 from public.availability_versions where maid_profile_id='22000000-0000-4000-8000-000000000003'));
+  perform private.decide_availability_change_at(
+    '22000000-0000-4000-8000-000000000001', v_change_id, 'approved', 'ADMIN_APPROVED', 0,
+    'availability-weekday-new-hire-approve', '2026-08-26 09:00:00+09'
   );
   insert into availability_test_results values (
-    12, 'a weekday new hire can submit the current KST week',
+    12, 'a weekday new hire is available only after administrator approval',
     (select version = 1 and is_current
       from public.availability_versions
       where maid_profile_id = '22000000-0000-4000-8000-000000000003'
         and week_start = '2026-08-24')
   );
 
-  perform private.submit_weekly_availability_at(
+  select (private.request_availability_change_at(
     '22000000-0000-4000-8000-000000000003', '2026-08-24',
-    array['2026-08-26'::date, '2026-08-28'::date, '2026-08-29'::date], 1,
+    array['2026-08-26'::date, '2026-08-28'::date, '2026-08-29'::date], 'WORK_SCHEDULE', 1,
     'availability-current-past-true', '2026-08-27 09:00:00+09'
+  )).id into v_change_id;
+  perform private.decide_availability_change_at(
+    '22000000-0000-4000-8000-000000000001', v_change_id, 'approved', 'ADMIN_APPROVED', 1,
+    'availability-current-past-true-approve', '2026-08-27 09:00:00+09'
   );
   insert into availability_test_results values (
-    13, 'a current-week resubmission preserves an already-available past date',
+    13, 'an approved current-week change preserves an already-available past date',
     (select version = 2 and is_current
       from public.availability_versions
       where maid_profile_id = '22000000-0000-4000-8000-000000000003'
@@ -245,16 +270,20 @@ begin
     '22000000-0000-4000-8000-000000000001', '2026-08-27 10:00:00+09'
   );
 
+  select (private.request_availability_change_at(
+    '22000000-0000-4000-8000-000000000003', '2026-08-24',
+    array['2026-08-26'::date, '2026-08-29'::date], 'WORK_SCHEDULE', 2,
+    'availability-notified-conflict-request', '2026-08-27 11:00:00+09'
+  )).id into v_change_id;
   begin
-    perform private.submit_weekly_availability_at(
-      '22000000-0000-4000-8000-000000000003', '2026-08-24',
-      array['2026-08-26'::date, '2026-08-29'::date], 2,
+    perform private.decide_availability_change_at(
+      '22000000-0000-4000-8000-000000000001', v_change_id, 'approved', 'ADMIN_APPROVED', 2,
       'availability-notified-conflict', '2026-08-27 11:00:00+09'
     );
-    insert into availability_test_results values (14, 'a direct resubmission cannot invalidate a notified assignment', false);
+    insert into availability_test_results values (14, 'approval cannot invalidate a notified assignment', false);
   exception when serialization_failure then
     insert into availability_test_results values (
-      14, 'a direct resubmission cannot invalidate a notified assignment',
+      14, 'approval cannot invalidate a notified assignment',
       sqlerrm like '%ASSIGNMENT_AVAILABILITY_STALE%'
         and (select version = 2 and is_current
           from public.availability_versions
@@ -270,6 +299,14 @@ begin
         )
     );
   end;
+
+  perform private.decide_availability_change_at(
+    '22000000-0000-4000-8000-000000000001', v_change_id, 'rejected', 'ADMIN_REJECTED', 2,
+    'availability-conflict-reject', '2026-08-27 11:01:00+09'
+  );
+  insert into availability_test_results values (31, 'rejection preserves availability and closes the pending request',
+    (select status='rejected' and approved_version_id is null from public.availability_change_requests where id=v_change_id)
+    and (select version=2 from public.availability_versions where maid_profile_id='22000000-0000-4000-8000-000000000003' and is_current));
 
   perform private.submit_weekly_availability_at(
     '22000000-0000-4000-8000-000000000003', '2026-08-31',
@@ -358,7 +395,7 @@ insert into availability_test_results values (
   21,
   'availability commands persist canonical request hashes in the audit ledger',
   (
-    select count(*) = 9
+    select count(*) = 14
       and bool_and(length(after_state ->> 'requestHash') = 64)
     from public.audit_events
     where event_type like 'availability.%'
@@ -374,10 +411,50 @@ insert into availability_test_results values (
     and not has_table_privilege('anon', 'public.availability_versions', 'SELECT')
 );
 
-select '1..27';
+-- Approval is evaluated at decision time, including a midnight/week rollover.
+do $$
+declare v_request uuid;
+begin
+  select (private.request_availability_change_at(
+    '22000000-0000-4000-8000-000000000002','2026-08-31',
+    array['2026-08-31'::date,'2026-09-02'::date,'2026-09-04'::date],
+    'WORK_SCHEDULE',4,'availability-late-request','2026-09-02 22:00+09'
+  )).id into v_request;
+  begin
+    perform private.decide_availability_change_at('22000000-0000-4000-8000-000000000001',v_request,'approved','ADMIN_APPROVED',4,'availability-late-approval','2026-09-03 00:00+09');
+    insert into availability_test_results values(32,'approval rechecks past dates after midnight',false);
+  exception when others then
+    insert into availability_test_results values(32,'approval rechecks past dates after midnight',sqlerrm='PAST_AVAILABILITY_DATE_NOT_ALLOWED');
+  end;
+  begin
+    perform private.decide_availability_change_at('22000000-0000-4000-8000-000000000002',v_request,'approved','ADMIN_APPROVED',4,'availability-maid-cannot-approve','2026-09-02 22:01+09');
+    insert into availability_test_results values(33,'maid cannot approve her own request',false);
+  exception when insufficient_privilege then
+    insert into availability_test_results values(33,'maid cannot approve her own request',sqlerrm='ACTIVE_ADMIN_REQUIRED');
+  end;
+  begin
+    perform private.request_availability_change_at('22000000-0000-4000-8000-000000000002','2026-08-31',array['2026-08-31'::date],'WORK_SCHEDULE',4,'availability-old-week-request','2026-09-07 00:00+09');
+    insert into availability_test_results values(34,'old-week requests are rejected',false);
+  exception when others then
+    insert into availability_test_results values(34,'old-week requests are rejected',sqlerrm='AVAILABILITY_WEEK_OUT_OF_RANGE');
+  end;
+  perform private.decide_availability_change_at('22000000-0000-4000-8000-000000000001',v_request,'rejected','ADMIN_REJECTED',4,'availability-old-week-reject','2026-09-07 00:00+09');
+  insert into availability_test_results values(35,'past-week request can be rejected without changing availability',
+    (select status='rejected' from public.availability_change_requests where id=v_request)
+    and (select version=4 from public.availability_versions where maid_profile_id='22000000-0000-4000-8000-000000000002' and is_current));
+  begin
+    perform private.request_availability_change_at('22000000-0000-4000-8000-000000000002','2026-08-31',array['2026-09-04'::date],'WORK_SCHEDULE',4,'availability-remove-past-true','2026-09-02 00:00+09');
+    insert into availability_test_results values(36,'past available dates cannot be removed either',false);
+  exception when others then
+    insert into availability_test_results values(36,'past available dates cannot be removed either',sqlerrm='PAST_AVAILABILITY_DATE_NOT_ALLOWED');
+  end;
+end;
+$$;
+
+select '1..36';
 select case when passed then 'ok ' else 'not ok ' end
   || test_number || ' - ' || description
-from availability_test_results
+from availability_test_results where test_number <= 22
 order by test_number;
 
 set local role authenticated;
@@ -432,4 +509,5 @@ select case
   else 'not ok 27 - audit idempotency keys preserve actor and command namespaces'
 end;
 
+select case when passed then 'ok ' else 'not ok ' end || test_number || ' - ' || description from availability_test_results where test_number >= 28 order by test_number;
 rollback;

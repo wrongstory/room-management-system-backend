@@ -1,5 +1,22 @@
 # #431 최종 1회 DB 검증 정책
 
+## #558 최종 lint와 역사적 호환 검사 구분
+
+최종 입력의 lint는 기존 #373 호환9건과 승인된 collector clock10건을 정확한 본문/catalog/진단으로
+검사한다. 원시 strict FAIL은 그대로 기록한다. 새 경고를 묵인하거나 과거9건으로 자동 후퇴하지
+않는다. 역사적100→101 upgrade만 고정 compatibility entry로 기존9건을 검사한다.
+예상19건은 실제 수정 후 DB 결과가 아니며, 정책 승인만으로 DB 검증을 실행하지 않는다.
+
+
+## 2026-11-01 #396 범위 분리와 검증 유지
+
+v1.0.0에는 #396 진단·안전장치만 포함하고 실제 초기화 완성/실행은 운영사 인계 전 후속이다.
+이는 기존 통합 SQL·RLS·업무/권한·경합·rollback 검사를 제거하거나 통과 기준을 낮추는 결정이 아니다.
+전체 초기화용 실데이터 보호·복구와 전체 작업 종료 증명을 일반 배포의 새 선행조건으로 두지 않는다.
+읽기 미리보기·공개 실행 비활성·사진 삭제 HOLD 및 기존 업무 호환은 이번 최종 검사에 남는다.
+구체 입력과 승인 경계는 [v1.0.0 최종 DB 계획](RELEASE_V1.0.0_FINAL_DB_PLAN.md)을 따른다.
+이 범위 확정 자체는 격리/운영 DB 실행 승인이 아니며 아래 실행별 승인 원칙은 그대로다.
+
 ## 2026-10-22 #469 UI-only 한정 재사용 승인
 
 사용자는 UI만 바뀌고 DB/API 검증 입력이 같으면 기존 증거를 재사용하도록 승인했다.
@@ -57,10 +74,27 @@ main 검사는 exact main SHA를 merge_commit_sha로 가진 단 하나의 merged
 
 ## 기존 전체 검사 유지
 
-fresh db:verify → template contract → exact lint baseline → 합성 backup dry-run →
+fresh source122 reset → hash-only checkpoint → exact pending 전체 tip 적용 →
+전체 catalog의 #551 미분류 차단 확인·별도로 바인딩한 기존 분류 범위의 read-plan/합성 사진 HOLD 부모 보호 검사 →
+template contract → exact lint baseline → 합성 backup dry-run →
 전체 db:test/upgrade → static warning upgrade → KST clock → concurrency → cleanup.
-모든 명령과 timeout40분을 유지하며 테스트 삭제/skip/continue-on-error를 추가하지 않는다.
+최종 전체 DB migration job은 유한한 60분 상한을 사용한다. 그 밖의 명령과 개별 timeout·검사 기준은 유지하며 테스트 삭제/skip/continue-on-error를 추가하지 않는다. 이 job 상한은 별도 cleanup 시간 예약이나 성공 보장이 아니다.
 운영 백업/복원은 사용자 결정대로 후속이며 CI 합성 검사를 실제 운영 복원으로 표현하지 않는다.
+
+[catalog 연결 검사](RESET_FINAL_CATALOG_VALIDATION.md)는 같은 실행의 hash-only checkpoint와
+입력 지문이 일치할 때 고정된 catalog 조회만 수행한다. 업무 행 조회·생성한 read-plan SQL 실행·
+보호 데이터 복사/복구·실제 초기화는 수행하지 않으며 전체 reset 실행 권한을 부여하지 않는다.
+새 메모 원장의 삭제·보존 정책은 정하지 않는다. 전체 read-plan/보호 계획은 계속 거부되어야 하며,
+전체와 파생 검사 범위의 지문·관계 수를 구분한다. 예상 밖 미분류 관계·누락·분리 경계를 넘는 FK는
+실패한다. 이는 #14의 #396 진단 범위 결정에 따른 검사 정합성 보완이고 전체 초기화 검증 성공이 아니다.
+
+H1의 [checkpoint 경로](MIGRATION_BASELINE_METADATA.md)는 최초 `db:verify`의 fresh 전체
+적용을 prefix122와 나머지 exact source tip으로 분할한다. 기존110→111 실험/전체 검증은
+유지하고 최초 reset 횟수를 추가하지 않는다.135 같은 특정 숫자를 최종 상한으로 고정하지 않는다.
+정확 실행 승인은 CLI의 로컬 container/volume 재생성, 나머지 적용, 기존 upgrade/fixture와
+오류 시 cleanup을 포함해야 한다. source 구현은 실행 허가가 아니며 일반 dev PR은 DB 실행0이다.
+전체 검사와 cleanup 뒤 hash-only oracle 업로드까지 성공해야 proof를 만든다. artifact 자체의
+fullDbProofVerified/baselineAccepted는 false이며 원 run의 성공 근거를 별도로 대조한다.
 
 ## 전환과 현재 제한
 

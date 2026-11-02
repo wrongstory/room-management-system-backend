@@ -2,7 +2,423 @@ import { type ApiHandlerDependencies, handleApiRequest } from "./index.ts";
 import type { EdgeActor, EdgeClients } from "../_shared/runtime.ts";
 import { EdgeError } from "../_shared/runtime.ts";
 import { PhotoError } from "../_shared/photo-binary.ts";
-import type { PhotoService } from "../_shared/photo-service.ts";
+import { PhotoService } from "../_shared/photo-service.ts";
+
+Deno.test("room READY correction routes expose private preview/commit and stable conflict envelopes", async () => {
+  const room = "10000000-0000-4000-8000-000000000142";
+  const proof = {
+    impactFingerprint: "a".repeat(64),
+    evaluatedAt: "2026-10-30T03:00:00Z",
+    expiresAt: "2026-10-30T03:05:00Z",
+  };
+  const preview = {
+    roomId: room,
+    targetStatus: "READY",
+    roomStateVersion: 3,
+    canApply: true,
+    blockingReasons: [],
+    requiresConfirmation: true,
+    requiresEarningAcknowledgement: false,
+    effects: {
+      cleaningTargets: [],
+      operationBlockIds: [],
+      roomIssueIds: [],
+      candleCount: 0,
+      displayStatusOverride: "READY",
+    },
+    warnings: [],
+    ...proof,
+  };
+  const result = {
+    roomId: room,
+    targetStatus: "READY",
+    roomStateVersion: 4,
+    recordedAt: "2026-10-30T03:01:00Z",
+    cancelledCleaningTargetIds: [],
+    releasedOperationBlockIds: [],
+    resolvedRoomIssueIds: [],
+    candlesCleared: false,
+  };
+  const base = {
+    targetStatus: "READY",
+    reasonCode: "ADMIN_ROOM_READY_CORRECTION",
+  };
+  const body = {
+    ...base,
+    expectedRoomVersion: 3,
+    ...proof,
+    confirmed: true,
+    acknowledgeNoNewEarnings: false,
+    confirmPhysicalCandleRemoval: false,
+  };
+  const calls: string[] = [];
+  let fail = false;
+  const dependencies: ApiHandlerDependencies = {
+    authenticateRequest: () => Promise.resolve({ ...actor, role: "admin" }),
+    createClients: () =>
+      ({
+        admin: {
+          rpc(name: string) {
+            calls.push(name);
+            return Promise.resolve({
+              data: fail
+                ? null
+                : name === "preview_room_ready_correction"
+                ? preview
+                : result,
+              error: fail
+                ? { message: "ROOM_READY_PREVIEW_STALE: private detail" }
+                : null,
+            });
+          },
+        },
+      }) as unknown as EdgeClients,
+  };
+  const path = `/v1/rooms/${room}/ready-correction`;
+  for (
+    const [suffix, payload, key] of [["/preview", base, "preview"], [
+      "",
+      body,
+      "correction",
+    ]] as const
+  ) {
+    const response = await handleApiRequest(
+      request("POST", path + suffix, payload),
+      dependencies,
+    );
+    assert(
+      response.status === 200 &&
+        response.headers.get("cache-control") === "no-store",
+      "private success",
+    );
+    const data = await response.json();
+    assert(data[key]?.roomId === room, "documented envelope");
+  }
+  assert(
+    calls.join(",") ===
+      "preview_room_ready_correction,apply_room_ready_correction",
+    "exact dispatch",
+  );
+  fail = true;
+  const conflict = await handleApiRequest(
+    request("POST", path, body),
+    dependencies,
+  );
+  assert(
+    conflict.status === 409 &&
+      conflict.headers.get("cache-control") === "no-store",
+    "private conflict",
+  );
+  assert(
+    await errorCode(conflict) === "ROOM_READY_PREVIEW_STALE",
+    "stable reload guidance",
+  );
+  fail = false;
+  const denied = await handleApiRequest(request("POST", path, body), {
+    ...dependencies,
+    authenticateRequest: () => Promise.resolve({ ...actor, role: "maid" }),
+  });
+  assert(denied.status === 403, "business admin only");
+  await denied.body?.cancel();
+  const before = calls.length;
+  for (const wrongPath of [path + "/preview/sibling", path + "/sibling"]) {
+    const response = await handleApiRequest(
+      request("POST", wrongPath, body),
+      dependencies,
+    );
+    assert(response.status === 404, "siblings do not dispatch");
+    await response.body?.cancel();
+  }
+  assert(calls.length === before, "wrong routes do not call commands");
+});
+
+for (const prefix of ["", "/api"]) {
+  Deno.test(`photo batch metadata route ${prefix || "root"} uses limited live session and atomic RPC`, async () => {
+    const uid = (n: number) =>
+      `41100000-0000-4000-8000-${String(n).padStart(12, "0")}`;
+    const payload = {
+      assignmentId: uid(3),
+      assignmentRevision: 2,
+      expectedCollectionRevision: 0,
+      items: [5, 6].map((n) => ({
+        photoItemId: uid(n),
+        expectedItemRevision: 0,
+        idempotencyKey: `photo-key-${n}`,
+      })),
+    };
+    let called = 0;
+    const clients = {
+      publicClient: {
+        auth: {
+          getUser: () =>
+            Promise.resolve({
+              data: { user: { id: actor.authUserId } },
+              error: null,
+            }),
+        },
+      },
+      admin: {
+        from: () => ({
+          select: () => ({
+            eq: () => ({
+              single: () =>
+                Promise.resolve({
+                  data: {
+                    id: actor.profileId,
+                    auth_user_id: actor.authUserId,
+                    display_name: "test",
+                    role: "maid",
+                    status: "upload_only",
+                    must_change_password: false,
+                  },
+                  error: null,
+                }),
+            }),
+          }),
+        }),
+        rpc: (name: string, args: Record<string, unknown>) => {
+          if (name === "is_active_auth_session") {
+            return Promise.resolve({ data: true, error: null });
+          }
+          assert(
+            name === "admit_photo_collection_upload_batch",
+            "one metadata RPC",
+          );
+          assert(
+            args.p_actor_profile_id === actor.profileId &&
+              typeof args.p_session_id === "string",
+            "live actor/session bound",
+          );
+          assert(
+            !JSON.stringify(args).includes("photo-key"),
+            "raw keys not forwarded",
+          );
+          called++;
+          return Promise.resolve({
+            data: {
+              batchId: uid(9),
+              maximumConcurrentTransfers: 2,
+              items: payload.items.map((item) => ({
+                photoItemId: item.photoItemId,
+                expiresAt: "2026-10-25T05:00:00Z",
+                quotaWarning: false,
+              })),
+            },
+            error: null,
+          });
+        },
+      },
+    } as unknown as EdgeClients;
+    const service = new PhotoService(clients.admin, () => {
+      throw new Error("provider forbidden for metadata");
+    }, async () => {
+      throw new Error("decoder forbidden");
+    });
+    const req = request(
+      "POST",
+      `${prefix}/v1/attempts/${uid(7)}/photo-slots/${uid(8)}/upload-batches`,
+      payload,
+    );
+    req.headers.set("idempotency-key", "batch-key-1");
+    const response = await handleApiRequest(req, {
+      createClients: () => clients,
+      photoService: () => service,
+      authenticateRequest: () => {
+        throw new Error("ordinary discovery must not replace limited auth");
+      },
+    });
+    assert(
+      response.status === 200 && called === 1,
+      "atomic metadata route succeeded",
+    );
+    assert(
+      response.headers.get("cache-control") === "no-store",
+      "private response",
+    );
+    const body = await response.json();
+    assert(
+      body.maximumConcurrentTransfers === 2 && body.items.length === 2,
+      "bounded pair only",
+    );
+  });
+}
+
+Deno.test("#411 thumbnail takes ordinary auth and preserves private binary headers", async () => {
+  let authentications = 0, reads = 0;
+  const token = `h.${
+    btoa(JSON.stringify({ session_id: "10000000-0000-4000-8000-000000000001" }))
+  }.synthetic`;
+  const service = {
+    withTiming: () => service,
+    timingHeader: () => "photo_db;dur=1.0, photo_drive;dur=2.0",
+    content: (
+      _request: Request,
+      identity: { role: string },
+      photoId: string,
+      representation: string,
+    ) => {
+      assert(
+        identity.role === "admin" &&
+          photoId === "10000000-0000-4000-8000-000000000411" &&
+          representation === "thumbnail",
+        "exact read route and identity",
+      );
+      reads++;
+      return Promise.resolve(
+        new Response(new Uint8Array([1, 2]), {
+          headers: {
+            "content-type": "image/jpeg",
+            "cache-control": "no-store",
+            "x-content-type-options": "nosniff",
+            "content-disposition": 'inline; filename="thumbnail.jpg"',
+          },
+        }),
+      );
+    },
+  };
+  for (const prefix of ["/api", "/functions/v1/api"]) {
+    const response = await handleApiRequest(
+      new Request(
+        `https://api.example${prefix}/v1/photos/10000000-0000-4000-8000-000000000411/thumbnail`,
+        {
+          headers: { authorization: `Bearer ${token}` },
+        },
+      ),
+      {
+        createClients: () => ({}) as EdgeClients,
+        authenticateRequest: () => {
+          authentications++;
+          return Promise.resolve({ ...actor, role: "admin" });
+        },
+        photoService: () => service as unknown as PhotoService,
+      },
+    );
+    assert(
+      response.status === 200 &&
+        response.headers.get("cache-control") === "no-store",
+      "private success",
+    );
+    assert(
+      response.headers.get("content-type") === "image/jpeg" &&
+        !response.headers.has("location"),
+      "no provider URL",
+    );
+    assert(
+      response.headers.get("access-control-expose-headers") ===
+        "Content-Disposition, Server-Timing",
+      "safe exposed headers",
+    );
+  }
+  assert(
+    authentications === 2 && reads === 2,
+    "full auth every request, no limited identity path",
+  );
+});
+
+Deno.test("#317 PIN 5xx logs correlate server UUID without secrets across all operations", async () => {
+  const paths = [
+    "pins/bootstrap",
+    "room/pin/reveal",
+    "room/pin/generated/confirm",
+    "room/pin-changes/prepare",
+    "room/pin-changes/lease/confirm",
+    "room/pin-changes/lease/rollback",
+  ];
+  const records: unknown[][] = [];
+  const original = console.error;
+  console.error = (...args: unknown[]) => {
+    records.push(args);
+  };
+  const supplied = "10000000-0000-4000-8000-000000000001";
+  try {
+    for (const path of paths) {
+      for (
+        const failure of [
+          new EdgeError(503, "ROOM_PIN_KEY_UNAVAILABLE", "safe"),
+          new Error("synthetic-secret-raw"),
+          new EdgeError(503, "synthetic-secret-code", "safe"),
+        ]
+      ) {
+        const deps: ApiHandlerDependencies = {
+          createClients: () => ({}) as EdgeClients,
+          authenticateRequest: () => Promise.reject(failure),
+        };
+        const before = records.length;
+        const response = await handleApiRequest(
+          new Request(
+            `https://api.example/api/v1/rooms/${path}?pin=synthetic-secret-query`,
+            {
+              method: "POST",
+              headers: {
+                "x-request-id": supplied,
+                authorization: "Bearer synthetic-secret-token",
+                "content-type": "application/json",
+              },
+              body: "{}",
+            },
+          ),
+          deps,
+        );
+        const body = await response.json();
+        assert(
+          response.status === (failure instanceof EdgeError ? 503 : 500),
+          "expected failure",
+        );
+        assert(
+          response.headers.get("cache-control") === "no-store",
+          "no cache",
+        );
+        assert(
+          body.requestId !== supplied &&
+            /^[0-9a-f-]{14}4[0-9a-f-]{21}$/.test(body.requestId),
+          "server UUID",
+        );
+        assert(records.length === before + 1, "exactly one diagnostic");
+        const record = JSON.parse(String(records.at(-1)?.[0]));
+        assert(
+          record.requestId === body.requestId &&
+            record.status === response.status,
+          "response correlation",
+        );
+        assert(
+          Object.keys(record).sort().join(",") ===
+            "code,operation,requestId,status",
+          "closed projection",
+        );
+        assert(
+          record.code ===
+            (failure instanceof EdgeError &&
+                failure.code === "ROOM_PIN_KEY_UNAVAILABLE"
+              ? failure.code
+              : "INTERNAL_SERVER_ERROR"),
+          "allowlist",
+        );
+      }
+    }
+    const before = records.length;
+    const denied = await handleApiRequest(
+      new Request("https://api.example/api/v1/rooms/room/pin/reveal", {
+        method: "POST",
+      }),
+      {
+        createClients: () => ({}) as EdgeClients,
+        authenticateRequest: () =>
+          Promise.reject(new EdgeError(401, "INVALID_ACCESS_TOKEN", "denied")),
+      },
+    );
+    assert(
+      denied.status === 401 && records.length === before,
+      "4xx not logged",
+    );
+    await denied.body?.cancel();
+    assert(
+      !JSON.stringify(records).includes("synthetic-secret"),
+      "no secret canaries in logs",
+    );
+  } finally {
+    console.error = original;
+  }
+});
 
 Deno.test("common timing exposes only fixed duration on successful business responses", async () => {
   const deps: ApiHandlerDependencies = {
@@ -1221,8 +1637,11 @@ Deno.test("assignment GET routes expose only own notified revisions and preserve
             ? []
             : [{ id: maid.profileId, display_name: "메이드" }],
         ),
-      rpc: (name: string, args: Record<string, unknown>) => {
-        if (name !== "get_assignment_schedule_read_for_plan") {
+      rpc: async (name: string, args: Record<string, unknown>) => {
+        if (
+          name !== "get_assignment_schedule_read_for_plan" &&
+          name !== "get_assignment_card_hydration"
+        ) {
           return Promise.resolve({ data: null, error: null });
         }
         assert(
@@ -1248,6 +1667,33 @@ Deno.test("assignment GET routes expose only own notified revisions and preserve
           ids.every((id) => rows.some((row) => row.id === id)),
           "no cross-ID hydration",
         );
+        if (name === "get_assignment_card_hydration") {
+          const target = await clients.admin.from("cleaning_targets").select(
+            "*",
+          );
+          const selected = rows.filter((row) => ids.includes(row.id));
+          const pack = (data: unknown[]) => ({
+            rows: data,
+            count: data.length,
+          });
+          return {
+            data: {
+              assignments: selected.map((
+                { id, cleaning_target_id, maid_profile_id },
+              ) => ({ id, cleaning_target_id, maid_profile_id })),
+              targets: pack(target.data ?? []),
+              profiles: pack(
+                [...new Set(selected.map((row) => row.maid_profile_id))].map(
+                  (id) => ({ id, display_name: "메이드" }),
+                ),
+              ),
+              attempts: pack([]),
+              submissions: pack([]),
+              schedules: pack([]),
+            },
+            error: null,
+          };
+        }
         scheduleModes.push(args.p_include_current);
         return Promise.resolve({
           data: ids.map((assignmentId) => ({
@@ -1486,7 +1932,7 @@ function routeDependencies(calls: string[]): ApiHandlerDependencies {
             error: null,
           };
         }
-        if (name === "get_room_board_projection") {
+        if (name === "get_room_board_arrival_projection") {
           return { data: [roomRow], error: null };
         }
         if (name === "list_room_operation_blocks_page") {
@@ -2724,5 +3170,71 @@ Deno.test("Web Push router keeps exact register/retire, no-store and secret-free
       dependencies,
     )).status === 400,
     "query rejected",
+  );
+});
+
+Deno.test("room fixed memo exact HTTP GET/PUT routes and private errors", async () => {
+  const room = "10000000-0000-4000-8000-000000000142",
+    path = `/v1/rooms/${room}/fixed-memo`;
+  const calls: string[] = [];
+  let fail = false;
+  const dependencies: ApiHandlerDependencies = {
+    authenticateRequest: () => Promise.resolve({ ...actor, role: "admin" }),
+    createClients: () =>
+      ({
+        admin: {
+          rpc(name: string) {
+            calls.push(name);
+            return Promise.resolve({
+              data: fail ? null : {
+                roomId: room,
+                memo: "화요일마다 청소",
+                version: 1,
+                updatedAt: "2026-11-01T01:00:00Z",
+              },
+              error: fail ? { message: "STALE_VERSION: private detail" } : null,
+            });
+          },
+        },
+      }) as unknown as EdgeClients,
+  };
+  for (const method of ["GET", "PUT"]) {
+    const response = await handleApiRequest(
+      request(
+        method,
+        path,
+        method === "PUT"
+          ? { memo: "화요일마다 청소", expectedVersion: 0 }
+          : undefined,
+      ),
+      dependencies,
+    );
+    assert(
+      response.status === 200 &&
+        response.headers.get("cache-control") === "no-store",
+      "private memo HTTP success",
+    );
+    assert((await response.json()).fixedMemo.roomId === room, "memo envelope");
+  }
+  assert(
+    calls.join(",") === "get_room_fixed_memo,set_room_fixed_memo",
+    "exact memo dispatch",
+  );
+  const denied = await handleApiRequest(
+    request("PUT", path, { memo: null, expectedVersion: 1 }),
+    {
+      ...dependencies,
+      authenticateRequest: () => Promise.resolve({ ...actor, role: "maid" }),
+    },
+  );
+  assert(denied.status === 403, "maid cannot write");
+  fail = true;
+  const stale = await handleApiRequest(
+    request("PUT", path, { memo: null, expectedVersion: 0 }),
+    dependencies,
+  );
+  assert(
+    stale.status === 409 && await errorCode(stale) === "STALE_VERSION",
+    "CAS reload error",
   );
 });

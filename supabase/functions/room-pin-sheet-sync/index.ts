@@ -1,5 +1,6 @@
 import { createEdgeClients } from "../_shared/runtime.ts";
 import { GoogleSheetsPinProvider } from "../_shared/google-sheets-pin.ts";
+import { operationWorkerConfig } from "../_shared/worker-admission.ts";
 import {
   handleRoomPinSheetSync,
   loadRoomPinSheetRuntimeConfig,
@@ -23,6 +24,12 @@ Deno.serve((request) => {
       createEdgeClients().admin,
       provider,
       settings.crypto,
+      Date.now,
+      operationWorkerConfig(
+        Deno.env.get("PIN_OPERATION_ADMISSION_MODE"),
+        Deno.env.get("DEVELOPER_OPERATION_TARGET"),
+        Deno.env.get("SUPABASE_URL"),
+      ),
     ).run();
   });
 });

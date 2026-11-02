@@ -5,14 +5,25 @@ const identifier = z.string().regex(/^[a-z][a-z0-9_]*$/).max(63);
 // Collector-local opaque row identities, not SQL identifiers or an execution API.
 const key = z.string().regex(/^[a-zA-Z0-9_-]{1,80}$/);
 const hash = z.string().regex(/^[a-f0-9]{64}$/);
-const schema = z.object({
+export const resetReferencePlanSchema = z.object({
   catalogFingerprint: hash, snapshotCatalogFingerprint: hash,
   complete: z.boolean(),
   relations: z.array(relation).min(1).max(1000),
+  // Independent COUNT(*) per relation in the same trusted snapshot, not rows.length.
+  relationRowCounts: z.array(z.object({
+    relation, count: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+  }).strict()).min(1).max(1000),
   foreignKeys: z.array(z.object({ source: relation, target: relation, name: identifier }).strict()).max(10000),
   rows: z.array(z.object({
     relation, key, disposition: z.enum(['keep', 'remove']),
     references: z.array(z.object({ constraint: identifier, targetKey: key.nullable() }).strict()).max(200),
+  }).strict()).max(10000),
+}).strict();
+// Content review can validate actual FK edges before a disposition is decided.
+// It does not turn pending candidates into keep/remove choices.
+export const resetReferenceCaptureSchema = resetReferencePlanSchema.extend({
+  rows: z.array(resetReferencePlanSchema.shape.rows.element.extend({
+    disposition: z.enum(['keep', 'remove', 'roomBaseline', 'templateSource', 'unresolved']),
   }).strict()).max(10000),
 }).strict();
 
@@ -21,12 +32,20 @@ const schema = z.object({
  * Cycles are visited once, not topologically sorted: this is NOT a deletion order planner.
  */
 export function inspectResetReferencePlan(input: unknown) {
-  const parsed = schema.safeParse(input);
+  const parsed = resetReferencePlanSchema.safeParse(input);
+  return inspect(parsed.success ? parsed.data : null);
+}
+/** Technical FK coverage only, never a selected removal/preservation plan. */
+export function inspectResetReferenceCapture(input: unknown) {
+  const parsed = resetReferenceCaptureSchema.safeParse(input);
+  const { referencesValid, ...result } = inspect(parsed.success ? parsed.data : null);
+  return { ...result, structureValid: referencesValid };
+}
+function inspect(p: z.infer<typeof resetReferenceCaptureSchema> | null) {
   const blocked = (blockers: string[]) => ({
     referencesValid: false, executionEnabled: false, blockers, counts: null,
   });
-  if (!parsed.success) return blocked(['INVALID_INPUT']);
-  const p = parsed.data;
+  if (!p) return blocked(['INVALID_INPUT']);
   const blockers = new Set<string>();
   if (!p.complete) blockers.add('INCOMPLETE_SNAPSHOT');
   if (p.catalogFingerprint !== p.snapshotCatalogFingerprint) blockers.add('CATALOG_MISMATCH');
@@ -43,6 +62,20 @@ export function inspectResetReferencePlan(input: unknown) {
   const rowIdentity = (table: string, rowKey: string) => `${table}:${rowKey}`;
   const rows = new Map(p.rows.map((row) => [rowIdentity(row.relation, row.key), row]));
   if (rows.size !== p.rows.length) blockers.add('DUPLICATE_ROW');
+  const actualCounts = new Map<string, number>();
+  for (const row of rows.values()) {
+    actualCounts.set(row.relation, (actualCounts.get(row.relation) ?? 0) + 1);
+  }
+  const counted = new Set<string>();
+  for (const entry of p.relationRowCounts) {
+    if (counted.has(entry.relation)) blockers.add('DUPLICATE_RELATION_COUNT');
+    counted.add(entry.relation);
+    if (!relations.has(entry.relation)) blockers.add('UNKNOWN_RELATION_COUNT');
+    if (entry.count !== (actualCounts.get(entry.relation) ?? 0)) blockers.add('ROW_COUNT_MISMATCH');
+  }
+  for (const name of relations) {
+    if (!counted.has(name)) blockers.add('MISSING_RELATION_COUNT');
+  }
   let edges = 0;
   for (const row of p.rows) {
     if (!relations.has(row.relation)) blockers.add('UNKNOWN_RELATION');

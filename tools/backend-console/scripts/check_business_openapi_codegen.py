@@ -17,6 +17,56 @@ def generated_enum_values(path: Path) -> list[str]:
     return ENUM_VALUE_PATTERN.findall(path.read_text(encoding="utf-8"))
 
 
+def check_reset_preview_roundtrip(repository_root: Path, destination: Path) -> None:
+    node = shutil.which("node")
+    if not node:
+        raise RuntimeError("Node is required for actual reset preview projections")
+    cases = subprocess.run(  # noqa: S603
+        [
+            node,
+            "--import",
+            "tsx",
+            "--input-type=module",
+            "-e",
+            "import { resetPreviewContractResponses } from './tests/fixtures/reset-preview.ts';"
+            "process.stdout.write(JSON.stringify(resetPreviewContractResponses()));",
+        ],
+        cwd=repository_root,
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    roundtrip = """\
+import json
+import sys
+sys.path.insert(0, sys.argv[1])
+from generated.models.developer_reset_preview import DeveloperResetPreview
+cases = json.load(sys.stdin)
+if len(cases) != 8 or len({case['name'] for case in cases}) != 8:
+    raise RuntimeError('Expected eight actual reset preview projection cases')
+for case in cases:
+    body = case['body']
+    model = DeveloperResetPreview.from_dict(body)
+    if model.to_dict() != body:
+        raise RuntimeError('Reset preview generated model changed response: ' + case['name'])
+    if not hasattr(model, 'operation_gates'):
+        raise RuntimeError('Required nullable operationGates model field is missing')
+    if (model.operation_gates is None) != (body['operationGates'] is None):
+        raise RuntimeError('Null gate evidence was silently omitted or fabricated')
+    if not hasattr(model, 'template_evidence'):
+        raise RuntimeError('Required template evidence model field is missing')
+print('Python reset preview codegen: eight actual gate/template projections roundtrip PASS')
+"""
+    subprocess.run(  # noqa: S603
+        [sys.executable, "-c", roundtrip, str(destination)],
+        input=cases.stdout,
+        text=True,
+        encoding="utf-8",
+        check=True,
+    )
+
+
 def check_post_approval_contract(document: dict[str, Any]) -> None:
     base = "/v1/cleaning-history/submissions/{sourceSubmissionId}/supplemental-room-issues"
     expected = {
@@ -116,14 +166,359 @@ def check_post_approval_contract(document: dict[str, Any]) -> None:
         raise RuntimeError("#336 원본 바이너리 MIME/5MiB 계약이 잘못됐습니다.")
     codes = document["components"]["schemas"]["ErrorCode"]["enum"]
     if (
-        len(codes) != 342
-        or len(set(codes)) != 342
+        len(codes) != 356
+        or len(set(codes)) != 356
         or "POST_APPROVAL_ROOM_ISSUE_EVIDENCE_RETRY_REQUIRED" not in codes
         or "AUTH_CONTEXT_UNAVAILABLE" not in codes
+        or "AVAILABILITY_APPROVAL_REQUIRED" not in codes
+        or "ASSIGNMENT_INSTRUCTION_INVALID" not in codes
+        or "ROOM_TYPE_CLEANING_FEE_INVALID" not in codes
+        or "ROOM_TYPE_CLEANING_FEE_RESPONSE_INVALID" not in codes
     ):
         raise RuntimeError(
-            "#442 공통 safe error code union은 신규 인증 오류를 포함한 정확342개여야 합니다."
+            "#442/#532/#534 공통 safe error code union은 "
+            "인증·객실 정정·배정 메모·가능일 승인 오류를 포함한 정확356개여야 합니다."
         )
+
+
+def check_assignment_instruction_contract(document: dict[str, Any]) -> None:
+    schemas = document["components"]["schemas"]
+    for path, operation_id, request_name in (
+        ("/v1/assignments/drafts", "saveAssignmentDraft", "AssignmentDraftRequest"),
+        (
+            "/v1/assignments/{cleaningTargetId}/change",
+            "changeCleaningAssignmentPrestart",
+            "AssignmentPrestartChangeRequest",
+        ),
+    ):
+        operation = document["paths"][path]["post"]
+        if (
+            operation.get("operationId") != operation_id
+            or operation.get("x-required-roles") != ["admin"]
+            or operation.get("security") != [{"bearerAuth": []}]
+            or operation["requestBody"]["content"]["application/json"]["schema"]
+            != {"$ref": "#/components/schemas/" + request_name}
+            or not any(
+                item.get("name") == "Idempotency-Key"
+                and item.get("in") == "header"
+                and item.get("required") is True
+                for item in operation.get("parameters", [])
+            )
+        ):
+            raise RuntimeError("#534 assignment instruction command authority drift")
+        request = schemas[request_name]
+        memo = request.get("properties", {}).get("instructionMemo", {})
+        if (
+            request.get("additionalProperties") is not False
+            or "instructionMemo" in request.get("required", [])
+            or memo.get("type") != ["string", "null"]
+            or memo.get("minLength") != 0
+            or memo.get("maxLength") != 500
+            or "default" in memo
+            or "#534 미배포 후보" not in memo.get("description", "")
+        ):
+            raise RuntimeError("#534 optional inherit/null-clear instruction contract drift")
+    for name in (
+        "Assignment",
+        "AssignmentCard",
+        "AssignmentCommitCandidate",
+        "AssignmentCommitBlockedCandidate",
+        "AttemptExecution",
+    ):
+        schema = schemas[name]
+        memo = schema.get("properties", {}).get("instructionMemo", {})
+        if (
+            "instructionMemo" not in schema.get("required", [])
+            or memo.get("type") != ["string", "null"]
+            or memo.get("minLength") != 1
+            or memo.get("maxLength") != 500
+            or "default" in memo
+            or "#534 미배포 후보" not in memo.get("description", "")
+        ):
+            raise RuntimeError("#534 exact revision nullable instruction contract drift: " + name)
+    if "ASSIGNMENT_INSTRUCTION_INVALID" not in schemas["ErrorCode"]["enum"]:
+        raise RuntimeError("#534 assignment instruction error code missing")
+
+
+def check_assignment_instruction_roundtrip(destination: Path, document: dict[str, Any]) -> None:
+    schemas = document["components"]["schemas"]
+
+    def example(schema: dict[str, Any]) -> Any:
+        if "$ref" in schema:
+            return example(schemas[schema["$ref"].split("/")[-1]])
+        if "anyOf" in schema:
+            options = schema["anyOf"]
+            return example(
+                next((item for item in options if item.get("type") == "null"), options[0])
+            )
+        kind = schema.get("type")
+        if kind == "null" or (isinstance(kind, list) and "null" in kind):
+            return None
+        if "const" in schema:
+            return schema["const"]
+        if "enum" in schema:
+            return schema["enum"][0]
+        if kind == "object":
+            return {key: example(schema["properties"][key]) for key in schema.get("required", [])}
+        if kind == "array":
+            return [example(schema["items"]) for _ in range(schema.get("minItems", 0))]
+        if kind == "boolean":
+            return False
+        if kind in ("integer", "number"):
+            return schema.get("minimum", 1)
+        if kind == "string":
+            return {
+                "uuid": "10000000-0000-4000-8000-000000000001",
+                "date": "2026-10-30",
+                "date-time": "2026-10-30T03:00:00+00:00",
+            }.get(str(schema.get("format", "")), "synthetic")
+        raise RuntimeError("#534 unsupported synthetic read fixture schema")
+
+    model_names = (
+        ("assignment", "Assignment"),
+        ("assignment_card", "AssignmentCard"),
+        ("assignment_commit_candidate", "AssignmentCommitCandidate"),
+        ("assignment_commit_blocked_candidate", "AssignmentCommitBlockedCandidate"),
+        ("attempt_execution", "AttemptExecution"),
+    )
+    fixtures = [
+        {"module": module, "name": name, "data": example(schemas[name])}
+        for module, name in model_names
+    ]
+    fixture_path = destination / "assignment-instruction-fixtures.json"
+    fixture_path.write_text(json.dumps(fixtures, ensure_ascii=False), encoding="utf-8")
+    source = """\
+import importlib
+import json
+import sys
+from pathlib import Path
+from uuid import UUID
+sys.path.insert(0, sys.argv[1])
+from generated.models.assignment_draft_request import AssignmentDraftRequest
+from generated.models.assignment_prestart_change_request import AssignmentPrestartChangeRequest
+from generated.api.assignments.save_assignment_draft import _get_kwargs as draft_kwargs
+from generated.api.assignments.change_cleaning_assignment_prestart import (
+    _get_kwargs as change_kwargs,
+)
+target = '10000000-0000-4000-8000-000000000001'
+draft = {'cleaningTargetId': target, 'maidProfileId': target,
+    'sequenceNumber': 1, 'expectedAssignmentVersion': 2}
+change = {'expectedCurrentAssignmentId': target, 'maidProfileId': target,
+    'sequenceNumber': 1, 'expectedAssignmentVersion': 2, 'reasonCode': 'OPERATIONAL_CHANGE'}
+for model, base, url in [(AssignmentDraftRequest, draft, '/v1/assignments/drafts'),
+    (AssignmentPrestartChangeRequest, change, f'/v1/assignments/{target}/change')]:
+    for update in [{}, {'instructionMemo': None}, {'instructionMemo': ''},
+        {'instructionMemo': '142호 수건 5개\\n물캡슐 2개'}]:
+        data = {**base, **update}
+        parsed = model.from_dict(data)
+        if parsed.to_dict() != data:
+            raise RuntimeError('#534 generated model collapsed omitted/null/text instruction')
+        args = {'body': parsed, 'idempotency_key': 'assignment-instruction-test'}
+        kwargs = (draft_kwargs(**args) if model is AssignmentDraftRequest
+            else change_kwargs(UUID(target), **args))
+        if (kwargs['json'] != data or kwargs['url'] != url or kwargs['method'] != 'post'
+            or kwargs['headers'].get('Idempotency-Key') != 'assignment-instruction-test'):
+            raise RuntimeError('#534 generated request lost instruction identity or HTTP binding')
+for fixture in json.loads(Path(sys.argv[2]).read_text(encoding='utf-8')):
+    module = importlib.import_module('generated.models.' + fixture['module'])
+    model = getattr(module, fixture['name'])
+    for memo in [None, '142호 수건 5개\\n물캡슐 2개']:
+        data = {**fixture['data'], 'instructionMemo': memo}
+        if model.from_dict(data).to_dict() != data:
+            raise RuntimeError('#534 generated read lost nullable memo: ' + fixture['name'])
+    missing = {key: value for key, value in data.items() if key != 'instructionMemo'}
+    try:
+        model.from_dict(missing)
+    except KeyError:
+        pass
+    else:
+        raise RuntimeError('#534 generated read invented required memo: ' + fixture['name'])
+print('Python assignment instruction codegen: omission/clear/text, revision reads and HTTP PASS')
+"""
+    subprocess.run(  # noqa: S603
+        [sys.executable, "-c", source, str(destination), str(fixture_path)], check=True
+    )
+
+
+def check_room_ready_contract(document: dict[str, Any]) -> None:
+    base = "/v1/rooms/{roomId}/ready-correction"
+    schemas = document["components"]["schemas"]
+    for suffix, operation_id, request_name, result_name, envelope in (
+        (
+            "/preview",
+            "previewRoomReadyCorrection",
+            "RoomReadyPreviewRequest",
+            "RoomReadyPreview",
+            "preview",
+        ),
+        (
+            "",
+            "applyRoomReadyCorrection",
+            "RoomReadyCorrectionRequest",
+            "RoomReadyCorrectionResult",
+            "correction",
+        ),
+    ):
+        path = document["paths"].get(base + suffix, {})
+        operation = path.get("post", {})
+        if set(path) != {"post"} or (
+            operation.get("operationId") != operation_id
+            or operation.get("x-required-roles") != ["admin"]
+            or operation.get("security") != [{"bearerAuth": []}]
+            or operation.get("x-release-status") != "candidate"
+            or operation.get("x-deployed-release") is not None
+        ):
+            raise RuntimeError("#532 exact route/admin/candidate contract drift: " + operation_id)
+        expected_parameters = [("roomId", "path", True)]
+        if not suffix:
+            expected_parameters.append(("Idempotency-Key", "header", True))
+        if [
+            (p.get("name"), p.get("in"), p.get("required")) for p in operation["parameters"]
+        ] != expected_parameters:
+            raise RuntimeError("#532 exact path/idempotency parameters drift")
+        if operation["requestBody"].get("required") is not True or operation["requestBody"][
+            "content"
+        ]["application/json"]["schema"] != {"$ref": "#/components/schemas/" + request_name}:
+            raise RuntimeError("#532 request schema registration drift")
+        for response in operation["responses"].values():
+            if (
+                response.get("headers", {}).get("Cache-Control", {}).get("schema", {}).get("const")
+                != "no-store"
+            ):
+                raise RuntimeError("#532 no-store response contract drift")
+        response = operation["responses"]["200"]["content"]["application/json"]["schema"]
+        if (
+            response.get("additionalProperties") is not False
+            or response.get("required") != [envelope]
+            or response.get("properties")
+            != {envelope: {"$ref": "#/components/schemas/" + result_name}}
+        ):
+            raise RuntimeError("#532 exact response envelope drift")
+    base_fields = {"targetStatus", "reasonCode"}
+    proof_fields = {"impactFingerprint", "evaluatedAt", "expiresAt"}
+    commit_fields = (
+        base_fields
+        | proof_fields
+        | {
+            "expectedRoomVersion",
+            "confirmed",
+            "acknowledgeNoNewEarnings",
+            "confirmPhysicalCandleRemoval",
+        }
+    )
+    for name, fields in (
+        ("RoomReadyPreviewRequest", base_fields),
+        ("RoomReadyCorrectionRequest", commit_fields),
+    ):
+        schema = schemas[name]
+        if (
+            schema.get("additionalProperties") is not False
+            or set(schema.get("required", [])) != fields
+            or set(schema.get("properties", {})) != fields
+        ):
+            raise RuntimeError("#532 strict request fields drift: " + name)
+        if schema["properties"]["targetStatus"] != {"const": "READY"} or schema["properties"][
+            "reasonCode"
+        ] != {"const": "ADMIN_ROOM_READY_CORRECTION"}:
+            raise RuntimeError("#532 READY intent/reason drift")
+    properties = schemas["RoomReadyCorrectionRequest"]["properties"]
+    if properties["confirmed"] != {"const": True} or any(
+        properties[field].get("type") != "boolean"
+        for field in ("acknowledgeNoNewEarnings", "confirmPhysicalCandleRemoval")
+    ):
+        raise RuntimeError("#532 explicit confirmation/acknowledgement contract drift")
+    if (
+        properties["expectedRoomVersion"]
+        != {"type": "integer", "minimum": 1, "maximum": 9007199254740991}
+        or properties["impactFingerprint"].get("pattern") != "^[0-9a-f]{64}$"
+        or any(
+            properties[field].get("format") != "date-time" for field in ("evaluatedAt", "expiresAt")
+        )
+    ):
+        raise RuntimeError("#532 CAS/fingerprint/timestamp proof drift")
+    if (
+        "ASSIGNMENT_CHANGE_PENDING"
+        not in schemas["RoomReadyPreview"]["properties"]["blockingReasons"]["items"]["enum"]
+    ):
+        raise RuntimeError("#532 pending assignment change blocker missing")
+    expected_codes = {
+        "ROOM_READY_CORRECTION_INVALID_INPUT",
+        "ROOM_READY_CONFIRMATION_REQUIRED",
+        "ROOM_READY_EARNING_ACKNOWLEDGEMENT_REQUIRED",
+        "ROOM_READY_CANDLE_CONFIRMATION_REQUIRED",
+        "ROOM_READY_PREVIEW_STALE",
+        "ROOM_READY_CORRECTION_BLOCKED",
+        "ROOM_READY_CORRECTION_LIMIT_EXCEEDED",
+        "ROOM_READY_CORRECTION_REQUIRED",
+        "ROOM_READY_CORRECTION_RESPONSE_INVALID",
+        "CLEANING_DUE_REPLAN_REQUIRED",
+    }
+    if not expected_codes.issubset(set(schemas["ErrorCode"]["enum"])):
+        raise RuntimeError("#532 safe error code missing")
+
+
+def check_room_ready_roundtrip(destination: Path) -> None:
+    source = """\
+import sys
+from copy import deepcopy
+from uuid import UUID
+sys.path.insert(0, sys.argv[1])
+from generated.models.room_ready_preview_request import RoomReadyPreviewRequest
+from generated.models.room_ready_correction_request import RoomReadyCorrectionRequest
+from generated.models.room_ready_preview import RoomReadyPreview
+from generated.models.room_ready_correction_result import RoomReadyCorrectionResult
+from generated.api.rooms.preview_room_ready_correction import _get_kwargs as preview_kwargs
+from generated.api.rooms.apply_room_ready_correction import _get_kwargs as commit_kwargs
+room = '10000000-0000-4000-8000-000000000142'
+target = '20000000-0000-4000-8000-000000000001'
+base = {'targetStatus': 'READY', 'reasonCode': 'ADMIN_ROOM_READY_CORRECTION'}
+proof = {'impactFingerprint': 'a' * 64, 'evaluatedAt': '2026-10-30T03:00:00.123456+00:00',
+    'expiresAt': '2026-10-30T03:05:00.123456+00:00'}
+commit = {**base, **proof, 'expectedRoomVersion': 9, 'confirmed': True,
+    'acknowledgeNoNewEarnings': True, 'confirmPhysicalCandleRemoval': True}
+preview = {'roomId': room, 'targetStatus': 'READY', 'roomStateVersion': 9, 'canApply': False,
+    'blockingReasons': ['ASSIGNMENT_CHANGE_PENDING'], 'requiresConfirmation': True,
+    'requiresEarningAcknowledgement': True,
+    'effects': {'cleaningTargets': [{'cleaningTargetId': target, 'assignmentId': target,
+        'attemptId': target, 'attemptStatus': 'submitted', 'hasSubmission': True,
+        'fieldCompleted': True}], 'operationBlockIds': [target], 'roomIssueIds': [target],
+        'candleCount': 2, 'displayStatusOverride': 'READY'},
+    'warnings': ['CANCEL_WITHOUT_NEW_EARNINGS', 'APPROVE_BEFORE_CANCEL_TO_PRESERVE_EARNINGS',
+        'PHYSICAL_CANDLE_REMOVAL_REQUIRED'], **proof}
+receipt = {'roomId': room, 'targetStatus': 'READY', 'roomStateVersion': 10,
+    'recordedAt': '2026-10-30T03:01:00+00:00', 'cancelledCleaningTargetIds': [target],
+    'releasedOperationBlockIds': [target], 'resolvedRoomIssueIds': [target], 'candlesCleared': True}
+empty = deepcopy(preview)
+empty.update(canApply=True, blockingReasons=[], requiresEarningAcknowledgement=False, warnings=[])
+empty['effects'].update(cleaningTargets=[], operationBlockIds=[], roomIssueIds=[],
+    candleCount=0, displayStatusOverride=None)
+for cls, data in [(RoomReadyPreviewRequest, base), (RoomReadyCorrectionRequest, commit),
+    (RoomReadyPreview, preview), (RoomReadyPreview, empty), (RoomReadyCorrectionResult, receipt)]:
+    if cls.from_dict(data).to_dict() != data:
+        raise RuntimeError('#532 generated DTO changed proof/consent/effects: ' + cls.__name__)
+for field in commit:
+    missing = {key: value for key, value in commit.items() if key != field}
+    try:
+        RoomReadyCorrectionRequest.from_dict(missing)
+    except KeyError:
+        pass
+    else:
+        raise RuntimeError('#532 generated command silently defaults required field: ' + field)
+read = preview_kwargs(UUID(room), body=RoomReadyPreviewRequest.from_dict(base))
+write = commit_kwargs(UUID(room), body=RoomReadyCorrectionRequest.from_dict(commit),
+    idempotency_key='room-ready-codegen-test')
+if (read['method'] != 'post' or read['url'] != f'/v1/rooms/{room}/ready-correction/preview'
+    or read['json'] != base or 'Idempotency-Key' in read['headers']):
+    raise RuntimeError('#532 generated preview URL/body/header drift')
+if (write['method'] != 'post' or write['url'] != f'/v1/rooms/{room}/ready-correction'
+    or write['json'] != commit
+    or write['headers'].get('Idempotency-Key') != 'room-ready-codegen-test'):
+    raise RuntimeError('#532 generated commit URL/body/idempotency drift')
+print('Python room READY codegen: proof, acknowledgement, effects and HTTP serialization PASS')
+"""
+    subprocess.run(  # noqa: S603
+        [sys.executable, "-c", source, str(destination)], check=True
+    )
 
 
 def check_template_permutation_roundtrip(
@@ -236,6 +631,27 @@ print('Python photo operation codegen: eight state/retention roundtrips PASS')
     )
 
 
+def check_room_type_fee_roundtrip(destination: Path) -> None:
+    source = """\
+import sys
+import httpx
+sys.path.insert(0, sys.argv[1])
+from generated.client import Client
+from generated.api.rooms.set_room_type_cleaning_fee import _parse_response
+client = Client(base_url='https://example.invalid')
+for status, code in [(400, 'ROOM_TYPE_CLEANING_FEE_INVALID'),
+                     (500, 'ROOM_TYPE_CLEANING_FEE_RESPONSE_INVALID')]:
+    body = {'error': {'code': code, 'message': 'synthetic'}, 'requestId': 'fee577-test'}
+    parsed = _parse_response(client=client, response=httpx.Response(status, json=body))
+    if parsed is None or parsed.to_dict() != body:
+        raise RuntimeError('#577 generated typed fee error response failed roundtrip')
+print('Python room-type fee codegen: actual HTTP400/500 typed error parsing PASS')
+"""
+    subprocess.run(  # noqa: S603
+        [sys.executable, "-c", source, str(destination)], check=True
+    )
+
+
 def main() -> None:
     console_root = Path(__file__).resolve().parents[1]
     repository_root = console_root.parents[1]
@@ -254,8 +670,8 @@ def main() -> None:
     if document.get("info", {}).get("version") != "0.6.0":
         raise RuntimeError("전체 source OpenAPI version이 0.6.0이 아닙니다.")
     paths = document.get("paths")
-    if not isinstance(paths, dict) or len(paths) != 154:
-        raise RuntimeError("전체 source OpenAPI path 수가 154가 아닙니다.")
+    if not isinstance(paths, dict) or len(paths) != 161:
+        raise RuntimeError("전체 source OpenAPI path 수가 161이 아닙니다.")
     methods = {"get", "post", "put", "patch", "delete"}
     operation_count = sum(
         1
@@ -264,10 +680,12 @@ def main() -> None:
         for method in path_item
         if method in methods
     )
-    if operation_count != 166:
-        raise RuntimeError("전체 source OpenAPI operation 수가 166이 아닙니다.")
+    if operation_count != 174:
+        raise RuntimeError("전체 source OpenAPI operation 수가 174가 아닙니다.")
     schemas = document.get("components", {}).get("schemas", {})
     check_post_approval_contract(document)
+    check_room_ready_contract(document)
+    check_assignment_instruction_contract(document)
     discovery_fields = [
         "attemptId",
         "assignmentId",
@@ -343,10 +761,10 @@ def main() -> None:
     audit_event_types = schemas.get("DeveloperAuditEventType", {}).get("enum")
     if (
         not isinstance(audit_event_types, list)
-        or len(audit_event_types) != 74
-        or len(set(audit_event_types)) != 74
+        or len(audit_event_types) != 75
+        or len(set(audit_event_types)) != 75
     ):
-        raise RuntimeError("developer 감사 이벤트 OpenAPI inventory가 74종이 아닙니다.")
+        raise RuntimeError("developer 감사 이벤트 OpenAPI inventory가 75종이 아닙니다.")
     legacy_list = schemas.get("ReservationListEnvelope", {})
     range_page = schemas.get("ReservationRangePageEnvelope", {})
     legacy_reservations = legacy_list.get("properties", {}).get("reservations", {})
@@ -380,6 +798,15 @@ def main() -> None:
         )
         package = destination / "generated"
         required = [
+            package / "api" / "developer" / "get_developer_reset_preview.py",
+            package / "models" / "developer_reset_preview.py",
+            package / "models" / "developer_reset_row_impact.py",
+            package / "models" / "developer_operation_gates_type_0.py",
+            package / "models" / "developer_reset_template_evidence.py",
+            package / "models" / "developer_reset_candidate_impact.py",
+            package / "api" / "photos" / "get_photo_thumbnail.py",
+            package / "api" / "photos" / "admit_attempt_photo_collection_batch.py",
+            package / "models" / "photo_upload_batch_admission.py",
             *[
                 package / "api" / "post_approval_room_issues" / (name + ".py")
                 for name in [
@@ -642,6 +1069,10 @@ def main() -> None:
             if field not in template_request:
                 raise RuntimeError(f"사진 템플릿 게시 codegen 필드가 누락됐습니다: {field}")
         check_template_permutation_roundtrip(npm, repository_root, destination)
+        check_reset_preview_roundtrip(repository_root, destination)
+        check_room_type_fee_roundtrip(destination)
+        check_room_ready_roundtrip(destination)
+        check_assignment_instruction_roundtrip(destination, document)
         batch_roundtrip = """
 import sys
 from datetime import date
@@ -961,9 +1392,9 @@ print('Python remittance batch codegen CSV serialization PASS')
             ("checked-in", checked_in_audit_type),
         ):
             actual = generated_enum_values(path)
-            if len(actual) != 74 or set(actual) != expected_audit_types:
+            if len(actual) != 75 or set(actual) != expected_audit_types:
                 raise RuntimeError(
-                    f"{label} developer 감사 이벤트 생성물이 source 74종과 다릅니다."
+                    f"{label} developer 감사 이벤트 생성물이 source 75종과 다릅니다."
                 )
         for label, summary_path in (
             (
@@ -981,6 +1412,10 @@ print('Python remittance batch codegen CSV serialization PASS')
                 "display_status_override: None | RoomPrimaryDisplayStatus | Unset",
                 "room_state_version: int | Unset",
                 "replacement_target_id: UUID | Unset",
+                "cancelled_cleaning_count: int | Unset",
+                "released_operation_block_count: int | Unset",
+                "resolved_room_issue_count: int | Unset",
+                "candles_cleared: bool | Unset",
             ):
                 if field not in generated_summary:
                     raise RuntimeError(
