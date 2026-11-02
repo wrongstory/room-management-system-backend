@@ -65,6 +65,26 @@ function nextKstMidnight(date) {
     "00:00",
   );
 }
+// Keep the manual negative fixture eligible on the same KST planning day.
+// The RPC inputs are minute-floored below; the last same-day minute is 23:59.
+export function checkoutIncidentPlannedCheckoutAt(fixtureAt, checkoutMode = "scheduled") {
+  assert(fixtureAt instanceof Date && Number.isFinite(fixtureAt.getTime()),
+    "CHECKOUT_INCIDENT_FIXTURE_CLOCK_INVALID");
+  assert(["scheduled", "manual"].includes(checkoutMode),
+    "CHECKOUT_INCIDENT_FIXTURE_MODE_INVALID");
+  if (checkoutMode === "scheduled") return new Date(fixtureAt);
+  const planned = new Date(Math.min(
+    fixtureAt.getTime() + 60 * 60_000,
+    Date.parse(nextKstMidnight(fixtureAt)) - 1,
+  ));
+  const actual = Date.parse(minute(fixtureAt));
+  const activation = new Date(actual + 60_000);
+  assert(Date.parse(minute(planned)) > actual &&
+    kstDate(planned) === kstDate(fixtureAt) &&
+    kstDate(activation) === kstDate(fixtureAt),
+  "CHECKOUT_INCIDENT_FIXTURE_DATE_BOUNDARY");
+  return planned;
+}
 async function waitForCheckoutFixtureWindow() {
   const now = new Date();
   const remainingMs = Date.parse(nextKstMidnight(now)) - now.getTime();
@@ -192,6 +212,7 @@ export async function testCheckoutIncidentConcurrency(client, adminProfileId) {
   async function fixture({ checkoutMode = "scheduled", nextReservation = null } = {}) {
     await waitForCheckoutFixtureWindow();
     const fixtureAt = new Date();
+    const checkoutAt = checkoutIncidentPlannedCheckoutAt(fixtureAt, checkoutMode);
     sequence += 1;
     const roomId = randomUUID();
     const reservationId = randomUUID();
@@ -202,9 +223,6 @@ export async function testCheckoutIncidentConcurrency(client, adminProfileId) {
       room_type_id: roomType.id,
       elevator_zone: "A",
     }), "checkout incident isolated room");
-    const checkoutAt = new Date(
-      fixtureAt.getTime() + (checkoutMode === "manual" ? 60 * 60_000 : 0),
-    );
     ok(await client.rpc("create_reservation", {
       p_actor_profile_id: adminProfileId,
       p_reservation_id: reservationId,
