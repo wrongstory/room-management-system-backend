@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { assertLegacyImpactRows } from './lib/legacy-impact-contract.mjs';
 import { execFileSync } from 'node:child_process';
 import { readFileSync, readdirSync } from 'node:fs';
 import { validatePostApprovalUpgradeSource } from './test-post-approval-room-issue-upgrade.mjs';
@@ -138,7 +139,7 @@ try {
   assert.equal(installedIncident, expectedIncident, 'Complete incident definition differs only by the exact reservation UPDATE move');
   phase = 'legacy-read-only-replay';
   const afterImpact = JSON.parse(sql(impactSql));
-  assert.deepEqual(afterImpact, priorImpact, 'Read snapshot additions cannot change existing impact/fingerprint contract');
+  assertLegacyImpactRows(priorImpact, afterImpact, { baselineHasMetadata: true });
   for (const includeCurrent of [false, true]) {
     for (const card of JSON.parse(sql(scheduleRead([oldAssignment, id(2003)], includeCurrent)))) {
       assert.equal(card.scheduleSnapshot, null);
@@ -181,6 +182,7 @@ try {
   const sourceLine = error instanceof Error ? error.stack?.match(/test-assignment-reservation-schedule-upgrade\.mjs:(\d+):\d+/)?.[1] : null;
   console.error(`Assignment schedule upgrade FAIL: ${JSON.stringify({ phase,
     kind: error instanceof assert.AssertionError ? 'ASSERTION_FAILED' : 'VALIDATION_FAILED',
+    impactContractCode: /^LEGACY_IMPACT_((committableDrafts|blockedDrafts|remainingUnassignedTargets)_(ARRAY|COUNT|MEMO_NULL|UNASSIGNED_MEMO|ORIGINAL_FIELDS)|TOP_LEVEL_FIELDS)$/.test(error?.message ?? '') ? error.message : null,
     sourceLine: sourceLine ? Number(sourceLine) : null })}`);
   process.exitCode = 1;
 } finally {
