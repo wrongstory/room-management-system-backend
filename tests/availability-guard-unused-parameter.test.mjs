@@ -130,7 +130,7 @@ describe('#559 unused private availability argument (DB-free; actual PostgreSQL 
     for (const name of identities) expect(find(fixture, name).definition).toBe(find(origin, name).definition);
     expect(regression.match(/^\\ir /gm)).toHaveLength(2);
     expect(regression).toContain('availability_guard_unused_parameter_fixture.psql');
-    expect(regression).toContain('../migrations/20261101235415_availability_guard_unused_parameter.sql');
+    expect(regression).toContain('availability_guard_unused_parameter_migration.psql');
     expect(regression).toContain('both callers preserve OID and every non-body catalog field');
     expect(regression).toContain('changed private signature intentionally receives a new OID');
     expect(regression).toContain('new helper ACL contains only its owner');
