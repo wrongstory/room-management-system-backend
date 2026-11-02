@@ -1,3 +1,4 @@
+import { createLegacyUpgradeHistory } from './lib/legacy-upgrade-history.mjs';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
@@ -12,16 +13,10 @@ const sql = (input) => run('docker', ['exec', '-i', 'supabase_db_room-management
 const id = (n) => `30830000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const start = (n, actor) => `select public.start_cleaning_attempt('${id(actor)}','${id(3000 + n)}',1,
   '${id(2000 + n)}',2,'started-upgrade-${n}',repeat('a',64));`;
-const snapshot = () => sql(`select md5(string_agg(data,'|' order by data)) from (
-  select row_to_json(t)::text data from public.cleaning_targets t union all
-  select (to_jsonb(a)-'notified_reservation_schedule_snapshot')::text from public.cleaning_assignments a union all
-  select row_to_json(a)::text from public.cleaning_attempts a union all
-  select row_to_json(e)::text from public.audit_events e union all
-  select row_to_json(n)::text from public.notifications n union all
-  select row_to_json(g)::text from private.notification_groups g union all
-  select row_to_json(o)::text from private.notification_delivery_outbox o union all
-  select row_to_json(c)::text from private.command_executions c
-) preserved;`);
+const history = createLegacyUpgradeHistory(sql, ['public.cleaning_targets', 'public.cleaning_assignments',
+  'public.cleaning_attempts', 'public.audit_events', 'public.notifications',
+  'private.notification_groups', 'private.notification_delivery_outbox', 'private.command_executions']);
+const snapshot = () => history.snapshot();
 try {
   run(process.execPath, [cli, 'db', 'reset', '--local', '--no-seed', '--version', '20261001012526']);
   const fixtureSource = readFileSync('supabase/tests/cleaning_started_notifications.sql', 'utf8');
@@ -38,12 +33,13 @@ try {
   assert.equal(sql("select count(*) from public.notifications where event_family='cleaning.started_admin';"), '0');
   const before = snapshot();
   run(process.execPath, [cli, 'migration', 'up', '--local']);
-  assert.equal(snapshot(), before, '87→88 preserves every old attempt, audit, inbox, outbox, group and receipt byte');
+  history.requireMemoColumn();
+  history.assertUnchanged(before, '87→88 preserves every old attempt, audit, inbox, outbox, group and receipt byte');
   assert.equal(sql("select count(*) from public.notifications where event_family='cleaning.started_admin';"), '0',
     'Installing the dispatcher never backfills historical start notifications');
   assert.deepEqual(JSON.parse(sql(start(1, 3))), completedStart, 'Completed attempt still replays original start receipt');
   assert.deepEqual(JSON.parse(sql(start(2, 6))), runningStart, 'Running attempt still replays original start receipt');
-  assert.equal(snapshot(), before, 'Old public RPC replay cannot manufacture new start history');
+  history.assertUnchanged(before, 'Old public RPC replay cannot manufacture new start history');
   console.log('Cleaning started upgrade 87→88: PASS; completed/running history and exact receipts preserved; no backfill.');
 } finally {
   run(process.execPath, [cli, 'db', 'reset', '--local', '--no-seed']);
