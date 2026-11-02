@@ -166,15 +166,16 @@ def check_post_approval_contract(document: dict[str, Any]) -> None:
         raise RuntimeError("#336 원본 바이너리 MIME/5MiB 계약이 잘못됐습니다.")
     codes = document["components"]["schemas"]["ErrorCode"]["enum"]
     if (
-        len(codes) != 353
-        or len(set(codes)) != 353
+        len(codes) != 354
+        or len(set(codes)) != 354
         or "POST_APPROVAL_ROOM_ISSUE_EVIDENCE_RETRY_REQUIRED" not in codes
         or "AUTH_CONTEXT_UNAVAILABLE" not in codes
+        or "AVAILABILITY_APPROVAL_REQUIRED" not in codes
         or "ASSIGNMENT_INSTRUCTION_INVALID" not in codes
     ):
         raise RuntimeError(
             "#442/#532/#534 공통 safe error code union은 "
-            "신규 인증·객실 정정·배정 메모 오류를 포함한 정확353개여야 합니다."
+            "인증·객실 정정·배정 메모·가능일 승인 오류를 포함한 정확354개여야 합니다."
         )
 
 
