@@ -62,16 +62,16 @@ describe('#336 data-only registered source OpenAPI generation', () => {
     expect(postApprovalOpenApiErrorCodes).toContain('PHOTO_UPLOAD_FENCE_CONFLICT');
     expect(new Set(postApprovalOpenApiErrorCodes).size).toBe(postApprovalOpenApiErrorCodes.length);
     const globalCodes = openApiDocument.components.schemas.ErrorCode.enum;
-    expect(globalCodes).toHaveLength(354);
-    expect(new Set(globalCodes).size).toBe(354);
+    expect(globalCodes).toHaveLength(356);
+    expect(new Set(globalCodes).size).toBe(356);
     expect(globalCodes).toContain('ASSIGNMENT_INSTRUCTION_INVALID');
     expect(globalCodes).toContain('AUTH_CONTEXT_UNAVAILABLE');
     for (const code of postApprovalOpenApiErrorCodes) expect(globalCodes).toContain(code);
-    expect(Object.keys(openApiDocument.paths)).toHaveLength(160);
+    expect(Object.keys(openApiDocument.paths)).toHaveLength(161);
     const globalOperations = Object.values(openApiDocument.paths).flatMap(item => Object.values(item))
       .filter((value): value is { operationId: string } => Boolean(value && typeof value === 'object' && 'operationId' in value));
-    expect(globalOperations).toHaveLength(173);
-    expect(new Set(globalOperations.map(value => value.operationId)).size).toBe(173);
+    expect(globalOperations).toHaveLength(174);
+    expect(new Set(globalOperations.map(value => value.operationId)).size).toBe(174);
   });
   it('retains binary MIME/size, CAS headers and independent administrator-only handover', () => {
     const values = Object.values(postApprovalOpenApiFragment.paths).flatMap(item => Object.values(item));

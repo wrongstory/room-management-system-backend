@@ -2,17 +2,17 @@
   "schemaVersion": 1,
   "release": "dev",
   "hashAlgorithm": "sha256-lf-utf8",
-  "totalCount": 147,
+  "totalCount": 148,
   "baseline": {
     "count": 78,
     "head": "reservation_bookability_optional_guest_count"
   },
   "pending": {
-    "count": 69,
+    "count": 70,
     "first": "assignment_unavailability_reassignment",
-    "head": "availability_guard_unused_parameter"
+    "head": "room_type_cleaning_fee"
   },
-  "head": "availability_guard_unused_parameter",
+  "head": "room_type_cleaning_fee",
   "migrations": [
     {
       "order": 1,
@@ -748,6 +748,11 @@
       "order": 147,
       "name": "availability_guard_unused_parameter",
       "sha256": "a3d9e37ce45ebe1f1f6b5ad68e63feb79b401ffb4eb26c389520e9c18aec7d3f"
+    },
+    {
+      "order": 148,
+      "name": "room_type_cleaning_fee",
+      "sha256": "5f0f7f852c0833950a66800bbda245de16a4728aac35ca818e4747f4198ed535"
     }
   ]
 }

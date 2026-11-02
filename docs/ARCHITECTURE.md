@@ -1,3 +1,7 @@
+## #577 관리자 타입별 청소 단가
+
+`PUT /v1/room-types/{roomTypeId}/cleaning-fee`는 최신 business admin/session/password, actor-scoped receipt, 공통 reservation-command 잠금과 room-type CAS를 거쳐 catalog 기본료만 변경한다. 감사와 receipt를 원자 commit하며 기존 target/earning/payroll은 쓰지 않는다. 새 일반 target의 생성 시 snapshot만 새 단가를 사용하고 원 snapshot 승계/0원 재청소는 유지한다. 새 table/column은 없다. [계약과 미실행 범위](ROOM_TYPE_CLEANING_FEE_577.md)를 따른다.
+
 # 백엔드 서버 설계
 
 ## #534 청소 배정 메모 — 미배포 후보

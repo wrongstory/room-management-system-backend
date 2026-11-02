@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
 const roomReadyExtension = {
+  setRoomTypeCleaningFee: { path: '/v1/room-types/{roomTypeId}/cleaning-fee', hashMode: 'CALLER', rpc: 'set_room_type_cleaning_fee', commandName: 'room_type.cleaning_fee.set' },
   setRoomFixedMemo: { path: '/v1/rooms/{roomId}/fixed-memo', hashMode: 'CALLER', rpc: 'set_room_fixed_memo', commandName: 'room.fixed_memo.set' },
   previewRoomReadyCorrection: { path: '/v1/rooms/{roomId}/ready-correction/preview',
     hashMode: 'READ_ONLY', rpc: null, commandName: null },
@@ -25,8 +26,8 @@ export function admissionRouteRows(routes) {
     seen.add(route.routeId);
     if (route.sqlExtension !== undefined) {
       const expected = roomReadyExtension[route.routeId];
-      if (route.sqlExtension !== (route.routeId === 'setRoomFixedMemo' ? 'ROOM_FIXED_MEMO_551' : 'ROOM_READY_CORRECTION_532') || !expected
-        || route.method !== (route.routeId === 'setRoomFixedMemo' ? 'PUT' : 'POST') || route.path !== expected.path
+      if (route.sqlExtension !== (route.routeId === 'setRoomTypeCleaningFee' ? 'ROOM_TYPE_CLEANING_FEE_577' : route.routeId === 'setRoomFixedMemo' ? 'ROOM_FIXED_MEMO_551' : 'ROOM_READY_CORRECTION_532') || !expected
+        || route.method !== (['setRoomFixedMemo','setRoomTypeCleaningFee'].includes(route.routeId) ? 'PUT' : 'POST') || route.path !== expected.path
         || route.hashMode !== expected.hashMode || route.rpc !== expected.rpc
         || route.commandName !== expected.commandName || route.kind !== 'BUSINESS_WRITE'
         || route.authority !== 'ACTIVE_SESSION' || route.keyArgument !== 'p_idempotency_key'

@@ -1,3 +1,4 @@
+import { setRoomTypeCleaningFee } from "../_shared/room-api.ts";
 import { roomFixedMemo } from "../_shared/room-api.ts";
 import {
   installAtomicHttpAdmission,
@@ -2056,6 +2057,25 @@ async function handleApiRequestCore(
       );
     }
 
+    if (
+      request.method === "PUT" &&
+      /^\/v1\/room-types\/[^/]+\/cleaning-fee$/.test(path)
+    ) {
+      const response = jsonResponse(
+        {
+          roomType: await setRoomTypeCleaningFee(
+            request,
+            clients,
+            actor,
+            path.split("/")[3],
+          ),
+        },
+        200,
+        corsHeaders,
+      );
+      response.headers.set("Cache-Control", "no-store");
+      return response;
+    }
     if (request.method === "GET" && path === "/v1/room-types") {
       const response = jsonResponse(
         { items: await listRoomTypes(request, clients, actor) },

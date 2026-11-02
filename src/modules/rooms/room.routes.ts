@@ -481,6 +481,16 @@ export function createRoomRoutes(roomService: RoomService): FastifyPluginAsync {
 
 export function createRoomTypeRoutes(roomService: RoomService): FastifyPluginAsync {
   return async (app) => {
+    app.put('/:roomTypeId/cleaning-fee', {
+      preHandler: [app.authenticate, app.requirePasswordChanged, app.requireAdmin]
+    }, async (request, reply) => {
+      reply.header('Cache-Control','no-store');
+      if (Object.keys(request.query as object).length) throw new AppError(400,'ROOM_TYPE_CLEANING_FEE_INVALID','조회 조건을 사용할 수 없습니다.');
+      const {roomTypeId} = z.object({roomTypeId:z.uuid()}).parse(request.params);
+      return reply.header('Cache-Control','no-store').send({roomType:await roomService.setTypeCleaningFee(request.actor,
+        {roomTypeId,body:request.body,idempotencyKey:idempotencyKey(request)})});
+    });
+
     app.get('/', {
       preHandler: [app.authenticate, app.requirePasswordChanged, app.requireAdmin]
     }, async (request, reply) => {
