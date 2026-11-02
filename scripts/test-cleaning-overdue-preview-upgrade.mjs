@@ -1,3 +1,4 @@
+import { createLegacyUpgradeHistory } from './lib/legacy-upgrade-history.mjs';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
@@ -13,9 +14,8 @@ const tables = ['public.cleaning_targets', 'public.cleaning_assignments', 'publi
   'public.cleaning_target_schedule_revisions', 'public.availability_versions', 'public.availability_days',
   'public.audit_events', 'public.notifications', 'private.notification_outbox', 'private.notification_delivery_outbox',
   'private.notification_groups', 'private.command_executions', 'public.reservations', 'public.checkout_cleaning_obligations'];
-const snapshot = () => sql(`select md5(string_agg(data,'|' order by data)) from (
-  ${tables.map((name) => `select '${name}:'||(to_jsonb(row)-array['reservation_schedule_snapshot','notified_reservation_schedule_snapshot'])::text data from ${name} row`).join(' union all ')}
-) preserved;`);
+const history = createLegacyUpgradeHistory(sql, tables);
+const snapshot = () => history.snapshot();
 const id = (n) => `30840000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const preview = (day = '2038-06-07') => JSON.parse(sql(`select private.assignment_preview_snapshot_at(
   '${id(1)}','${day}','2038-06-07 08:00+09');`));
@@ -35,10 +35,11 @@ try {
   assert.equal(previous.targets.find((t) => t.cleaningTargetId === id(1004)).blockedReason,
     'ASSIGNMENT_PREVIEW_ACTIVE_WORKFLOW_UNRESOLVED');
   assert.equal(previous.sequenceReservations, undefined, '88 has no occupancy metadata');
-  assert.equal(snapshot(), before, '88 preview itself remains read-only');
+  history.assertUnchanged(before, '88 preview itself remains read-only');
 
   run(process.execPath, [cli, 'migration', 'up', '--local']);
-  assert.equal(snapshot(), before, '88→89 preserves every old row, including snapshots, owners and receipts');
+  history.requireMemoColumn();
+  history.assertUnchanged(before, '88→89 preserves every old row, including snapshots, owners and receipts');
   const current = preview();
   assert.equal(current.targets.length, 8, '89 includes bounded old unfinished candidates on today');
   for (const n of [1001, 1002, 1003, 1004]) {
@@ -57,7 +58,7 @@ try {
   assert.deepEqual(tomorrow.targets.map(t => t.cleaningTargetId).sort(),
     [1001,1002,1003,1004,1005,1006,1011,1012,1013,1014].map(id).sort(),
     'Latest head includes tomorrow and unfinished backlog, not approved/cancelled history');
-  assert.equal(snapshot(), before, 'Installing and reading89 cannot rewrite history or produce notifications');
+  history.assertUnchanged(before, 'Installing and reading89 cannot rewrite history or produce notifications');
   console.log('Cleaning overdue preview upgrade88→latest: PASS; exact history preserved, today4→8, tomorrow10, terminal max60, no writes.');
 } finally {
   run(process.execPath, [cli, 'db', 'reset', '--local', '--no-seed']);

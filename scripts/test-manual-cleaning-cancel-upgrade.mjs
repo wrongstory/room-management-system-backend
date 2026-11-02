@@ -1,3 +1,4 @@
+import { createLegacyUpgradeHistory } from './lib/legacy-upgrade-history.mjs';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
@@ -33,11 +34,8 @@ function reset(version) {
   if (version) args.push('--version', version);
   execFileSync(process.execPath, args, { stdio: 'inherit' });
 }
-function digest() {
-  return sql(`select md5(string_agg(tag||':'||data,'|' order by tag,data)) from (
-    ${protectedTables.map((table) => `select '${table}' tag,(to_jsonb(t)-array['reservation_schedule_snapshot','notified_reservation_schedule_snapshot'])::text data from ${table} t`).join(' union all ')}
-    ) history;`);
-}
+const history = createLegacyUpgradeHistory(sql, protectedTables);
+function digest() { return history.snapshot(); }
 const command = (n, legacy = false, key = `manual-upgrade-cancel-${n}`) => legacy
   ? `select public.cancel_manual_cleaning_request('${id(1)}','${id(1000 + n)}',
       (select assignment_version from public.cleaning_targets where id='${id(1000 + n)}'),
@@ -84,12 +82,13 @@ try {
       if sqlerrm<>'CLEANING_REQUEST_CANCEL_CONFLICT' then raise; end if;
     end;
   end $probe$;`);
-  assert.equal(digest(), preserved, 'Legacy PIN rejection writes no cancellation effects');
+  history.assertUnchanged(preserved, 'Legacy PIN rejection writes no cancellation effects');
   phase = '92-to-current-install';
   execFileSync(process.execPath, [cli, 'migration', 'up', '--local'], { stdio: 'inherit' });
+  history.requireMemoColumn();
   assert.equal(sql('select count(*) from supabase_migrations.schema_migrations;'), String(expectedMigrationCount));
   assert.equal(sql(`select exists(select 1 from supabase_migrations.schema_migrations where version='${added}');`), 't');
-  assert.equal(digest(), preserved, '92→93 preserves exact target/schedule/snapshot/PIN/receipt/audit/notification history');
+  history.assertUnchanged(preserved, '92→93 preserves exact target/schedule/snapshot/PIN/receipt/audit/notification history');
   assert.equal(sql("select count(*) from public.notifications where event_family='cleaning_request.cancelled_revoked';"), oldCancellationCount,
     'Installation never backfills cancellation notices');
   assert.equal(sql(`select has_function_privilege('service_role',
@@ -101,7 +100,7 @@ try {
   assert.deepEqual(JSON.parse(sql(`select public.cancel_manual_cleaning_request_with_session('${id(1)}','${id(201)}','${id(1001)}',1,
     'CUSTOM_CANCEL_REASON','manual-upgrade-old-receipt',repeat('3',64));`)), oldReceipt,
   'Pre-93 completed receipt replays exact public response through the new session guard');
-  assert.equal(digest(), preserved, 'Old receipt replay cannot add evidence or backfill an audit assignment identity');
+  history.assertUnchanged(preserved, 'Old receipt replay cannot add evidence or backfill an audit assignment identity');
   phase = 'new-command-probes';
   for (const n of [2, 3, 4]) assert.equal(JSON.parse(sql(command(n))).status, 'cancelled',
     'New session-aware command allows an unstarted manual request regardless of legacy/finalized/open PIN evidence');

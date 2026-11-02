@@ -1,3 +1,4 @@
+import { createLegacyUpgradeHistory } from './lib/legacy-upgrade-history.mjs';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import assert from 'node:assert/strict';
@@ -9,15 +10,10 @@ const run = (command, args, input) => execFileSync(command, args, {
 });
 const sql = (input) => run('docker', ['exec', '-i', 'supabase_db_room-management-system-backend',
   'psql', '-X', '-qAt', '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', 'postgres'], input).trim();
-const snapshot = () => sql(`select md5(string_agg(data,'|' order by data)) from (
-  select row_to_json(t)::text data from public.cleaning_targets t union all
-  select (to_jsonb(a)-'notified_reservation_schedule_snapshot')::text from public.cleaning_assignments a union all
-  select row_to_json(a)::text from public.cleaning_attempts a union all
-  select (to_jsonb(r)-'reservation_schedule_snapshot')::text from public.cleaning_target_schedule_revisions r union all
-  select row_to_json(n)::text from public.notifications n union all
-  select row_to_json(e)::text from public.audit_events e union all
-  select row_to_json(r)::text from private.command_executions r
-) preserved;`);
+const history = createLegacyUpgradeHistory(sql, ['public.cleaning_targets', 'public.cleaning_assignments',
+  'public.cleaning_attempts', 'public.cleaning_target_schedule_revisions', 'public.notifications',
+  'public.audit_events', 'private.command_executions']);
+const snapshot = () => history.snapshot();
 
 try {
   run(process.execPath, [cli, 'db', 'reset', '--local', '--no-seed', '--version', '20260928095656']);
@@ -39,7 +35,8 @@ try {
     commit;`);
   const before = snapshot();
   run(process.execPath, [cli, 'migration', 'up', '--local']);
-  assert.equal(snapshot(), before, 'Upgrade must not rewrite historical or overdue business rows');
+  history.requireMemoColumn();
+  history.assertUnchanged(before, 'Upgrade must not rewrite historical or overdue business rows');
   const response = JSON.parse(sql(`select public.process_due_assignment_lifecycle(
     '28000000-0000-4000-8000-000000000001','2037-10-01 11:00+09',
     'overdue-upgrade-preserve',repeat('f',64));`));

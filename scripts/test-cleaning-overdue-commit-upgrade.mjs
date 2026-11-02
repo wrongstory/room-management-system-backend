@@ -1,3 +1,4 @@
+import { createLegacyUpgradeHistory } from './lib/legacy-upgrade-history.mjs';
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { readFileSync } from 'node:fs';
@@ -15,9 +16,8 @@ const tables = ['public.cleaning_targets', 'public.cleaning_assignments', 'publi
   'public.cleaning_target_schedule_revisions', 'public.availability_versions', 'public.availability_days',
   'public.audit_events', 'public.notifications', 'private.notification_outbox', 'private.notification_delivery_outbox',
   'private.notification_groups', 'private.command_executions', 'public.reservations', 'public.checkout_cleaning_obligations'];
-const snapshot = () => sql(`select md5(string_agg(data,'|' order by data)) from (
-  ${tables.map((name) => `select '${name}:'||(to_jsonb(row)-array['reservation_schedule_snapshot','notified_reservation_schedule_snapshot'])::text data from ${name} row`).join(' union all ')}
-) preserved;`);
+const history = createLegacyUpgradeHistory(sql, tables);
+const snapshot = () => history.snapshot();
 const impact = (day = '2038-06-07') => JSON.parse(sql(`select private.assignment_commit_impact_at('${day}','2038-06-07 08:00+09');`));
 const commit = (target, fingerprint, key, version = 1) => `select private.commit_and_notify_assignments_at(
   '${id(1)}','2038-06-07','${fingerprint}',
@@ -72,9 +72,10 @@ try {
   assert.equal(impact().committableDrafts.length, 1, '89 only includes today draft');
   assert.equal(impact().remainingUnassignedTargets.length, 0, '89 omits old unassigned');
   assert.equal(impact('2038-06-08').committableDrafts.length, 1, '89 tomorrow exact baseline');
-  assert.equal(snapshot(), before, '89 preflight is read-only');
+  history.assertUnchanged(before, '89 preflight is read-only');
   run(process.execPath, [cli, 'migration', 'up', '--local']);
-  assert.equal(snapshot(), before, '89→90 preserves every existing business and delivery row');
+  history.requireMemoColumn();
+  history.assertUnchanged(before, '89→90 preserves every existing business and delivery row');
   const current = impact();
   assert.equal(current.committableDrafts.length, 2, '90 includes old and today draft');
   assert.equal(current.committableDrafts.find((row) => row.cleaningTargetId === id(1002)).serviceDate,
@@ -83,7 +84,7 @@ try {
   assert.equal(current.remainingUnassignedTargets[0].serviceDate, '2038-06-06');
   assert.deepEqual(impact('2038-06-08').committableDrafts.map(row => row.cleaningTargetId).sort(),
     [1002,1003,1004].map(id).sort(), 'Latest head includes safe backlog using tomorrow availability');
-  assert.equal(snapshot(), before, '90 install/preflight cannot rewrite history or notify');
+  history.assertUnchanged(before, '90 install/preflight cannot rewrite history or notify');
 
   const holders = [];
   try {
