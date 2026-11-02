@@ -145,7 +145,7 @@ select pg_temp.old_commit(3,'overdue-current-success',2);
 select throws_ok($$select private.decide_availability_change_at(pg_temp.ocid(1),(private.request_availability_change_at(pg_temp.ocid(3),'2038-06-07',array['2038-06-08'::date],'WORK_SCHEDULE',2,'overdue-current-unavailable-request','2038-06-07 08:00+09')).id,'approved','ADMIN_APPROVED',2,'overdue-current-unavailable','2038-06-07 08:00+09')$$,'40001','ASSIGNMENT_AVAILABILITY_STALE','original same-day availability guard remains after old assignment ended');
 update public.cleaning_assignments set is_current=false,ended_at='2038-06-07 09:00+09' where id=pg_temp.ocid(2003);
 update public.cleaning_targets set status='unassigned' where id=pg_temp.ocid(1003);
-select lives_ok($$select private.submit_weekly_availability_at(pg_temp.ocid(3),'2038-06-07',array['2038-06-08'::date],2,'overdue-ended-unavailable','2038-06-07 09:00+09')$$,'ended assignments do not leave a ghost today guard');
+select lives_ok($$select private.decide_availability_change_at(pg_temp.ocid(1),(private.request_availability_change_at(pg_temp.ocid(3),'2038-06-07',array['2038-06-08'::date],'WORK_SCHEDULE',2,'overdue-ended-unavailable-request','2038-06-07 09:00+09')).id,'approved','ADMIN_APPROVED',2,'overdue-ended-unavailable','2038-06-07 09:00+09')$$,'ended assignments do not leave a ghost today guard');
 
 select ok(not has_function_privilege('anon','private.assignment_planning_includes_date(date,date,timestamptz)','EXECUTE'),'anon cannot execute private planning helper');
 select ok(not has_function_privilege('authenticated','private.assignment_planning_includes_date(date,date,timestamptz)','EXECUTE'),'authenticated cannot execute private planning helper');

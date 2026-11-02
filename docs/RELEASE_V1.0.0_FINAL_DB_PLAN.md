@@ -1,5 +1,20 @@
 # v1.0.0 최종 DB 검증 계획 — 객실 고정 메모 포함
 
+## 최신147 입력 준비와 추가 회귀 범위
+
+#558은 dev 병합 및 DB 없는 CI/독립 QA를 마쳤다. #559의 후속147과 기존 검사3곳의
+현재/다음 주 정책 정합성 보완을 통합한 뒤 최종 입력을 고정한다. 기존146개 migration 원문을
+보존하고 source147 목록을 운영 pending 건수로 해석하지 않는다.
+
+새 SQL2파일은 canonical receipt·권한/snapshot/만료 확인과 내부 helper의 신구 동등성을
+transaction 안에서 검증한 뒤 rollback한다. helper 회귀는 고정 psql fixture와147 재적용을
+같은 transaction에서 사용하며 별도 DB 시작/reset을 추가하지 않는다. 기존 경합 검사의
+요일 분기·과거 날짜 보존·정확한 업무 오류 판정을 보완하고 연결 수·대상 날짜·제한은 유지한다.
+
+최종 승인 문서는 USER_DECISIONS.md 하나다. 로컬/CI DB 실행·release push·운영 적용은
+별도 정확 승인 전 NOT RUN이며 과거 R3 실패 또는 feature source CI를 전체 DB 성공으로 쓰지 않는다.
+
+
 ## 2026-11-02 현재 — D03-L A 승인, 새 통합 입력 준비
 
 FINAL-144-R3/run41353299781은 TLS/atomic21 PASS 후 strict lint에서 FAIL했고 승인은 소모됐다.
