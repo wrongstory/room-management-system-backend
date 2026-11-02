@@ -43,13 +43,21 @@ select pg_temp.warning_id(700+n),r.id,'additional','manual_room_request','warnin
   jsonb_build_object('code','standard','name','immutable warning type'),10000,'{}',pg_temp.warning_id(2)
 from generate_series(1,2)n cross join warning_clock c
 cross join (select id from public.rooms order by room_number limit 1)r;
-insert into public.cleaning_assignments(id,cleaning_target_id,maid_profile_id,sequence_number,
+-- Replica-mode history fixture: explicit NULL bypasses only the internal
+-- inheritance default, while CHECK constraints remain enabled. Unknown JSON
+-- memo key is ignored by the pre140 row type used by historical consumers.
+with assignment_fixture_rows(id,cleaning_target_id,maid_profile_id,sequence_number,
   revision,is_current,notified_at,changed_by,service_date,notified_room_id_snapshot,
-  notified_room_number_snapshot)
+  notified_room_number_snapshot) as (
 select pg_temp.warning_id(800+n),pg_temp.warning_id(700+n),pg_temp.warning_id(3),n,
   1,true,c.at_time-interval '2 hours',pg_temp.warning_id(2),c.service_date,r.id,r.room_number
 from generate_series(1,2)n cross join warning_clock c
-cross join (select id,room_number from public.rooms order by room_number limit 1)r;
+cross join (select id,room_number from public.rooms order by room_number limit 1)r
+)
+insert into public.cleaning_assignments
+select (jsonb_populate_record(null::public.cleaning_assignments,
+  to_jsonb(assignment_fixture_rows)||jsonb_build_object('instruction_memo',null,'created_at',now()))).*
+from assignment_fixture_rows;
 insert into public.cleaning_attempts(id,cleaning_target_id,assignment_id,maid_profile_id,
   attempt_number,status,assignment_revision,started_at,field_completed_at,ended_at,
   template_snapshot,room_snapshot)

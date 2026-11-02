@@ -46,8 +46,11 @@ select throws_ok($q$select pg_temp.reset_preview(pg_temp.reset_id(1),pg_temp.res
 select throws_ok($q$select pg_temp.reset_preview(pg_temp.reset_id(1),pg_temp.reset_id(11),pg_temp.reset_id(22)::text)$q$,'42501','RESET_PREVIEW_AUTHORIZATION_FAILED','other user session denied');
 select throws_ok($q$select pg_temp.reset_preview(pg_temp.reset_id(1),pg_temp.reset_id(11),pg_temp.reset_id(24)::text)$q$,'42501','RESET_PREVIEW_AUTHORIZATION_FAILED','expired session denied');
 reset role;
-update public.profiles set must_change_password=true where id=pg_temp.reset_id(11);
-select throws_ok($q$select pg_temp.reset_preview(pg_temp.reset_id(1),pg_temp.reset_id(11),pg_temp.reset_id(21)::text)$q$,'42501','DEVELOPER_REQUIRED','temporary-password developer denied');
+select throws_ok($q$update public.profiles set must_change_password=true where id=pg_temp.reset_id(11)$q$,
+  '23514','DEVELOPER_ACCOUNT_PROTECTED','developer password-state protection is enforced');
+update auth.sessions set not_after=clock_timestamp()-interval '1 minute' where id=pg_temp.reset_id(21);
+select throws_ok($q$select pg_temp.reset_preview(pg_temp.reset_id(1),pg_temp.reset_id(11),pg_temp.reset_id(21)::text)$q$,
+  '42501','RESET_PREVIEW_AUTHORIZATION_FAILED','previously valid session is freshly rechecked after expiry');
 set local role authenticated;
 select throws_ok($q$select public.get_developer_reset_preview(null,null,null)$q$,'42501','permission denied for function get_developer_reset_preview','actual client execution permission denied');
 reset role;

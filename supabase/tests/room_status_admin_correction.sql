@@ -458,11 +458,12 @@ select is((select count(*)::integer from public.audit_events
   where event_type='room.display_status_overridden'),7,
   'each display override appends one safe audit event');
 
-select ok(cardinality(private.developer_audit_event_types())=74
+select ok(cardinality(private.developer_audit_event_types())=75
+    and private.developer_audit_event_types() @> array['assignment.unavailability_cancelled','room.ready_corrected']::text[]
     and cardinality(private.developer_audit_event_types())=(
       select count(distinct event_type) from unnest(
         private.developer_audit_event_types()) event_type),
-  'database developer audit allowlist contains the same 74 unique types as OpenAPI');
+  'database developer audit allowlist contains the same 75 unique types as OpenAPI including both approved additions');
 select ok((select count(distinct event_type)=2
   from public.list_developer_audit_events(
     (select id from public.profiles where role='developer'),null,null,

@@ -184,6 +184,22 @@ select ok(has_function_privilege('service_role',
   'service role RPC still requires caller actor/session validation');
 select public.refresh_photo_storage_quota(clock_timestamp(),1000);
 
+create function pg_temp.batch_savepoint_state() returns text language sql stable as $$
+  select encode(extensions.digest(jsonb_build_object(
+    'session',(select to_jsonb(s) from auth.sessions s where id=pg_temp.cid(902)),
+    'batches',(select jsonb_agg(to_jsonb(r) order by to_jsonb(r)::text) from private.photo_upload_batches r),
+    'members',(select jsonb_agg(to_jsonb(r) order by to_jsonb(r)::text) from private.photo_upload_batch_members r),
+    'admissions',(select jsonb_agg(to_jsonb(r) order by to_jsonb(r)::text) from private.photo_upload_admissions r),
+    'operations',(select jsonb_agg(to_jsonb(r) order by to_jsonb(r)::text) from private.photo_upload_operations r),
+    'collectionStates',(select jsonb_agg(to_jsonb(r) order by to_jsonb(r)::text) from private.attempt_photo_collection_states r),
+    'collectionItems',(select jsonb_agg(to_jsonb(r) order by to_jsonb(r)::text) from private.attempt_photo_collection_items r),
+    'collectionChanges',(select jsonb_agg(to_jsonb(r) order by to_jsonb(r)::text) from private.attempt_photo_collection_changes r),
+    'quota',(select jsonb_agg(to_jsonb(r) order by to_jsonb(r)::text) from private.photo_storage_quota_snapshot r),
+    'flow',(select jsonb_agg(to_jsonb(r) order by k) from flow r)
+  )::text,'sha256'),'hex')
+$$;
+create temp table batch_savepoint_before as select pg_temp.batch_savepoint_state() hash;
+
 savepoint pair;
 insert into flow values(-1,jsonb_build_object('minute',date_trunc('minute',clock_timestamp())));
 insert into flow values(0,pg_temp.batch(1,'cleaning-proof',0));
@@ -312,5 +328,9 @@ delete from auth.sessions where id=pg_temp.cid(902);
 select throws_ok($$select pg_temp.open_upload(1,1,'cleaning-proof',1,0)$$,'42501','SESSION_REVOKED','old batch reservation never replaces a live session');
 rollback to session;
 
+-- Sequence-based TAP numbering survives rollback, but cached no_plan state
+-- does not. A real post-rollback oracle records the final number (44).
+select is(pg_temp.batch_savepoint_state(),(select hash from batch_savepoint_before),
+  'all savepoints restore session, batch, provider operation and collection state');
 select * from finish();
 rollback;
