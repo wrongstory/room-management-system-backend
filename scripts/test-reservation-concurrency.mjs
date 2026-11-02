@@ -184,6 +184,10 @@ const { error: profileError } = await client.from('profiles').insert({
 });
 assert(!profileError, `profile fixture failed: ${profileError?.message}`);
 
+// Isolate global delivery claims before unrelated business fixtures enqueue work.
+// Keep the same races, bounded preparation, connection budget and reset count.
+await testNotificationDeliveryConcurrency(client);
+
 // Local synthetic operational input goes through the same session-bound immutable
 // publication command as production. Raw Data API template DML is intentionally denied.
 const loginClient = createClient(status.API_URL, status.ANON_KEY, {
@@ -1226,7 +1230,6 @@ await testPhotoDriveQuotaConcurrency(client);
 await testPhotoRetentionConcurrency(client);
 await testNotificationConcurrency(client);
 await testWebPushConcurrency(client);
-await testNotificationDeliveryConcurrency(client);
 await testPasswordChangeConcurrency(client);
 await testRoomPinConcurrency(client);
 await testRoomPinBootstrapConcurrency(client);

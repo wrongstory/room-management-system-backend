@@ -2,8 +2,8 @@ import { execFile, execFileSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { promisify } from 'node:util';
 import {
-  assertDeliveryDrainPredicateProbe, DELIVERY_DRAIN_PREDICATE_PROBE_SQL,
-  DELIVERY_DRAIN_SUMMARY_SQL, drainNotificationDeliveryFixtures,
+  assertDeliveryDrainPredicateProbe, assertQuiescentDeliveryFixture, DELIVERY_DRAIN_PREDICATE_PROBE_SQL,
+  DELIVERY_DRAIN_SUMMARY_SQL, DELIVERY_FRESH_SUMMARY_SQL, drainNotificationDeliveryFixtures,
 } from './notification-delivery-fixture-drain.mjs';
 
 const execFileAsync = promisify(execFile);
@@ -48,11 +48,24 @@ export async function testNotificationDeliveryConcurrency(client) {
     p_request_hash: digest(`request:${subscriptionId}`), p_vapid_key_version: 'vapid-v1',
   });
   assert(!registration.error, 'notification delivery subscription fixture');
-  // Earlier concurrency suites intentionally leave typed outbox work behind. Drain only
-  // currently due work through the public bounded claim contract so this test's first
-  // fanout race is not displaced by unrelated fixtures.
+  // Run before other business fixtures: unexpected background state is a setup
+  // failure, never work to delete, ignore or spend a larger drain budget on.
+  // Reuse this first summary in the bounded helper; do not add a DB round trip.
+  let initialRaw;
+  try { initialRaw = sql(DELIVERY_FRESH_SUMMARY_SQL); }
+  catch { throw new Error('Notification delivery fixture drain: SUMMARY_READ_FAILED'); }
+  const initial = assertQuiescentDeliveryFixture(initialRaw);
+  console.log(`Notification delivery fixture initial counts: ${JSON.stringify(initial)}`);
+  let initialSummary = JSON.stringify(initial.summary);
   await drainNotificationDeliveryFixtures({
-    readSummary: () => sql(DELIVERY_DRAIN_SUMMARY_SQL),
+    readSummary: () => {
+      if (initialSummary !== undefined) {
+        const first = initialSummary;
+        initialSummary = undefined;
+        return first;
+      }
+      return sql(DELIVERY_DRAIN_SUMMARY_SQL);
+    },
     claim: limit => sqlAsync(`select public.claim_notification_deliveries('${digest(`drain:${randomUUID()}`)}',${limit})::text`),
     report: message => console.log(message),
   });
