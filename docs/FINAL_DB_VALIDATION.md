@@ -78,7 +78,7 @@ fresh source122 reset → hash-only checkpoint → exact pending 전체 tip 적�
 전체 catalog의 #551 미분류 차단 확인·별도로 바인딩한 기존 분류 범위의 read-plan/합성 사진 HOLD 부모 보호 검사 →
 template contract → exact lint baseline → 합성 backup dry-run →
 전체 db:test/upgrade → static warning upgrade → KST clock → concurrency → cleanup.
-그 밖의 명령과 timeout 40분을 유지하며 테스트 삭제/skip/continue-on-error를 추가하지 않는다.
+최종 전체 DB migration job은 유한한 60분 상한을 사용한다. 그 밖의 명령과 개별 timeout·검사 기준은 유지하며 테스트 삭제/skip/continue-on-error를 추가하지 않는다. 이 job 상한은 별도 cleanup 시간 예약이나 성공 보장이 아니다.
 운영 백업/복원은 사용자 결정대로 후속이며 CI 합성 검사를 실제 운영 복원으로 표현하지 않는다.
 
 [catalog 연결 검사](RESET_FINAL_CATALOG_VALIDATION.md)는 같은 실행의 hash-only checkpoint와

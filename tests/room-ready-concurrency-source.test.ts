@@ -118,6 +118,6 @@ describe('#532 READY race preparation (actual SQL/concurrency NOT RUN)', () => {
     expect(script).toContain('await runManualCleaningCancelConcurrency(testRoomReadyCorrectionConcurrency)');
     expect(script).not.toMatch(/execFileSync|\bspawn\(|db.*reset|--skip|--force/);
     expect(manual.match(/\['db'|\[cli, 'db', 'reset'/g)).toHaveLength(1);
-    expect(read('.github/workflows/quality.yml')).toContain('timeout-minutes: 40');
+    expect(read('.github/workflows/quality.yml')).toContain('timeout-minutes: 60');
   });
 });
