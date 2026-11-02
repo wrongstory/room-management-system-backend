@@ -102,6 +102,6 @@ describe('#14 prefix122 checkpoint source and synthetic boundary, no database',(
     for(const command of ['db:test:template-contract','db:test:migration-readonly-tls','db:lint:baseline','backup:dry-run','npm run db:test\n','db:test:static-warning','db:test:long-stay-clock','db:test:concurrency','db:stop'])expect(text).toContain(command);
     expect(text.indexOf('run: npm run db:stop')).toBeLessThan(text.indexOf('uses: actions/upload-artifact@'));
     expect(text.indexOf('uses: actions/upload-artifact@')).toBeLessThan(text.indexOf('- name: Full DB proof'));
-    expect(text).toContain('if-no-files-found: error');expect(text).toContain('timeout-minutes: 40');
+    expect(text).toContain('if-no-files-found: error');expect(text).toContain('timeout-minutes: 60');
   });
 });
