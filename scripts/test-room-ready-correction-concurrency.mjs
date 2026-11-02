@@ -114,6 +114,18 @@ const approveSql = n => `select public.approve_cleaning_submission('${manualCanc
 const admitSql = n => `select public.admit_photo_collection_upload('${manualCancelId(2)}','${manualCancelId(202)}',
  ${uuid(attempt(n))},${uuid(assignment(n))},2,${slot(n)},${uuid(roomReadyId(11000+n))},1,0,lpad('${n}',64,'0'));`;
 
+export function assertRoomReadyRaceDenied(value, code, name) {
+  try {
+    assert.notEqual(value.exitCode, 0, 'The losing command must fail');
+    assert.equal(value.code, code);
+  } catch (error) {
+    error.sqlState = value.sqlState;
+    error.readyRace = { name, exitCode: value.exitCode, expectedCode: code,
+      observedCode: value.code, diagnostic: value.diagnostic };
+    throw error;
+  }
+}
+
 export async function testRoomReadyCorrectionConcurrency({ sql, race }) {
   assert.equal(sql(`select count(*) from public.profiles where id in ('${manualCancelId(1)}','${manualCancelId(2)}') and status='active';`), '2', 'Shared synthetic actors required');
   sql(roomReadyCorrectionFixture());
@@ -141,7 +153,7 @@ export async function testRoomReadyCorrectionConcurrency({ sql, race }) {
     assert.deepEqual(value, { target: 'cancelled', current: false, version: original.roomStateVersion+1, audits: 1, receipts: 1, earnings: 0 });
     preserved();
   };
-  const denied = (value, code) => { assert.notEqual(value.exitCode, 0, 'The losing command must fail'); assert.equal(value.code, code); };
+  const denied = assertRoomReadyRaceDenied;
 
   const samePreview = preview(1), same = roomReadyApplySql(1,samePreview,'ready-race-same-key');
   const sameResult = await race(same,same,'ready_same_key');
@@ -151,23 +163,23 @@ export async function testRoomReadyCorrectionConcurrency({ sql, race }) {
 
   const casPreview = preview(2);
   const cas = await race(roomReadyApplySql(2,casPreview,'ready-race-cas-first'),roomReadyApplySql(2,casPreview,'ready-race-cas-second'),'ready_room_cas');
-  assert.equal(cas[0].exitCode,0); denied(cas[1],'ROOM_READY_PREVIEW_STALE'); corrected(2,casPreview);
+  assert.equal(cas[0].exitCode,0); denied(cas[1],'ROOM_READY_PREVIEW_STALE','ready_room_cas'); corrected(2,casPreview);
 
   const approvalPreview = preview(3);
   const approved = await race(approveSql(3),roomReadyApplySql(3,approvalPreview,'ready-race-after-approval'),'ready_approval_first');
-  assert.equal(approved[0].exitCode,0); denied(approved[1],'ROOM_READY_PREVIEW_STALE');
+  assert.equal(approved[0].exitCode,0); denied(approved[1],'ROOM_READY_PREVIEW_STALE','ready_approval_first');
   assert.equal(state(3).target,'approved'); assert.equal(state(3).earnings,1);
   assert.equal(state(3).audits,0); assert.equal(state(3).receipts,0); preserved();
 
   const cancellationPreview = preview(4);
   const approvalLost = await race(roomReadyApplySql(4,cancellationPreview,'ready-race-before-approval'),approveSql(4),'ready_correction_first');
-  assert.equal(approvalLost[0].exitCode,0); denied(approvalLost[1],'INSPECTION_INVALID_TRANSITION'); corrected(4,cancellationPreview);
+  assert.equal(approvalLost[0].exitCode,0); denied(approvalLost[1],'INSPECTION_INVALID_TRANSITION','ready_correction_first'); corrected(4,cancellationPreview);
   assert.equal(sql(`select ${rowsDigest('public.cleaning_submissions', `r.cleaning_attempt_id=${uuid(attempt(4))}`)};`),submissionBefore,
     'Cancellation ends authority without changing the existing submission or manufacturing an inspection');
 
   const uploadPreview = preview(5);
   const uploading = await race(admitSql(5),roomReadyApplySql(5,uploadPreview,'ready-race-after-upload'),'ready_upload_first');
-  assert.equal(uploading[0].exitCode,0); denied(uploading[1],'ROOM_READY_PREVIEW_STALE');
+  assert.equal(uploading[0].exitCode,0); denied(uploading[1],'ROOM_READY_PREVIEW_STALE','ready_upload_first');
   const blocked = preview(5);
   assert.equal(blocked.canApply,false); assert(blocked.blockingReasons.includes('PHOTO_UPLOAD_IN_PROGRESS'));
   assert.equal(state(5).target,'notified'); assert.equal(state(5).current,true);
@@ -175,7 +187,7 @@ export async function testRoomReadyCorrectionConcurrency({ sql, race }) {
 
   const beforeUpload = preview(6);
   const uploadLost = await race(roomReadyApplySql(6,beforeUpload,'ready-race-before-upload'),admitSql(6),'ready_upload_after');
-  assert.equal(uploadLost[0].exitCode,0); denied(uploadLost[1],'PHOTO_ACCESS_REQUIRED'); corrected(6,beforeUpload);
+  assert.equal(uploadLost[0].exitCode,0); denied(uploadLost[1],'CAPABILITY_ACCESS_REQUIRED','ready_upload_after'); corrected(6,beforeUpload);
   assert.equal(sql(`select count(*) from private.photo_upload_admissions where collection_item_id=${uuid(roomReadyId(11006))};`),'0', 'Losing photo request leaves no new upload authority');
   assert.equal(sql(`select ${rowsDigest('public.cleaning_attempts', `r.id in (${[1,2,4,5,6].map(n => uuid(attempt(n))).join(',')})`)};`),physicalBefore,
     'Finished/submitted physical work records remain exact');

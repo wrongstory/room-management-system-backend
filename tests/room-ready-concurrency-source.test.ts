@@ -102,7 +102,7 @@ describe('#532 READY race preparation (actual SQL/concurrency NOT RUN)', () => {
     expect(script.match(/await race\(/g)).toHaveLength(6);
     for (const marker of ['ready_same_key','ready_room_cas','ready_approval_first','ready_correction_first','ready_upload_first','ready_upload_after',
       'public.approve_cleaning_submission','public.admit_photo_collection_upload', 'INSPECTION_INVALID_TRANSITION',
-      'PHOTO_UPLOAD_IN_PROGRESS','PHOTO_ACCESS_REQUIRED','assertRoomReadyProtectedRows', 'Confirmed earning baseline must be nonempty']) {
+      'PHOTO_UPLOAD_IN_PROGRESS','CAPABILITY_ACCESS_REQUIRED','assertRoomReadyProtectedRows', 'Confirmed earning baseline must be nonempty']) {
       expect(script).toContain(marker);
     }
     expect(manual).toContain('await waitBlocked(`manual_cancel_contender_${suffix}`)');
