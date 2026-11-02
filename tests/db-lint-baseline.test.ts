@@ -3,7 +3,8 @@ import { describe, expect, it, vi } from 'vitest';
 const pureModule = '../scripts/db-lint-baseline.mjs';
 const runnerModule = '../scripts/check-db-lint-baseline.mjs';
 const {
-  CATALOG_SQL, EXPECTED_CATALOG, EXPECTED_LINT, EXPECTED_WARNING_COUNT, LOCAL_DB_CONTAINER,
+  CATALOG_SQL, EXPECTED_CATALOG, EXPECTED_LINT, EXPECTED_WARNING_COUNT,
+  FINAL_CATALOG_SQL, FINAL_EXPECTED_CATALOG, FINAL_EXPECTED_LINT, LOCAL_DB_CONTAINER,
   LOCAL_PROJECT_ID, PROCESS_MAX_BUFFER, PROCESS_TIMEOUT_MS, STRICT_LINT_ARGS,
   validateInstalledCatalog, validateLintBaseline, validateLintStderr, validateLintWarnings,
   validateLocalContainer, validateLocalDockerEndpoint, validateLocalProjectConfig, validateProcessResult,
@@ -33,6 +34,7 @@ const catalogFixture = (): Catalog[] => structuredClone(EXPECTED_CATALOG);
 const progress = 'Connecting to local database...\nLinting schema: public\nLinting schema: private\n';
 const result = (stdout: string, status = 0, stderr = ''): Result => ({ status, signal: null, stdout, stderr });
 const valid = () => ({ lint: result(JSON.stringify(lintFixture()), 1, progress), catalog: result(JSON.stringify(catalogFixture())) });
+const validFinal = () => ({ lint: result(JSON.stringify(FINAL_EXPECTED_LINT), 1, progress), catalog: result(JSON.stringify(FINAL_EXPECTED_CATALOG)) });
 const localConfig = (port = 54322) => `project_id = "${LOCAL_PROJECT_ID}"\n[db]\nport = ${port}\n`;
 const containerFixture = (port = 54322) => ({
   name: `/${LOCAL_DB_CONTAINER}`, running: true, project: LOCAL_PROJECT_ID,
@@ -174,7 +176,7 @@ describe('fixed local runner without real Docker, Supabase or DB execution', () 
     const outputs: Result[] = [
       result(JSON.stringify('unix:///var/run/docker.sock')),
       result(JSON.stringify(containerFixture())),
-      valid().lint, valid().catalog,
+      validFinal().lint, validFinal().catalog,
     ];
     const spawnSyncImpl = vi.fn(() => outputs.shift());
     const readFileSyncImpl = vi.fn((file: string) => file.endsWith('config.toml') ? localConfig()
@@ -187,7 +189,7 @@ describe('fixed local runner without real Docker, Supabase or DB execution', () 
   };
   it('runs only the pinned local command and local read-only catalog with bounded capture and visible raw FAIL', () => {
     const h = harness();
-    expect(runLocalBaselineCheck(h.options).acceptedWarningCount).toBe(9);
+    expect(runLocalBaselineCheck(h.options).acceptedWarningCount).toBe(19);
     expect(h.spawnSyncImpl).toHaveBeenCalledTimes(4);
     const calls = h.spawnSyncImpl.mock.calls as unknown as [string, string[], Record<string, unknown>][];
     expect(at(calls, 2)[0]).toBe(process.execPath);
@@ -201,12 +203,12 @@ describe('fixed local runner without real Docker, Supabase or DB execution', () 
     expect(at(calls, 0)[2].env).toEqual({});
     expect(at(calls, 3)[2].env).toEqual({});
     expect(h.options.env).toEqual({});
-    expect(at(calls, 3)[1]).toEqual(['--context', 'default', 'exec', LOCAL_DB_CONTAINER, 'psql', '-X', '-qAt', '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', 'postgres', '-c', CATALOG_SQL]);
+    expect(at(calls, 3)[1]).toEqual(['--context', 'default', 'exec', LOCAL_DB_CONTAINER, 'psql', '-X', '-qAt', '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', 'postgres', '-c', FINAL_CATALOG_SQL]);
     for (const [, commandArgs, options] of calls) {
       expect(commandArgs).not.toContain('--linked'); expect(commandArgs).not.toContain('--db-url');
       expect(options).toMatchObject({ shell: false, encoding: 'utf8', windowsHide: true, timeout: PROCESS_TIMEOUT_MS, maxBuffer: PROCESS_MAX_BUFFER });
     }
-    expect(h.writes.stdout).toContain(JSON.stringify(lintFixture()));
+    expect(h.writes.stdout).toContain(JSON.stringify(FINAL_EXPECTED_LINT));
     expect(h.writes.stderr).toContain(progress);
     expect(h.writes.stdout).toContain('original strict lint exit=1 signal=none');
     expect(h.writes.stdout).toContain('Original strict lint remains FAIL, exit 1');
@@ -215,7 +217,7 @@ describe('fixed local runner without real Docker, Supabase or DB execution', () 
   it('keeps all raw lint streams visible on rejection', () => {
     const h = harness(); at(h.outputs, 2).stderr += 'FATAL: synthetic failure\n';
     expect(() => runLocalBaselineCheck(h.options)).toThrow('unrecognized diagnostic');
-    expect(h.writes.stdout).toContain(JSON.stringify(lintFixture()));
+    expect(h.writes.stdout).toContain(JSON.stringify(FINAL_EXPECTED_LINT));
     expect(h.writes.stderr).toContain('FATAL: synthetic failure\n');
     expect(h.writes.stdout).not.toContain('DB lint baseline: PASS');
   });
@@ -284,7 +286,7 @@ describe('fixed local runner without real Docker, Supabase or DB execution', () 
     h.readFileSyncImpl.mockImplementation((file: string) => file.endsWith('config.toml') ? localConfig(55432)
       : file.includes('node_modules') ? JSON.stringify({ name: 'supabase', version: '2.115.0' })
       : JSON.stringify({ devDependencies: { supabase: '2.115.0' } }));
-    expect(runLocalBaselineCheck(h.options).acceptedWarningCount).toBe(9);
+    expect(runLocalBaselineCheck(h.options).acceptedWarningCount).toBe(19);
     const calls = h.spawnSyncImpl.mock.calls as unknown as [string, string[], { env: Record<string, string> }][];
     expect(at(calls, 2)[2].env).toEqual({
       DOCKER_CONTEXT: 'default', DOCKER_HOST: 'unix:///var/run/docker.sock',

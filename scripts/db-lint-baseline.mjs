@@ -60,6 +60,56 @@ export const EXPECTED_LINT = freeze([
 ]);
 export const EXPECTED_WARNING_COUNT = 9;
 
+// #558 is a separately approved, exact exception for these clock-only refusal
+// guards. Values below are reviewed source expectations, not live DB evidence.
+// Keep the historical #373 exports above unchanged for the 100 -> 101 probe.
+const collectorCatalog = {
+  ...commonCatalog,
+  argumentTypes: [], argNames: null, volatility: 'S', returnType: 'jsonb',
+  acl: ['postgres=X/postgres'], settings: ['search_path=pg_catalog', 'lock_timeout=2s'],
+  cost: 100, rows: 0, support: '-', binary: null,
+};
+export const CLOCK_EXPECTED_CATALOG = freeze([
+  {
+    ...collectorCatalog, function: 'private.collect_developer_reset_inventory',
+    sourceMd5: '6b5894e9ee85b67503d369d6cda5d399',
+    sourceSha256: '150b290b30c0017c558f48715356ac21b0c7014ab2f8dad7839053fdcf7d84e9',
+  },
+  {
+    ...collectorCatalog, function: 'private.collect_developer_reset_template_inventory',
+    sourceMd5: 'fc53807eba654fd8dc4f8fbf6d4efadd',
+    sourceSha256: '6370c825c1c6eb8b528fba5f4e6801c1c2f8c4768e78dd5b7de566c36cb0699d',
+  },
+  {
+    ...collectorCatalog, function: 'private.collect_developer_reset_row_impact',
+    sourceMd5: '128b344160f0860ce256b1181419fca2',
+    sourceSha256: 'ea0c1e33ed68dd16cfc5da645bf3fb323573066eeadcbd1e0e667a47a9c0095a',
+  },
+]);
+const clockIssue = (lineNumber, text, context) => ({
+  level: 'warning', message: 'routine is marked as STABLE, but expression is VOLATILE',
+  statement: { lineNumber, text },
+  hint: 'When you fix this issue, please, recheck other functions that uses this function.',
+  detail: 'there is a risk of unwanted behave',
+  ...(context === undefined ? {} : { context }), sqlState: '00000',
+});
+export const CLOCK_EXPECTED_LINT = freeze([
+  { function: 'private.collect_developer_reset_inventory', issues: [
+    clockIssue('7', 'statement block', 'during statement block local variable "deadline" initialization on line 6'),
+    clockIssue('18', 'IF'), clockIssue('26', 'IF'),
+  ] },
+  { function: 'private.collect_developer_reset_template_inventory', issues: [
+    clockIssue('30', 'IF'), clockIssue('69', 'IF'), clockIssue('87', 'IF'),
+  ] },
+  { function: 'private.collect_developer_reset_row_impact', issues: [
+    clockIssue('8', 'statement block', 'during statement block local variable "deadline" initialization on line 7'),
+    clockIssue('18', 'IF'), clockIssue('67', 'IF'), clockIssue('117', 'IF'),
+  ] },
+]);
+export const FINAL_EXPECTED_CATALOG = freeze([...EXPECTED_CATALOG, ...CLOCK_EXPECTED_CATALOG]);
+export const FINAL_EXPECTED_LINT = freeze([...EXPECTED_LINT, ...CLOCK_EXPECTED_LINT]);
+export const FINAL_EXPECTED_WARNING_COUNT = 19;
+
 // Filter by names, not regprocedure, so an unexpected overload is also returned
 // and rejected. No runtime role gets EXECUTE or direct access from this query.
 export const CATALOG_SQL = `
@@ -101,6 +151,17 @@ from (
 ) as functions;
 rollback;
 `;
+
+// Query every overload of all six names. Extend only the newly approved rows;
+// the three historical catalog records and their exact comparison are retained.
+const clockNamesSql = CLOCK_EXPECTED_CATALOG.map((row) => `'${row.function.split('.')[1]}'`).join(', ');
+export const FINAL_CATALOG_SQL = CATALOG_SQL
+  .replace('  ) as catalog', `  ) || case when n.nspname = 'private' and p.proname in (${clockNamesSql}) then
+    jsonb_build_object('sourceSha256', encode(extensions.digest(p.prosrc, 'sha256'), 'hex'),
+      'cost', p.procost, 'rows', p.prorows, 'support', p.prosupport::regproc::text, 'binary', p.probin)
+    else '{}'::jsonb end as catalog`)
+  .replace("'assignment_preview_source_reason_before_stay_segments'))",
+    `'assignment_preview_source_reason_before_stay_segments', ${clockNamesSql}))`);
 
 const fail = (message) => { throw new Error(`DB lint baseline rejected: ${message}`); };
 const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -199,6 +260,47 @@ export function validateInstalledCatalog(raw) {
   return rows.length;
 }
 
+export function validateFinalLintWarnings(raw) {
+  const groups = parseArray(raw, 'strict lint stdout');
+  if (groups.length !== FINAL_EXPECTED_LINT.length) fail('strict lint must contain exactly the six approved function groups');
+  const seen = new Set();
+  let warningCount = 0;
+  for (const group of groups) {
+    exactKeys(group, ['function', 'issues'], 'lint function group');
+    const expected = FINAL_EXPECTED_LINT.find((row) => row.function === group.function);
+    if (!expected || seen.has(group.function)) fail('lint contains an unknown or duplicate function');
+    seen.add(group.function);
+    if (!Array.isArray(group.issues) || group.issues.length !== expected.issues.length) fail('unexpected approved warning count');
+    const issuesSeen = new Set();
+    for (const actual of group.issues) {
+      const match = expected.issues.find((allowed) => same(actual, allowed));
+      if (!match) fail('unknown or changed warning diagnostic');
+      exactKeys(actual, Object.keys(match), 'lint warning');
+      const key = JSON.stringify(canonical(actual));
+      if (issuesSeen.has(key)) fail('duplicate warning diagnostic');
+      issuesSeen.add(key);
+      warningCount++;
+    }
+  }
+  if (warningCount !== FINAL_EXPECTED_WARNING_COUNT) fail('strict lint must contain exactly nineteen approved warnings');
+  return warningCount;
+}
+
+export function validateFinalInstalledCatalog(raw) {
+  const rows = parseArray(raw, 'installed function catalog');
+  if (rows.length !== FINAL_EXPECTED_CATALOG.length) fail('installed catalog has missing functions or additional overloads');
+  const seen = new Set();
+  for (const row of rows) {
+    if (!isRecord(row)) fail('installed function catalog row must be an object');
+    const expected = FINAL_EXPECTED_CATALOG.find((entry) => entry.function === row.function);
+    if (!expected || seen.has(row.function)) fail('installed catalog has an unknown function or duplicate overload');
+    exactKeys(row, Object.keys(expected), 'installed function catalog row');
+    seen.add(row.function);
+    if (!same(row, expected)) fail('installed source or catalog drift');
+  }
+  return rows.length;
+}
+
 export function validateLocalDockerEndpoint(raw) {
   let endpoint;
   try { endpoint = JSON.parse(raw); } catch { fail('Docker endpoint is not JSON'); }
@@ -266,5 +368,15 @@ export function validateLintBaseline({ lint, catalog }) {
   validateProcessResult(catalog, 0, 'installed function catalog');
   if (catalog.stderr !== '') fail('installed function catalog emitted a diagnostic');
   const functionCount = validateInstalledCatalog(catalog.stdout);
+  return Object.freeze({ rawStrictResult: 'FAIL', rawStrictExitCode: 1, acceptedWarningCount: warningCount, catalogFunctionCount: functionCount });
+}
+
+export function validateFinalLintBaseline({ lint, catalog }) {
+  validateProcessResult(lint, 1, 'original strict lint');
+  validateLintStderr(lint.stderr);
+  const warningCount = validateFinalLintWarnings(lint.stdout);
+  validateProcessResult(catalog, 0, 'installed function catalog');
+  if (catalog.stderr !== '') fail('installed function catalog emitted a diagnostic');
+  const functionCount = validateFinalInstalledCatalog(catalog.stdout);
   return Object.freeze({ rawStrictResult: 'FAIL', rawStrictExitCode: 1, acceptedWarningCount: warningCount, catalogFunctionCount: functionCount });
 }

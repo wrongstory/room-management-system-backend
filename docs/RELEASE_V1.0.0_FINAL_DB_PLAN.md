@@ -1,5 +1,18 @@
 # v1.0.0 최종 DB 검증 계획 — 객실 고정 메모 포함
 
+## 2026-11-02 현재 — D03-L A 승인, 새 통합 입력 준비
+
+FINAL-144-R3/run41353299781은 TLS/atomic21 PASS 후 strict lint에서 FAIL했고 승인은 소모됐다.
+사용자가 #558의 정확 clock10 정책과 소스 보완을 승인했다. 과거 compatibility9는 보존한다.
+현재 승인 범위는 DB 없는 검증·독립 QA·개발 통합·다음 실행안 준비다. DB 재실행과 release
+push 및 운영 migration은 승인되지 않았다. 아래144개 계획은 이전 입력의 범위 기록이다.
+
+최신 dev PR556과 #558/#559 보완을 통합한 후 정확한 migration/SQL/검증 파일 목록과
+후보·tree·입력 지문·bundle을 다시 계산한다. 새 실행안은 USER_DECISIONS.md에 확정하며,
+기존 R1/R2/R3 실패나 다른 입력의 성공을 재사용하지 않는다. 실제 수정 후 lint·SQL·RLS·
+경합과 canonical receipt byte 동등성은 새 승인 전 NOT RUN이다.
+
+
 ## 상태와 확정 범위 (2026-11-02)
 
 사용자 결정: “#396은 진단·안전장치만 v1.0.0에 포함하고 실제 초기화는 운영사 인계 전

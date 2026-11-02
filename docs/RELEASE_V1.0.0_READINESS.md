@@ -1,5 +1,19 @@
 # v1.0.0 개발·배포 준비 상태
 
+## 2026-11-02 — R3 실패 후 승인된 검사 정책 보완
+
+R3 run41353299781 attempt1은 설치·checkpoint·catalog/HOLD6·template·TLS/atomic21 PASS 후
+strict lint의 추가 경고로 FAIL했다. 후속 SQL·upgrade·경합 및 성공 proof는 미실행이다.
+원시 경고 30건 중 기존 허용9건을 제외한21건을 검토했고, D03-L A 승인에 따라
+불필요한 변수·명시 형변환·immutable 문자열 JSON 생성 보완과 정확 clock10 정책을 준비한다.
+실제 새 DB 검증은 NOT RUN이며 R3 승인은 소모됐다.
+
+최신 dev의 PR556 이번 주 근무가능일 관리자 승인 기능도 후보 통합 대상이다. 그 내부
+미사용 인자는 #559에서 별도 보완하며 검사 예외를 늘리지 않는다. 최종 migration/SQL 목록·
+번들·커밋·입력 지문은 모든 보완과 독립 QA 후 다시 확정한다. 이전144개 계획은 새 입력이 아니다.
+단일 USER_DECISIONS.md에 새1회안을 고정한 뒤 별도 승인을 받는다. 운영 적용도 별도 승인이다.
+
+
 ## 2026-11-02 격리 검증 R2 실패와 atomic fixture 보완
 
 승인된 FINAL-144-R2는 PR553/run41348857034 attempt1에서 FAIL로 종료됐다. source3c89df1,
