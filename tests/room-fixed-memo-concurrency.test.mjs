@@ -125,7 +125,7 @@ describe('#551 prepared actual concurrency (DB/SQL NOT RUN)', () => {
     for (const statement of statements) expect((await parse(statement)).stmts.length).toBeGreaterThan(0);
     const runner = read('scripts/test-reservation-concurrency.mjs');
     expect(runner).toContain('await testRoomFixedMemoConcurrency(status.DB_URL,actorProfileId);');
-    expect(JSON.parse(read('package.json')).scripts['db:test:concurrency'].split(' && ')).toHaveLength(12);
+    expect(JSON.parse(read('package.json')).scripts['db:test:concurrency'].split(' && ')).toHaveLength(13);
     expect(source).not.toMatch(/execFile|spawn\(|process\.argv|supabase.*start|db[', ]+reset/);
     expect(Client).not.toHaveBeenCalled();
   });

@@ -219,12 +219,12 @@ describe('GitHub Pages Swagger portal', () => {
       '--expected-version', '0.6.0', '--output-dir', outputDirectory
     ];
     const result = await execFileAsync(process.execPath, [
-      ...args, '--expected-path-count', '160', '--expected-operation-count', '173'
+      ...args, '--expected-path-count', '161', '--expected-operation-count', '174'
     ]);
-    expect(result.stdout).toContain('version=0.6.0 paths=160 operations=173');
+    expect(result.stdout).toContain('version=0.6.0 paths=161 operations=174');
     const manifest = JSON.parse(await readFile(join(outputDirectory, 'portal-manifest.json'), 'utf8'));
     expect(manifest).toMatchObject({
-      apiVersion: '0.6.0', pathCount: 160, operationCount: 173, readOnly: true
+      apiVersion: '0.6.0', pathCount: 161, operationCount: 174, readOnly: true
     });
     await expect(execFileAsync(process.execPath, [
       ...args, '--expected-path-count', '131', '--expected-operation-count', '141'

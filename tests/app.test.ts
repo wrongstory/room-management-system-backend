@@ -393,6 +393,7 @@ function services(): AppServices {
       listCandidates: vi.fn(async () => [])
     },
     rooms: {
+      setTypeCleaningFee: vi.fn(),
       listTypes: vi.fn(async () => [
         { id: '10000000-0000-4000-8000-000000000001', code: 'oceanFamily', displayName: '파셜 오션뷰 패밀리 투룸 로프트', baseCleaningFee: 30000, baseOccupancy: 4, maxOccupancy: 6, active: true, version: 1, roomCount: 35 },
         { id: '10000000-0000-4000-8000-000000000002', code: 'oceanPremium', displayName: '파셜 오션뷰 프리미어 더블 로프트', baseCleaningFee: 20000, baseOccupancy: 2, maxOccupancy: 4, active: true, version: 1, roomCount: 13 },
@@ -2710,6 +2711,46 @@ describe('#551 room fixed memo HTTP',()=>{
    const write=await app.inject({method:'PUT',url,headers,payload:{memo:result.memo,expectedVersion:0}});expect(write.statusCode).toBe(role==='admin'?200:403);
    if(role==='maid')expect(appServices.rooms.setFixedMemo).not.toHaveBeenCalled();
    expect((await app.inject({method:'GET',url:url+'?actorId=spoof',headers})).statusCode).toBe(400);
+  }finally{await app.close();}
+ });
+});
+
+describe('admin room-type fee HTTP contract577',()=>{
+ const typeId='10000000-0000-4000-8000-000000000004';
+ it('routes only the confirmed fee command with no-store and Idempotency-Key',async()=>{
+  const appServices=services();const body={baseCleaningFee:18000,expectedVersion:1,confirmFutureTargetsOnly:true};
+  vi.mocked(appServices.rooms.setTypeCleaningFee).mockResolvedValue({roomTypeId:typeId,baseCleaningFee:18000,version:2,effectiveFor:'NEW_TARGETS_ONLY'});
+  const app=await buildApp({env,services:appServices,logger:false});
+  try {const response=await app.inject({method:'PUT',url:`/v1/room-types/${typeId}/cleaning-fee`,headers:{authorization:'Bearer access-token','idempotency-key':'fee577-http'},payload:body});
+   expect(response.statusCode).toBe(200);expect(response.headers['cache-control']).toBe('no-store');
+   expect(appServices.rooms.setTypeCleaningFee).toHaveBeenCalledWith(expect.objectContaining({role:'admin'}),{roomTypeId:typeId,body,idempotencyKey:'fee577-http'});
+   expect((await app.inject({method:'PUT',url:`/v1/room-types/${typeId}/cleaning-fee?reprice=true`,headers:{authorization:'Bearer access-token','idempotency-key':'fee577-query'},payload:body})).statusCode).toBe(400);
+  } finally {await app.close();}
+ });
+ it('rejects maid and absent request key without calling the mutation',async()=>{
+  const appServices=services();const app=await buildApp({env,services:appServices,logger:false});
+  try {expect((await app.inject({method:'PUT',url:`/v1/room-types/${typeId}/cleaning-fee`,headers:{authorization:'Bearer access-token'},payload:{}})).statusCode).toBe(400);
+   vi.mocked(appServices.auth.authenticate).mockResolvedValue({authUserId:typeId,profileId:typeId,role:'maid',displayName:'합성',mustChangePassword:false,accessToken:'synthetic'});
+   expect((await app.inject({method:'PUT',url:`/v1/room-types/${typeId}/cleaning-fee`,headers:{authorization:'Bearer access-token','idempotency-key':'fee577-forbidden'},payload:{}})).statusCode).toBe(403);
+   expect(appServices.rooms.setTypeCleaningFee).not.toHaveBeenCalled();
+  } finally {await app.close();}
+ });
+});
+
+describe('fee577 pre-handler safety boundary',()=>{
+ const url='/v1/room-types/10000000-0000-4000-8000-000000000004/cleaning-fee';
+ it('returns no-store auth/role/password failures before any mutation',async()=>{
+  const appServices=services();const app=await buildApp({env,services:appServices,logger:false});
+  try {for(const scenario of [{role:'admin',password:false,auth:false,status:401},{role:'maid',password:false,auth:true,status:403},{role:'developer',password:false,auth:true,status:403},{role:'admin',password:true,auth:true,status:403}] as const){
+   vi.mocked(appServices.auth.authenticate).mockResolvedValue({authUserId:'10000000-0000-4000-8000-000000000004',profileId:'10000000-0000-4000-8000-000000000004',role:scenario.role,displayName:'합성',accessToken:'synthetic',mustChangePassword:scenario.password});
+   const response=await app.inject({method:'PUT',url,headers:scenario.auth?{authorization:'Bearer access-token','idempotency-key':'fee577-boundary'}:{},payload:{}});
+   expect(response.statusCode).toBe(scenario.status);expect(response.headers['cache-control']).toBe('no-store');
+  }expect(appServices.rooms.setTypeCleaningFee).not.toHaveBeenCalled();}finally{await app.close();}
+ });
+ it.each(['','{"private":"PRIVATE_FEE_BODY_CANARY",'])('returns safe400/no-store on malformed JSON %j',async payload=>{
+  const appServices=services();const app=await buildApp({env,services:appServices,logger:false});
+  try{const response=await app.inject({method:'PUT',url,headers:{authorization:'Bearer access-token','idempotency-key':'fee577-malformed','content-type':'application/json'},payload});
+   expect(response.statusCode).toBe(400);expect(response.headers['cache-control']).toBe('no-store');expect(response.json().error.code).toBe('ROOM_TYPE_CLEANING_FEE_INVALID');expect(response.body).not.toContain('PRIVATE_FEE_BODY_CANARY');expect(appServices.rooms.setTypeCleaningFee).not.toHaveBeenCalled();
   }finally{await app.close();}
  });
 });

@@ -575,7 +575,7 @@ function parseSnapshot(input: unknown): PreviewSnapshot {
       roomNumber: str(t.roomNumber),
       roomTypeCode: rt as RoomType,
       elevatorZone: str(t.elevatorZone),
-      feeSnapshot: integer(t.feeSnapshot),
+      feeSnapshot: integer(t.feeSnapshot, 0, 1073741823),
       availableFrom: timestamp(t.availableFrom),
       dueAt: t.dueAt == null ? null : timestamp(t.dueAt),
       serviceDate: date(t.serviceDate),

@@ -1,3 +1,7 @@
+## #577 관리자 타입별 단가 변경 추가
+
+사용자 선택으로 v1.0.0에 `PUT /v1/room-types/{roomTypeId}/cleaning-fee`를 추가한다. 기존 GET의 가격/version으로 확인하고 `baseCleaningFee`·`expectedVersion`·`confirmFutureTargetsOnly:true`와 Idempotency-Key를 보낸다. 기존 미래청소/진행청소/확정수당은 유지한다. 성공·재전송·409 후 목록을 새로 조회한다. API source는161paths/174operations다. 프런트정본의기준snapshot을 임의변경하지않으며 관리자화면연결/활성화/실사용은미완료다. [전체계약·운영경계](ROOM_TYPE_CLEANING_FEE_577.md)를 따른다.
+
 # 프론트엔드·Codex API 연동 가이드
 
 ## 2026-10-31 #534 배정 메모 v1.0.0 인계 — dev 병합·운영 미배포

@@ -1,3 +1,7 @@
+## #577 타입별 단가 변경
+
+room_types의 기존 base_cleaning_fee/version과 audit_events/command receipt를 사용한다. 새 관계나 원장 대체는 없다. admin만 catalog를 수정하고 이미 생성된 cleaning_targets.fee_snapshot/earnings/payroll은 보존한다. 실제 DB 검증·운영 적용은 별도 승인 전 미실행이다. [계약](ROOM_TYPE_CLEANING_FEE_577.md).
+
 # Room Management System ERD 초안
 
 ## #534 청소 배정 메모 — 미배포 후보

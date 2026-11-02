@@ -518,6 +518,25 @@ update public.room_types set name=name||'-changed',base_cleaning_fee=base_cleani
 select is(pg_temp.work_read(-4),(select value from work_checkpoints where label='before-catalog'),
   'live catalog name/fee changes never rewrite frozen detail or historical amounts');
 
+-- BEGIN #577 FEE COMMAND PRESERVATION
+insert into work_checkpoints values('fee-command-ledgers',jsonb_build_object(
+  'earnings',(select jsonb_agg(to_jsonb(e) order by id) from public.earnings e),
+  'cycles',(select jsonb_agg(to_jsonb(c) order by id) from public.payroll_cycles c),
+  'items',(select jsonb_agg(to_jsonb(i) order by earning_id) from public.payroll_items i)));
+select public.set_room_type_cleaning_fee(pg_temp.work_id(1),pg_temp.work_id(401),id,version,base_cleaning_fee+2000,
+  true,'fee577-paid-preserve-up',repeat('a',64)) from public.room_types where code='standard';
+select is(pg_temp.work_read(-4),(select value from work_checkpoints where label='before-catalog'),
+  'admin fee increase preserves paid historical detail and amounts');
+select public.set_room_type_cleaning_fee(pg_temp.work_id(1),pg_temp.work_id(401),id,version,0,
+  true,'fee577-paid-preserve-zero',repeat('b',64)) from public.room_types where code='standard';
+select is(pg_temp.work_read(-4),(select value from work_checkpoints where label='before-catalog'),
+  'admin fee reduction to zero preserves historical detail and amounts');
+select is(jsonb_build_object('earnings',(select jsonb_agg(to_jsonb(e) order by id) from public.earnings e),
+  'cycles',(select jsonb_agg(to_jsonb(c) order by id) from public.payroll_cycles c),
+  'items',(select jsonb_agg(to_jsonb(i) order by earning_id) from public.payroll_items i)),
+  (select value from work_checkpoints where label='fee-command-ledgers'),'admin catalog fee changes preserve every full earning/cycle/item row');
+-- END #577 FEE COMMAND PRESERVATION
+
 select public.carry_forward_payroll_cycle(pg_temp.work_id(1),pg_temp.work_id(11),pg_temp.work_week(-7),0,
   'work-empty-offset',repeat('7',64));
 select pg_temp.work_add_earning(200,11,pg_temp.work_week(-7)+1,1000);

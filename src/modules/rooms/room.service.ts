@@ -1,3 +1,4 @@
+import { feeRoomTypeId, parseRoomTypeFeeInput, parseRoomTypeFeeResult, RoomTypeFeeError, type RoomTypeFeeResult } from './room-type-fee-contract.js';
 import { fixedMemoErrors, fixedMemoRoomId, parseRoomFixedMemo, parseRoomFixedMemoInput, RoomFixedMemoError, type RoomFixedMemo } from './room-fixed-memo-contract.js';
 import { parseRoomArrival, type RoomArrival } from './room-arrival-contract.js';
 import { randomInt, randomUUID } from 'node:crypto';
@@ -441,6 +442,7 @@ export interface RoomEventsResult {
 
 export interface RoomService {
   getFixedMemo(actor: Actor, roomId: string): Promise<RoomFixedMemo>;
+  setTypeCleaningFee(actor: Actor, input: {roomTypeId: string; body: unknown; idempotencyKey: string}): Promise<RoomTypeFeeResult>;
   setFixedMemo(actor: Actor, input: {roomId: string; body: unknown; idempotencyKey: string}): Promise<RoomFixedMemo>;
   previewReadyCorrection(actor: Actor, input: RoomReadyPreviewRequest & { roomId: string }): Promise<RoomReadyPreview>;
   applyReadyCorrection(actor: Actor, input: RoomReadyCorrectionRequest & { roomId: string; idempotencyKey: string }): Promise<RoomReadyCorrectionResult>;
@@ -1136,6 +1138,31 @@ export class SupabaseRoomService implements RoomService {
       throw new AppError(403, 'PIN_REVEAL_AUTHORIZATION_CHANGED', 'PIN 열람 권한이 변경되었습니다.');
     }
     return { roomId, credential, pinVersion: Number(row.pin_version), clearAfterSeconds, expiresAt };
+  }
+
+  async setTypeCleaningFee(actor: Actor, input: {roomTypeId: string; body: unknown; idempotencyKey: string}): Promise<RoomTypeFeeResult> {
+    ensureAdmin(actor);
+    if (actor.mustChangePassword) throw new AppError(403,'PASSWORD_CHANGE_REQUIRED','비밀번호를 먼저 변경해 주세요.');
+    try {
+      const roomTypeId = feeRoomTypeId(input.roomTypeId), parsed = parseRoomTypeFeeInput(input.body);
+      const {data,error} = await this.clients.admin.rpc('set_room_type_cleaning_fee', {
+        p_actor_profile_id: actor.profileId, p_session_id: verifiedSessionId(actor.accessToken),
+        p_room_type_id: roomTypeId, p_expected_version: parsed.expectedVersion,
+        p_base_cleaning_fee: parsed.baseCleaningFee, p_confirm_future_targets_only: parsed.confirmFutureTargetsOnly,
+        p_idempotency_key: input.idempotencyKey, p_request_hash: requestHash({roomTypeId,...parsed})
+      });
+      if (error) {
+        if (error.message?.includes('ROOM_TYPE_CLEANING_FEE_INVALID')) throw new AppError(400,'ROOM_TYPE_CLEANING_FEE_INVALID','청소 단가와 적용 범위 확인을 확인해 주세요.');
+        if (error.message?.includes('ROOM_TYPE_NOT_FOUND')) throw new AppError(404,'ROOM_TYPE_NOT_FOUND','객실 타입을 찾을 수 없습니다.');
+        throw roomError(error);
+      }
+      return parseRoomTypeFeeResult(data,roomTypeId,parsed);
+    } catch (error) {
+      if (error instanceof RoomTypeFeeError) throw new AppError(error.output?500:400,
+        error.output?'ROOM_TYPE_CLEANING_FEE_RESPONSE_INVALID':'ROOM_TYPE_CLEANING_FEE_INVALID',
+        error.output?'청소 단가 변경 결과를 확인하지 못했습니다.':'청소 단가와 적용 범위 확인을 확인해 주세요.');
+      throw error;
+    }
   }
 
   async listTypes(actor: Actor): Promise<RoomTypeCatalogItem[]> {

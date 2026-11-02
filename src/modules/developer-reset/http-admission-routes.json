@@ -1464,5 +1464,20 @@
     "hashArgs": {},
     "keyArgument": "p_idempotency_key",
     "sqlExtension": "ROOM_FIXED_MEMO_551"
+  },
+  {
+    "method": "PUT",
+    "path": "/v1/room-types/{roomTypeId}/cleaning-fee",
+    "routeId": "setRoomTypeCleaningFee",
+    "kind": "BUSINESS_WRITE",
+    "authority": "ACTIVE_SESSION",
+    "rpc": "set_room_type_cleaning_fee",
+    "commandName": "room_type.cleaning_fee.set",
+    "rpcAliases": [],
+    "bindings": {},
+    "hashMode": "CALLER",
+    "hashArgs": {},
+    "keyArgument": "p_idempotency_key",
+    "sqlExtension": "ROOM_TYPE_CLEANING_FEE_577"
   }
 ]

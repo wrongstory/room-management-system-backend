@@ -10,8 +10,10 @@ describe('#336 race runner pure preflight/source checks, NOT actual DB/race exec
   it('runs the actual runner after existing races in the required migration CI command', async () => {
     const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
     const commands = pkg.scripts['db:test:concurrency'].split(' && ');
-    expect(commands.slice(-2)).toEqual(['node scripts/test-post-approval-room-issue-concurrency.mjs',
+    expect(commands.slice(-3,-1)).toEqual(['node scripts/test-post-approval-room-issue-concurrency.mjs',
       'node scripts/test-auth-context-concurrency.mjs']);
+    expect(commands.at(-1)).toBe('node scripts/test-room-type-fee-concurrency.mjs');
+    expect(commands).toHaveLength(13);
     expect(commands.filter((command: string) => command.includes('test-post-approval-room-issue-concurrency.mjs'))).toHaveLength(1);
     for (const name of ['reservation', 'limited-existing-session', 'room-candle', 'photo-storage-names']) {
       expect(commands).toContain(`node scripts/test-${name}-concurrency.mjs`);
