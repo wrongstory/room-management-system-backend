@@ -1140,10 +1140,13 @@ Deno.test("OpenAPI publishes bearer and idempotency contracts", async () => {
     "assignment draft and commit concurrency errors must be documented",
   );
   assert(
-    serialized.includes('"AVAILABILITY_WEEK_OUT_OF_RANGE"') &&
+    document.components.schemas.ErrorCode.enum.includes(
+      "AVAILABILITY_APPROVAL_REQUIRED",
+    ) &&
+      serialized.includes('"AVAILABILITY_WEEK_OUT_OF_RANGE"') &&
       serialized.includes('"PAST_AVAILABILITY_DATE_NOT_ALLOWED"') &&
       serialized.includes('"STALE_VERSION"'),
-    "availability KST week, past-date, and CAS errors must be documented",
+    "availability approval, KST week, past-date, and CAS errors must be documented",
   );
   assert(
     serialized.includes('"#/components/schemas/ReservationDetail"') &&
