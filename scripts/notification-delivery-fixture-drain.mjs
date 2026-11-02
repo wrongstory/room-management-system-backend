@@ -51,6 +51,19 @@ select jsonb_build_object(
   'invalidJobs',j.invalid_jobs,'invalidTargets',t.invalid
 )::text from drain_jobs j cross join drain_counts t;`;
 
+// Full initial census includes blocked and terminal rows excluded from claims.
+// One statement gives the census and the original drain projection one snapshot.
+export const DELIVERY_FRESH_SUMMARY_SQL = `with initial_summary(value) as (
+${DELIVERY_DRAIN_SUMMARY_SQL.trim().slice(0, -1)}
+)
+select jsonb_build_object('summary',value::jsonb,
+  'outboxes',(select count(*) from private.notification_delivery_outbox),
+  'jobs',(select count(*) from private.notification_delivery_jobs),
+  'targets',(select count(*) from private.notification_delivery_targets),
+  'attempts',(select count(*) from private.notification_delivery_attempts),
+  'events',(select count(*) from private.notification_delivery_events)
+)::text from initial_summary;`;
+
 const isRecord = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const exactKeys = (value, keys) => isRecord(value) && Object.keys(value).length === keys.length
   && keys.every(key => Object.hasOwn(value, key));
@@ -109,6 +122,25 @@ function checkpoint(code, passes, summary) {
   // Only fixed field names, finite counts and a bounded pass number reach logs.
   const safe = Object.fromEntries(SUMMARY_KEYS.map(key => [key, summary[key]]));
   return `Notification delivery fixture drain: ${code}; passes=${passes}; ${JSON.stringify(safe)}`;
+}
+
+// This suite now runs before unrelated business fixtures. A fresh start must
+// have no outstanding delivery state, including work the claim RPC excludes.
+export function assertQuiescentDeliveryFixture(raw) {
+  const initial = parseJson(raw, 16384, 'INITIAL_CENSUS_INVALID');
+  const keys = ['outboxes', 'jobs', 'targets', 'attempts', 'events'];
+  if (!exactKeys(initial, ['summary', ...keys]) || !keys.every(key => count(initial[key]))) {
+    throw failure('INITIAL_CENSUS_INVALID');
+  }
+  const summary = parseDeliveryDrainSummary(JSON.stringify(initial.summary));
+  const census = Object.freeze(Object.fromEntries(keys.map(key => [key, initial[key]])));
+  if (keys.some(key => census[key] !== 0)) {
+    throw new Error(`Notification delivery fixture drain: INITIAL_STATE_NOT_QUIESCENT; passes=0; ${JSON.stringify(census)}`);
+  }
+  if (SUMMARY_KEYS.some(key => summary[key] !== 0)) {
+    throw new Error(checkpoint('INITIAL_STATE_NOT_QUIESCENT', 0, summary));
+  }
+  return { summary, census };
 }
 
 export async function drainNotificationDeliveryFixtures(options) {

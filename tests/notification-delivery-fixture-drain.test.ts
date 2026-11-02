@@ -7,9 +7,10 @@ import { describe, expect, it, vi } from 'vitest';
 
 const helperModule = '../scripts/notification-delivery-fixture-drain.mjs';
 const {
-  DELIVERY_DRAIN_PASS_LIMIT, DELIVERY_DRAIN_CLAIM_LIMIT, DELIVERY_DRAIN_SUMMARY_SQL,
+  DELIVERY_DRAIN_PASS_LIMIT, DELIVERY_DRAIN_CLAIM_LIMIT, DELIVERY_DRAIN_SUMMARY_SQL, DELIVERY_FRESH_SUMMARY_SQL,
   DELIVERY_DRAIN_PREDICATE_PROBE_SQL, parseDeliveryDrainSummary,
   validateDeliveryDrainClaim, drainNotificationDeliveryFixtures, assertDeliveryDrainPredicateProbe,
+  assertQuiescentDeliveryFixture,
 } = await import(helperModule);
 
 // Independent fixtures, not implementation constants or a second production
@@ -25,6 +26,8 @@ const quiet = (): Summary => ({
   futureTargets: 0, liveClaimTargets: 0, invalidJobs: 0, invalidTargets: 0,
 });
 const raw = (summary: Summary) => JSON.stringify(summary);
+const census = () => ({ outboxes: 0, jobs: 0, targets: 0, attempts: 0, events: 0 });
+const fresh = (summary = quiet(), rows = census()) => JSON.stringify({ summary, ...rows });
 const pending = (): Summary => ({ ...quiet(), pendingJobs: 1 });
 const due = (kind: 'duePendingTargets' | 'dueRetryTargets' | 'expiredClaimTargets'): Summary => ({
   ...quiet(), claimableTargets: 1, [kind]: 1,
@@ -37,6 +40,39 @@ const workload = () => ({
 });
 
 describe('notification delivery fixture drain fixed contract', () => {
+  it('requires an explicitly empty initial inventory without treating exclusion as completion', () => {
+    expect(assertQuiescentDeliveryFixture(fresh())).toEqual({ summary: quiet(), census: census() });
+  });
+  it.each([
+    pending(), due('duePendingTargets'), due('dueRetryTargets'), due('expiredClaimTargets'),
+    { ...quiet(), blockedDueTargets: 1 }, { ...quiet(), otherParentDueTargets: 1 },
+    { ...quiet(), futureTargets: 1 }, { ...quiet(), liveClaimTargets: 1 },
+  ])('rejects any outstanding initial delivery state (%#)', state => {
+    expect(() => assertQuiescentDeliveryFixture(fresh(state)))
+      .toThrow('INITIAL_STATE_NOT_QUIESCENT; passes=0;');
+  });
+  it.each([
+    ['blocked-only job and target', { ...census(), jobs: 1, targets: 1 }],
+    ['blocked parent with future or live sibling', { ...census(), jobs: 1, targets: 2 }],
+    ['terminal history', { outboxes: 1, jobs: 1, targets: 1, attempts: 1, events: 2 }],
+    ['outbox without materialized job', { ...census(), outboxes: 1 }],
+    ['orphan target', { ...census(), targets: 1 }],
+    ['orphan attempt', { ...census(), attempts: 1 }],
+    ['orphan event', { ...census(), events: 1 }],
+  ])('rejects %s even when every claim classification is zero', (_name, rows) => {
+    expect(() => assertQuiescentDeliveryFixture(fresh(quiet(), rows)))
+      .toThrow('INITIAL_STATE_NOT_QUIESCENT; passes=0;');
+  });
+  it.each(['{}', 'null', JSON.stringify({ summary: quiet(), ...census(), extra: 0 }),
+    JSON.stringify({ summary: quiet(), ...census(), jobs: -1 })])('rejects an invalid initial census (%#)', input => {
+    expect(() => assertQuiescentDeliveryFixture(input)).toThrow('INITIAL_CENSUS_INVALID');
+  });
+  it('counts every delivery ledger row in the same initial statement without filtering status', () => {
+    for (const relation of ['outbox', 'jobs', 'targets', 'attempts', 'events']) {
+      expect(DELIVERY_FRESH_SUMMARY_SQL).toContain(`(select count(*) from private.notification_delivery_${relation})`);
+    }
+    expect(DELIVERY_FRESH_SUMMARY_SQL).toContain(DELIVERY_DRAIN_SUMMARY_SQL.trim().slice(0, -1));
+  });
   it('preserves finite 100 passes / limit10 and checks parent plus fresh-claim time boundaries', () => {
     expect(DELIVERY_DRAIN_PASS_LIMIT).toBe(100);
     expect(DELIVERY_DRAIN_CLAIM_LIMIT).toBe(10);
@@ -217,12 +253,26 @@ describe('isolated SQL predicate probe and existing concurrency integration', ()
     expect(source).toContain('sql(DELIVERY_DRAIN_PREDICATE_PROBE_SQL)');
     expect(source).toContain('assertDeliveryDrainPredicateProbe(predicateProbe)');
     expect(source).toContain('await drainNotificationDeliveryFixtures({');
-    expect(source).toContain('readSummary: () => sql(DELIVERY_DRAIN_SUMMARY_SQL)');
+    expect(source).toContain('initialRaw = sql(DELIVERY_FRESH_SUMMARY_SQL)');
+    expect(source).toContain('assertQuiescentDeliveryFixture(initialRaw)');
+    expect(source).toContain('initialSummary = undefined;');
+    expect(source).toContain('return sql(DELIVERY_DRAIN_SUMMARY_SQL)');
     expect(source).toMatch(/digest\(`drain:\$\{randomUUID\(\)\}`\)/);
     expect(source).not.toContain("assert(pass < 99, 'bounded delivery fixture drain converges')");
     expect(source).toContain('const crossRaceRounds = 6;');
     expect(source).toContain('parallel claim owns target exactly once:');
     expect(source).toContain('claim/resume cross races create one unique provider permit per round');
+  });
+
+  it('runs delivery races exactly once after the admin exists and before business fixture producers', () => {
+    const source = readFileSync(new URL('../scripts/test-reservation-concurrency.mjs', import.meta.url), 'utf8');
+    const call = 'await testNotificationDeliveryConcurrency(client);';
+    expect(source.split(call)).toHaveLength(2);
+    const position = source.indexOf(call);
+    expect(position).toBeGreaterThan(source.indexOf('assert(!profileError,'));
+    expect(position).toBeLessThan(source.indexOf('const loginClient ='));
+    expect(position).toBeLessThan(source.indexOf('const standardPublishRace ='));
+    expect(position).toBeLessThan(source.indexOf('await testReservationRoomMoveConcurrency('));
   });
 
   it.each([
@@ -250,8 +300,8 @@ describe('isolated SQL predicate probe and existing concurrency integration', ()
     try {
       const run = runInNewContext(`${controlledProgram}\ntestNotificationDeliveryConcurrency;`, {
         execFileSync: execute, execFile: vi.fn(), promisify, createHash, randomUUID, Buffer,
-        assertDeliveryDrainPredicateProbe, DELIVERY_DRAIN_PREDICATE_PROBE_SQL,
-        DELIVERY_DRAIN_SUMMARY_SQL, drainNotificationDeliveryFixtures,
+        assertDeliveryDrainPredicateProbe, assertQuiescentDeliveryFixture, DELIVERY_DRAIN_PREDICATE_PROBE_SQL,
+        DELIVERY_DRAIN_SUMMARY_SQL, DELIVERY_FRESH_SUMMARY_SQL, drainNotificationDeliveryFixtures,
       }, { timeout: 1000 });
       const client = {
         auth: { admin: { createUser: async () => ({ error: null }) } },
