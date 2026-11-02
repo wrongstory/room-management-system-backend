@@ -21,9 +21,10 @@ function checkExpectedCount(expectedCount) {
   // 141 only observes an existing offline resolution terminal; no family is added.
   // 142 settles a password effect using the existing account.password_changed event.
   // 143 is an arrival read projection; it adds no event or catalog writes.
-  // 145 adds room memo revisions but no notification families.
-  assert(Number.isSafeInteger(expectedCount) && expectedCount >= 95 && expectedCount <= 145,
-    'Only the audited95..145 upgrade range is supported; 112..145 add no catalog rows');
+  // 144 adds room memo revisions; 145 changes current-week approval timing.
+  // 146 replaces six existing function bodies without adding catalog rows.
+  assert(Number.isSafeInteger(expectedCount) && expectedCount >= 95 && expectedCount <= 146,
+    'Only the audited95..146 upgrade range is supported; 112..146 add no catalog rows');
 }
 function catalogRows(value) {
   assert(Array.isArray(value), 'An existing baseline notification catalog is required');

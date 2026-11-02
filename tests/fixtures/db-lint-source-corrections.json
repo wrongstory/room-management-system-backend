@@ -1,0 +1,215 @@
+{
+  "schemaVersion": 1,
+  "migration": "supabase/migrations/20261101235131_db_lint_source_corrections.sql",
+  "decisionIssue": 558,
+  "priorMigrationCount": 145,
+  "priorManifestPrefixSha256": "9c33502a24d431528758021dc8af087e67826c674aa5596d672e092883deed96",
+  "reviewedProposalSha256": "da9e5508c334d7ff30aca5272de9ca5be6ef11b580ee13a0a11ad9290365f5cf",
+  "functions": [
+    {
+      "identity": "public.get_developer_reset_preview(uuid,uuid,text)",
+      "originPath": "supabase/migrations/20261025024327_developer_reset_row_impact.sql",
+      "beforeSha256": "9eaf597ac996a24b565116853dbc5d84e497d357c80260144ba7bd66f97a9110",
+      "afterSha256": "642a8dffcebba66adf8191e3f53051245506ceb104ef911890c34ced3673d6d7",
+      "volatility": "v",
+      "securityDefiner": true,
+      "strict": false,
+      "returnType": "jsonb",
+      "argumentNames": [
+        "p_auth_user_id",
+        "p_actor_profile_id",
+        "p_session_id"
+      ],
+      "settings": [
+        "search_path=pg_catalog",
+        "statement_timeout=7s"
+      ],
+      "acl": [
+        "postgres=X/postgres",
+        "service_role=X/postgres"
+      ],
+      "edits": [
+        {
+          "id": "remove_shadowed_pass",
+          "before": "declare context jsonb; result jsonb; pass integer;",
+          "after": "declare context jsonb; result jsonb;",
+          "occurrences": 1,
+          "observedWarningsTargeted": 2
+        }
+      ]
+    },
+    {
+      "identity": "public.admit_photo_collection_upload_batch(uuid,uuid,uuid,uuid,bigint,uuid,bigint,jsonb,text,text)",
+      "originPath": "supabase/migrations/20261025022445_photo_collection_upload_batch.sql",
+      "beforeSha256": "d0b73946bff39427704de5ffd681c8a3005d78ce7bfe103c6c7c6c454ab7fffe",
+      "afterSha256": "bf965406076dd80eab77d516831f70bc372aa94674e8045eb2ea5c10d7549aed",
+      "volatility": "v",
+      "securityDefiner": true,
+      "strict": false,
+      "returnType": "jsonb",
+      "argumentNames": [
+        "p_actor_profile_id",
+        "p_session_id",
+        "p_attempt_id",
+        "p_assignment_id",
+        "p_assignment_revision",
+        "p_target_slot_id",
+        "p_expected_collection_revision",
+        "p_items",
+        "p_idempotency_key_digest",
+        "p_request_hash"
+      ],
+      "settings": [
+        "search_path=\"\""
+      ],
+      "acl": [
+        "postgres=X/postgres",
+        "service_role=X/postgres"
+      ],
+      "edits": [
+        {
+          "id": "explicit_empty_result_jsonb",
+          "before": "result jsonb:='[]';",
+          "after": "result jsonb:='[]'::jsonb;",
+          "occurrences": 1,
+          "observedWarningsTargeted": 1
+        }
+      ]
+    },
+    {
+      "identity": "private.collect_developer_reset_template_inventory()",
+      "originPath": "supabase/migrations/20261025031218_developer_reset_template_inventory.sql",
+      "beforeSha256": "d58488be97b49c437ad1f279f800b273368dacd764a36ba862d7e8535c4ea936",
+      "afterSha256": "6370c825c1c6eb8b528fba5f4e6801c1c2f8c4768e78dd5b7de566c36cb0699d",
+      "volatility": "s",
+      "securityDefiner": true,
+      "strict": false,
+      "returnType": "jsonb",
+      "argumentNames": null,
+      "settings": [
+        "search_path=pg_catalog",
+        "lock_timeout=2s"
+      ],
+      "acl": [
+        "postgres=X/postgres"
+      ],
+      "edits": [
+        {
+          "id": "explicit_empty_items_jsonb",
+          "before": "items jsonb:='[]';",
+          "after": "items jsonb:='[]'::jsonb;",
+          "occurrences": 1,
+          "observedWarningsTargeted": 1
+        },
+        {
+          "id": "explicit_empty_references_jsonb",
+          "before": "references_found jsonb:='[]';",
+          "after": "references_found jsonb:='[]'::jsonb;",
+          "occurrences": 1,
+          "observedWarningsTargeted": 1
+        }
+      ]
+    },
+    {
+      "identity": "private.reset_receipt_canonical(jsonb)",
+      "originPath": "supabase/migrations/20261025051231_developer_reset_receipt_store.sql",
+      "beforeSha256": "23b0ebda264442c103d6ae83d9aca9bed6fa702dcf1376dc2213e2b0547a890c",
+      "afterSha256": "d5d0fa59f7d26fa82430f16c4d50068fa82ae646ccbb48a36185c9a08e694ea7",
+      "volatility": "i",
+      "securityDefiner": false,
+      "strict": true,
+      "returnType": "text",
+      "argumentNames": [
+        "p_value"
+      ],
+      "settings": [
+        "search_path=pg_catalog"
+      ],
+      "acl": [
+        "postgres=X/postgres"
+      ],
+      "edits": [
+        {
+          "id": "immutable_text_json_string",
+          "before": "to_jsonb(key)::text",
+          "after": "(jsonb_object(array['k']::text[],array[key]::text[])->'k')::text",
+          "occurrences": 1,
+          "observedWarningsTargeted": 1
+        }
+      ]
+    },
+    {
+      "identity": "private.validate_reset_receipt(jsonb,jsonb,jsonb,bigint)",
+      "originPath": "supabase/migrations/20261025051231_developer_reset_receipt_store.sql",
+      "beforeSha256": "8f0411d7f6a978f9a5a82d9d984730826d63f4084baa47af5387f838991bc545",
+      "afterSha256": "9844d306b50d756b19b4fbf80e26763667017d656454069cdf99fa4ac0386af6",
+      "volatility": "i",
+      "securityDefiner": false,
+      "strict": false,
+      "returnType": "void",
+      "argumentNames": [
+        "p_binding",
+        "p_header",
+        "p_entries",
+        "p_now"
+      ],
+      "settings": [
+        "search_path=pg_catalog"
+      ],
+      "acl": [
+        "postgres=X/postgres"
+      ],
+      "edits": [
+        {
+          "id": "immutable_pending_text_state",
+          "before": "jsonb_build_object(s->>'id','PENDING')",
+          "after": "jsonb_object(array[s->>'id']::text[],array['PENDING']::text[])",
+          "occurrences": 1,
+          "observedWarningsTargeted": 1
+        },
+        {
+          "id": "immutable_started_text_state",
+          "before": "jsonb_build_object(e->>'stepId','STARTED')",
+          "after": "jsonb_object(array[e->>'stepId']::text[],array['STARTED']::text[])",
+          "occurrences": 1,
+          "observedWarningsTargeted": 1
+        },
+        {
+          "id": "immutable_observed_text_state",
+          "before": "jsonb_build_object(e->>'stepId',e->>'outcome')",
+          "after": "jsonb_object(array[e->>'stepId']::text[],array[e->>'outcome']::text[])",
+          "occurrences": 1,
+          "observedWarningsTargeted": 1
+        }
+      ]
+    },
+    {
+      "identity": "private.normalize_assignment_instruction(text)",
+      "originPath": "supabase/migrations/20261030143048_assignment_instruction_memo.sql",
+      "beforeSha256": "c9f44590d035d83c5c87562ab09725ffab3f4aa970d1f23adcc487ea6389c1e1",
+      "afterSha256": "3510754a80d970c8a329ebfcb2745699231eae5b08b11e4c60759d16612b0fd8",
+      "volatility": "i",
+      "securityDefiner": false,
+      "strict": false,
+      "returnType": "text",
+      "argumentNames": [
+        "p_value"
+      ],
+      "settings": [
+        "search_path=\"\""
+      ],
+      "acl": [
+        "postgres=X/postgres"
+      ],
+      "edits": [
+        {
+          "id": "remove_shadowed_i",
+          "before": "declare normalized text; units integer; i integer;",
+          "after": "declare normalized text; units integer;",
+          "occurrences": 1,
+          "observedWarningsTargeted": 2
+        }
+      ]
+    }
+  ]
+}

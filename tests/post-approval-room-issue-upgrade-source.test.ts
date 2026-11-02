@@ -195,6 +195,34 @@ const localInput = { args: [], env: {}, config, endpoint: JSON.stringify('unix:/
     project: 'room-management-system-backend', ports: { '5432/tcp': [{ HostIp: '127.0.0.1', HostPort: '54322' }] } }) };
 
 describe('#336 isolated110->111 source/preflight only (no DB PASS claim)', () => {
+  it('accepts the unchanged historical145 prefix and exact reviewed146 extension', () => {
+    expect(source.entries).toHaveLength(146);
+    expect(source.entries[145]?.file).toBe('20261101235131_db_lint_source_corrections.sql');
+    expect(source.entries[145]?.sha256).toBe('b7f6834b471877e8a209116e669c566320bd2d67894952947abb351149377282');
+    const historical = clone(manifest) as typeof manifest & { head: string; pending: { head: string; count: number } };
+    historical.totalCount = 145;
+    historical.head = 'current_week_availability_approval';
+    historical.pending.head = historical.head;
+    historical.pending.count = 145 - 78;
+    historical.migrations = historical.migrations.slice(0, 145);
+    expect(validatePostApprovalUpgradeSource(historical, entries.slice(0, 145)).entries)
+      .toEqual(source.entries.slice(0, 145));
+    expect(execFileSync).not.toHaveBeenCalled();
+  });
+  it('rejects a self-rehashed lint146 body replacement without weakening the historical prefix', () => {
+    const changed = clone(entries), changedManifest = clone(manifest);
+    const tail = changed[145], record = changedManifest.migrations[145];
+    if (!tail || !record) throw new Error('EXPECTED146_TAIL');
+    tail.raw = Buffer.from('select 1;\n');
+    record.sha256 = createHash('sha256').update(tail.raw).digest('hex');
+    expect(() => validatePostApprovalUpgradeSource(changedManifest, changed)).toThrow('Only reviewed lint-correction146 tail');
+  });
+  it('rejects renamed146 timestamps even with identical body and manifest hash', () => {
+    const changed = clone(entries), tail = changed[145];
+    if (!tail) throw new Error('EXPECTED146_TAIL');
+    tail.file = tail.file.replace('20261101235131_', '20261101235132_');
+    expect(() => validatePostApprovalUpgradeSource(manifest, changed)).toThrow();
+  });
   it('pins completion142 and rejects a rehashed replacement', () => {
     const changed = clone(entries), changedManifest = clone(manifest);
     const tail = changed[141], record = changedManifest.migrations[141];

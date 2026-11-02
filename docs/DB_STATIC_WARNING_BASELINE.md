@@ -1,5 +1,28 @@
 # #363 DB 정적 경고 보완과 #373 정확 호환 기준
 
+## 2026-11-02 — #558 승인된 정확 clock 경고 정책
+
+사용자가 D03-L 추천 A를 승인했다. 기존 #373의 호환 인자 3함수/9경고는 그대로 유지하며,
+최종 DB에는 STABLE collector 3함수의 정확한 clock 경고 10건만 별도 추가한다.
+함수 전체 본문과 보안 catalog 및 진단의 모든 필드·위치·개수를 묶는다. 변경·누락·중복·
+신규 경고·error·overload·권한/본문 drift와 실행·파싱 실패는 거부한다.
+원시 strict lint FAIL/exit1과 별도 exact gate 수용을 구분한다. 예상 6함수/19경고는
+수정 후 실제 DB 관측 결과가 아니다. 실제 SQL·새 catalog·lint는 별도 승인 전 NOT RUN이다.
+
+최종 기본 entry는 새 정책만 검사하며 과거 정책으로 자동 후퇴하지 않는다. 역사적 100→101
+upgrade는 고정된 별도 compatibility entry로 기존 3함수/9건을 검사한다. 기존 90초 제한과
+호출 수는 유지하고 CLI·환경변수로 정책을 선택하는 경로는 추가하지 않는다.
+
+inventory와 row impact는 함수 진입의 clock_timestamp()+5초에서, template inventory는
+외부 statement_timestamp()+5초에서 시작한다. 기존 확인 위치·STABLE snapshot·최신 권한
+검사를 보존한다. 이는 협조적 시간 확인이며 실행 중인 SQL을 정확히 5초에 선점 취소한다는
+보장이 아니다. RPC statement_timeout·HTTP 중단 제한의 실제 효력은 별도 검증 대상이다.
+
+R3 run41353299781은 원시 11함수/30경고 때문에 FAIL했다. TLS/atomic 21검사는 PASS였지만
+후속 SQL·upgrade·경합·proof는 NOT RUN이다. 해당 실패와 소모된 승인을 새 성공 근거로
+사용하지 않는다. #558의 소스 보완 및 정책 승인은 새 DB 실행이나 운영 적용 승인이 아니다.
+
+
 ## 2026-10-07 v0.9.0 최신 dev 통합 checkpoint
 
 후속 확정: PR377/source83e7122의 CI37603160916 application/migration 모두 PASS 후

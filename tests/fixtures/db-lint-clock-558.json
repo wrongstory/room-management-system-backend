@@ -1,0 +1,129 @@
+[
+  {
+    "function": "private.collect_developer_reset_template_inventory",
+    "issues": [
+      {
+        "level": "warning",
+        "message": "routine is marked as STABLE, but expression is VOLATILE",
+        "statement": {
+          "lineNumber": "30",
+          "text": "IF"
+        },
+        "hint": "When you fix this issue, please, recheck other functions that uses this function.",
+        "detail": "there is a risk of unwanted behave",
+        "sqlState": "00000"
+      },
+      {
+        "level": "warning",
+        "message": "routine is marked as STABLE, but expression is VOLATILE",
+        "statement": {
+          "lineNumber": "69",
+          "text": "IF"
+        },
+        "hint": "When you fix this issue, please, recheck other functions that uses this function.",
+        "detail": "there is a risk of unwanted behave",
+        "sqlState": "00000"
+      },
+      {
+        "level": "warning",
+        "message": "routine is marked as STABLE, but expression is VOLATILE",
+        "statement": {
+          "lineNumber": "87",
+          "text": "IF"
+        },
+        "hint": "When you fix this issue, please, recheck other functions that uses this function.",
+        "detail": "there is a risk of unwanted behave",
+        "sqlState": "00000"
+      }
+    ]
+  },
+  {
+    "function": "private.collect_developer_reset_inventory",
+    "issues": [
+      {
+        "level": "warning",
+        "message": "routine is marked as STABLE, but expression is VOLATILE",
+        "statement": {
+          "lineNumber": "7",
+          "text": "statement block"
+        },
+        "hint": "When you fix this issue, please, recheck other functions that uses this function.",
+        "detail": "there is a risk of unwanted behave",
+        "context": "during statement block local variable \"deadline\" initialization on line 6",
+        "sqlState": "00000"
+      },
+      {
+        "level": "warning",
+        "message": "routine is marked as STABLE, but expression is VOLATILE",
+        "statement": {
+          "lineNumber": "18",
+          "text": "IF"
+        },
+        "hint": "When you fix this issue, please, recheck other functions that uses this function.",
+        "detail": "there is a risk of unwanted behave",
+        "sqlState": "00000"
+      },
+      {
+        "level": "warning",
+        "message": "routine is marked as STABLE, but expression is VOLATILE",
+        "statement": {
+          "lineNumber": "26",
+          "text": "IF"
+        },
+        "hint": "When you fix this issue, please, recheck other functions that uses this function.",
+        "detail": "there is a risk of unwanted behave",
+        "sqlState": "00000"
+      }
+    ]
+  },
+  {
+    "function": "private.collect_developer_reset_row_impact",
+    "issues": [
+      {
+        "level": "warning",
+        "message": "routine is marked as STABLE, but expression is VOLATILE",
+        "statement": {
+          "lineNumber": "8",
+          "text": "statement block"
+        },
+        "hint": "When you fix this issue, please, recheck other functions that uses this function.",
+        "detail": "there is a risk of unwanted behave",
+        "context": "during statement block local variable \"deadline\" initialization on line 7",
+        "sqlState": "00000"
+      },
+      {
+        "level": "warning",
+        "message": "routine is marked as STABLE, but expression is VOLATILE",
+        "statement": {
+          "lineNumber": "18",
+          "text": "IF"
+        },
+        "hint": "When you fix this issue, please, recheck other functions that uses this function.",
+        "detail": "there is a risk of unwanted behave",
+        "sqlState": "00000"
+      },
+      {
+        "level": "warning",
+        "message": "routine is marked as STABLE, but expression is VOLATILE",
+        "statement": {
+          "lineNumber": "67",
+          "text": "IF"
+        },
+        "hint": "When you fix this issue, please, recheck other functions that uses this function.",
+        "detail": "there is a risk of unwanted behave",
+        "sqlState": "00000"
+      },
+      {
+        "level": "warning",
+        "message": "routine is marked as STABLE, but expression is VOLATILE",
+        "statement": {
+          "lineNumber": "117",
+          "text": "IF"
+        },
+        "hint": "When you fix this issue, please, recheck other functions that uses this function.",
+        "detail": "there is a risk of unwanted behave",
+        "sqlState": "00000"
+      }
+    ]
+  }
+]
