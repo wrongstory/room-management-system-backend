@@ -1,6 +1,14 @@
 # #532 예약 가능 상태 정정과 청소 취소 확인
 
-상태: **소스 구현·DB 없는 검증 완료 / 운영 미배포 / 전체 DB·경합 검증 NOT RUN**.
+## 2026-11-03 최종 경합 검사 계약 보완
+
+FINAL-148-R2/run41472392339는 전체 SQL119파일/6,517건 및 앞선 직접 경합2개를 통과했으나 세 번째 READY 검사에서 실패했다. 기록된 위치는 공통 거절 assertion이며 실제 실패한 race·반환 코드·SQLSTATE는 미관측이다. 이를 실제 DB 권한 오류나 특정 race의 실패로 단정하지 않는다.
+
+정적 분석에서 취소 후 업로드 경로의 기존 `private.live_attempt_capability`가42501/`CAPABILITY_ACCESS_REQUIRED`를 직접 던지는데 검사가 이전 `PHOTO_ACCESS_REQUIRED`를 기대한 차이를 확인했다. 해당 기대값 한 곳만 정확한 코드로 정정하며 다른 코드와 OR로 허용하지 않는다. 비정상 종료·정확한 거절 코드, 나머지4거절 기대값·6경합 순서와 사진/확정 수당/제출 이력 보존 assertion은 유지한다.
+
+부모 실행기는 private stderr를8KiB 안에서 조합한 뒤 정확한 verbose ERROR/FATAL header 하나의 allowlist 코드/SQLSTATE만 읽는다. 분할된 토큰을 잃거나 CONTEXT의 다른 코드로 덮어쓰지 않으며, 초과·다중 header·알 수 없는 값은 UNKNOWN으로 실패시킨다. 실패 시 source-controlled race 이름·종료 코드·예상/관측 allowlist 코드만 기록하고 원문 SQL·행·토큰·사진·PIN은 출력하지 않는다. DB 없는 검사는 이 파싱과 실제 거절 assertion을 검증하며 제품 SQL·기존 migration·DB 실행 수/연결·잠금/시간 상한은 바꾸지 않는다. 보완된 통합 입력의 실제 DB·경합 결과와 운영 적용은 별도다.
+
+상태: **소스 구현·검사 보완 후보 / 운영 미배포 / R2 전체 DB FAIL·보완본 DB·경합 NOT RUN**.
 백엔드 [#532](https://github.com/wrongstory/room-management-system-backend/issues/532),
 프런트 [#268](https://github.com/makee-ham/room-management-system/issues/268).
 v1.0.0에 합칠 기능 수정이며 별도 채팅의 릴리스 실행기와 운영 데이터를 직접 변경하지 않는다.
