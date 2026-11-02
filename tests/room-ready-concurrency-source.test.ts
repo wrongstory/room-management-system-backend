@@ -39,6 +39,24 @@ describe('#532 READY race preparation (actual SQL/concurrency NOT RUN)', () => {
     expect(fixture.indexOf('create function pg_temp.ordinary_slots')).toBeLessThan(fixture.indexOf('create function pg_temp.additional_fixture'));
     // Parser treats PL/pgSQL bodies as strings; this is not installation/runtime proof.
   });
+  it('fits every synthetic room number to the actual photo identity constraints without seeded-room collisions', () => {
+    const fixture = roomReadyCorrectionFixture();
+    const match = fixture.match(/select pg_temp\.cid\(1000\+n\),\((\d+)\+n\)::text/);
+    expect(match).not.toBeNull();
+    if (!match) throw new Error('Synthetic room expression missing');
+    const numbers = Array.from({ length: 7 }, (_, index) => String(Number(match[1]) + index + 1));
+    const identity = read('supabase/migrations/20260908180643_photo_drive_upload_read.sql');
+    const pattern = identity.match(/room_number text not null check\(room_number ~ '([^']+)'\)/)?.[1];
+    expect(pattern).toBe('^[0-9]{3}$');
+    if (!pattern) throw new Error('Photo room constraint missing');
+    expect(identity).toContain("scope_room_number='' or scope_room_number ~ '^[0-9]{3}$'");
+    expect(numbers.every(number => new RegExp(pattern).test(number))).toBe(true);
+    expect(new RegExp(pattern).test('9551')).toBe(false);
+    const baseline = read('supabase/migrations/20260825141441_initial_core_schema.sql');
+    for (const number of numbers) expect(baseline).not.toContain(`('${number}',`);
+    expect(manual).not.toMatch(/insert\s+into\s+public\.rooms/i);
+    expect(fixture).toContain('generate_series(1,7) n');
+  });
   it.each([
     (source: string) => source.replace('create function pg_temp.ordinary_slots() returns jsonb language sql immutable as $$',''),
     (source: string) => source.replace('-- BEGIN PHOTO CONTEXT RPC HELPERS','-- drift'),

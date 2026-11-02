@@ -26,13 +26,35 @@ export function manualCancelFixture() {
   return fixture;
 }
 
+const safeSqlStates = new Set(['23514','23505','23503','23502','22023','42501','55000',
+  'P0001','P0002','40001','40P01','57014','42P01','42703','42883','42601','22P02','53300','08006','57P01']);
+export function manualCancelSqlState(stderr) {
+  const state = typeof stderr === 'string'
+    ? stderr.match(/^(?:psql:[^\r\n]*:\s*)?(?:ERROR|FATAL):[ \t]+([0-9A-Z]{5})[ \t]*\r?$/m)?.[1] : null;
+  return safeSqlStates.has(state) ? state : null;
+}
 function localSql(input) {
   try {
-    return execFileSync('docker', psqlArgs, { input, encoding: 'utf8',
+    return execFileSync('docker', [...psqlArgs, '-v', 'VERBOSITY=sqlstate'], { input, encoding: 'utf8',
       stdio: ['pipe', 'pipe', 'pipe'], timeout: 30000 }).trim();
-  } catch {
-    throw new Error('MANUAL_CANCEL_LOCAL_SQL_FAILED');
+  } catch (cause) {
+    const error = new Error('MANUAL_CANCEL_LOCAL_SQL_FAILED');
+    error.sqlState = manualCancelSqlState(cause?.stderr);
+    throw error;
   }
+}
+
+export function manualCancelFailureSummary(error, phase) {
+  const phases = ['local-identity','fresh-reset','read-only-api-readiness','fixture-and-races','room-ready-correction-races'];
+  const stack = error instanceof Error && typeof error.stack === 'string' ? error.stack : '';
+  const manualLine = stack.match(/test-manual-cleaning-cancel-concurrency\.mjs:(\d{1,6}):\d+/)?.[1];
+  const readyLine = stack.match(/test-room-ready-correction-concurrency\.mjs:(\d{1,6}):\d+/)?.[1];
+  return { phase: phases.includes(phase) ? phase : 'unknown',
+    kind: error instanceof assert.AssertionError ? 'ASSERTION_FAILED' : 'VALIDATION_FAILED',
+    sourceLine: manualLine ? Number(manualLine) : null,
+    readySourceLine: readyLine ? Number(readyLine) : null,
+    sqlState: safeSqlStates.has(error?.sqlState) ? error.sqlState : null,
+    ...(error?.summary ? { rpc: safeRpcResultSummary({ status: error.summary.status, error: { code: error.summary.code } }) } : {}) };
 }
 
 const cancelSql = (n, key) => `select public.cancel_manual_cleaning_request_with_session(
@@ -301,11 +323,7 @@ export async function runManualCleaningCancelConcurrency(afterManual = null) {
       await afterManual(context);
     } : null);
   } catch (error) {
-    const sourceLine = error instanceof Error ? error.stack?.match(/test-manual-cleaning-cancel-concurrency\.mjs:(\d+):\d+/)?.[1] : null;
-    console.error(`Manual cancellation validation FAIL: ${JSON.stringify({ phase,
-      kind: error instanceof assert.AssertionError ? 'ASSERTION_FAILED' : 'VALIDATION_FAILED',
-      sourceLine: sourceLine ? Number(sourceLine) : null,
-      ...(error?.summary ? { rpc: safeRpcResultSummary({ status: error.summary.status, error: { code: error.summary.code } }) } : {}) })}`);
+    console.error(`Manual cancellation validation FAIL: ${JSON.stringify(manualCancelFailureSummary(error, phase))}`);
     process.exitCode = 1;
   } finally {
     if (resetStarted) {
