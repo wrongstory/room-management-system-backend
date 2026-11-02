@@ -231,7 +231,7 @@ Table public.room_types {
   id uuid [pk]
   code text [not null, unique]
   name text [not null]
-  base_cleaning_fee int [not null, note: 'KRW integer']
+  base_cleaning_fee int [not null, note: '#577 KRW integer catalog fee: business-admin versioned update, future ordinary target snapshots only; historical fees unchanged.']
   default_duration_minutes int [not null]
   default_guest_count int [not null, note: 'API baseOccupancy; >= 1']
   max_guest_count int [not null, note: 'API maxOccupancy; >= default_guest_count; reservation authority']

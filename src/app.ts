@@ -336,6 +336,15 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
         error = new AppError(400, 'ROOM_READY_CORRECTION_INVALID_INPUT', '객실 상태 변경 입력이 올바르지 않습니다.');
       }
     }
+    const roomTypeFee = request.method === 'PUT'
+      && request.routeOptions.url === '/v1/room-types/:roomTypeId/cleaning-fee';
+    if (roomTypeFee) {
+      reply.header('Cache-Control','no-store');
+      if (error instanceof Error && 'code' in error
+        && (error.code === 'FST_ERR_CTP_INVALID_JSON_BODY' || error.code === 'FST_ERR_CTP_EMPTY_JSON_BODY')) {
+        error = new AppError(400,'ROOM_TYPE_CLEANING_FEE_INVALID','청소 단가 입력이 올바르지 않습니다.');
+      }
+    }
     const pinOperation = roomPinOperation(request.method, request.raw.url ?? '');
     if (pinOperation) {
       reply.header('Cache-Control', 'no-store');

@@ -147,7 +147,7 @@ describe('#534 actual race source preparation (actual SQL/concurrency NOT RUN)',
     const runner = read('scripts/test-reservation-concurrency.mjs');
     expect(runner).toContain('await testAssignmentInstructionConcurrency(status.DB_URL,actorProfileId);');
     const scripts = JSON.parse(read('package.json')).scripts;
-    expect(scripts['db:test:concurrency'].split(' && ')).toHaveLength(12);
+    expect(scripts['db:test:concurrency'].split(' && ')).toHaveLength(13);
     expect(source).not.toMatch(/db[', ]+reset|supabase.*start|execFile|spawn\(|process\.argv/);
     expect(source).toContain('pg_blocking_pids(pid)');
     expect(source).toContain('MEMO_EXACTLY_ONE_COMMAND_AUDIT');

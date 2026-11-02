@@ -5735,6 +5735,101 @@ export const openApiDocument = {
         },
       },
     },
+    "/v1/room-types/{roomTypeId}/cleaning-fee": {
+      put: {
+        tags: ["Rooms"],
+        operationId: "setRoomTypeCleaningFee",
+        summary: "객실 타입별 기본 청소 단가 변경",
+        description:
+          "#577 개발 후보. 변경 후 카탈로그 단가로 생성하는 일반 청소에만 적용. 이미 생성된 미래 청소·진행 청소·확정 수당·재청소 승계금액은 변경하지 않습니다. 금액은 정수 원화이며 폭탄방 동액 보너스 합계의 DB integer 범위를 보호합니다. 현재 타입 version과 적용범위 확인이 필요합니다. 성공·재전송 뒤 GET /v1/room-types를 다시 조회하세요.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin"],
+        parameters: [{
+          name: "roomTypeId",
+          in: "path",
+          required: true,
+          schema: { type: "string", format: "uuid" },
+        }, idempotencyHeader],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                additionalProperties: false,
+                required: [
+                  "baseCleaningFee",
+                  "expectedVersion",
+                  "confirmFutureTargetsOnly",
+                ],
+                properties: {
+                  baseCleaningFee: {
+                    type: "integer",
+                    minimum: 0,
+                    maximum: 1073741823,
+                  },
+                  expectedVersion: {
+                    type: "integer",
+                    minimum: 1,
+                    maximum: 9007199254740990,
+                  },
+                  confirmFutureTargetsOnly: { type: "boolean", const: true },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          "200": {
+            description:
+              "확정 결과 또는 동일 요청의 기존 receipt. 현재 목록을 다시 조회합니다.",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["roomType"],
+                  properties: {
+                    roomType: {
+                      type: "object",
+                      additionalProperties: false,
+                      required: [
+                        "roomTypeId",
+                        "baseCleaningFee",
+                        "version",
+                        "effectiveFor",
+                      ],
+                      properties: {
+                        roomTypeId: { type: "string", format: "uuid" },
+                        baseCleaningFee: {
+                          type: "integer",
+                          minimum: 0,
+                          maximum: 1073741823,
+                        },
+                        version: {
+                          type: "integer",
+                          minimum: 1,
+                          maximum: 9007199254740991,
+                        },
+                        effectiveFor: {
+                          type: "string",
+                          const: "NEW_TARGETS_ONLY",
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "404": errorResponse,
+          "409": errorResponse,
+          "500": errorResponse,
+        },
+      },
+    },
     "/v1/room-types": {
       get: {
         tags: ["Rooms"],

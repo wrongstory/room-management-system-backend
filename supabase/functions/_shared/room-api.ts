@@ -1,4 +1,10 @@
 import {
+  feeRoomTypeId,
+  parseRoomTypeFeeInput,
+  parseRoomTypeFeeResult,
+  RoomTypeFeeError,
+} from "../../../src/modules/rooms/room-type-fee-contract.ts";
+import {
   fixedMemoErrors,
   fixedMemoRoomId,
   parseRoomFixedMemo,
@@ -2087,6 +2093,71 @@ export async function roomFixedMemo(
         error.output
           ? "객실 메모를 불러오지 못했습니다."
           : "객실 메모 입력을 확인해 주세요.",
+      );
+    }
+    throw error;
+  }
+}
+
+export async function setRoomTypeCleaningFee(
+  request: Request,
+  clients: EdgeClients,
+  actor: EdgeActor,
+  rawId: string,
+) {
+  requireRoomAdmin(actor);
+  if (actor.mustChangePassword) {
+    throw new EdgeError(
+      403,
+      "PASSWORD_CHANGE_REQUIRED",
+      "비밀번호를 먼저 변경해 주세요.",
+    );
+  }
+  try {
+    if (new URL(request.url).search) throw new RoomTypeFeeError();
+    const roomTypeId = feeRoomTypeId(rawId),
+      parsed = parseRoomTypeFeeInput(await readJsonBody(request));
+    const { data, error } = await clients.admin.rpc(
+      "set_room_type_cleaning_fee",
+      {
+        p_actor_profile_id: actor.profileId,
+        p_session_id: verifiedRequestSessionId(request),
+        p_room_type_id: roomTypeId,
+        p_expected_version: parsed.expectedVersion,
+        p_base_cleaning_fee: parsed.baseCleaningFee,
+        p_confirm_future_targets_only: parsed.confirmFutureTargetsOnly,
+        p_idempotency_key: idempotencyKey(request),
+        p_request_hash: await requestHash({ roomTypeId, ...parsed }),
+      },
+    );
+    if (error) {
+      if (error.message?.includes("ROOM_TYPE_CLEANING_FEE_INVALID")) {
+        throw new EdgeError(
+          400,
+          "ROOM_TYPE_CLEANING_FEE_INVALID",
+          "청소 단가와 적용 범위를 확인해 주세요.",
+        );
+      }
+      if (error.message?.includes("ROOM_TYPE_NOT_FOUND")) {
+        throw new EdgeError(
+          404,
+          "ROOM_TYPE_NOT_FOUND",
+          "객실 타입을 찾을 수 없습니다.",
+        );
+      }
+      throw roomDatabaseError(error);
+    }
+    return parseRoomTypeFeeResult(data, roomTypeId, parsed);
+  } catch (error) {
+    if (error instanceof RoomTypeFeeError) {
+      throw new EdgeError(
+        error.output ? 500 : 400,
+        error.output
+          ? "ROOM_TYPE_CLEANING_FEE_RESPONSE_INVALID"
+          : "ROOM_TYPE_CLEANING_FEE_INVALID",
+        error.output
+          ? "청소 단가 변경 결과를 확인하지 못했습니다."
+          : "청소 단가와 적용 범위를 확인해 주세요.",
       );
     }
     throw error;

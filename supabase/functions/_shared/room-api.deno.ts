@@ -1,3 +1,4 @@
+import { setRoomTypeCleaningFee } from "./room-api.ts";
 import {
   applyRoomReadyCorrection,
   changeRoomMasterData,
@@ -1637,4 +1638,89 @@ Deno.test("room fixed memo binds session, sanitizes output and enforces write ro
     changed.status === 403 && calls.length === 2,
     "password gate before RPC",
   );
+});
+
+Deno.test("room type fee binds admin session, integer price, confirmation and strips private fields", async () => {
+  const base = readRequest(`/v1/room-types/${roomTypeId}/cleaning-fee`);
+  const headers = new Headers(base.headers);
+  headers.set("Content-Type", "application/json");
+  headers.set("Idempotency-Key", "fee577-edge-001");
+  const request = new Request(base, {
+    method: "PUT",
+    headers,
+    body: JSON.stringify({
+      baseCleaningFee: 18000,
+      expectedVersion: 1,
+      confirmFutureTargetsOnly: true,
+    }),
+  });
+  let calls = 0;
+  const clients = {
+    admin: {
+      rpc: (name: string, args: Record<string, unknown>) => {
+        calls++;
+        assert(name === "set_room_type_cleaning_fee", "exact fee RPC");
+        assert(
+          args.p_room_type_id === roomTypeId &&
+            args.p_base_cleaning_fee === 18000 &&
+            args.p_expected_version === 1 &&
+            args.p_confirm_future_targets_only === true &&
+            args.p_session_id === sessionId,
+          "canonical fee/session bindings",
+        );
+        return Promise.resolve({
+          data: {
+            roomTypeId,
+            baseCleaningFee: 18000,
+            version: 2,
+            effectiveFor: "NEW_TARGETS_ONLY",
+            privateField: "hidden",
+          },
+          error: null,
+        });
+      },
+    },
+  } as unknown as EdgeClients;
+  const result = await setRoomTypeCleaningFee(
+    request,
+    clients,
+    admin,
+    roomTypeId,
+  );
+  assert(
+    result.version === 2 && !("privateField" in result) && calls === 1,
+    "safe result",
+  );
+});
+Deno.test("room type fee rejects maid and missing confirmation without RPC", async () => {
+  let calls = 0;
+  const clients = {
+    admin: {
+      rpc: () => {
+        calls++;
+        throw new Error("unexpected RPC");
+      },
+    },
+  } as unknown as EdgeClients;
+  const base = readRequest(`/v1/room-types/${roomTypeId}/cleaning-fee`);
+  for (
+    const [actor, body] of [[{ ...admin, role: "maid" }, {}], [admin, {
+      baseCleaningFee: 18000,
+      expectedVersion: 1,
+    }]] as const
+  ) {
+    const headers = new Headers(base.headers);
+    headers.set("Content-Type", "application/json");
+    headers.set("Idempotency-Key", "fee577-edge-invalid");
+    const request = new Request(base, {
+      method: "PUT",
+      headers,
+      body: JSON.stringify(body),
+    });
+    const error = await captureEdgeError(() =>
+      setRoomTypeCleaningFee(request, clients, actor as EdgeActor, roomTypeId)
+    );
+    assert([400, 403].includes(error.status), "fail closed");
+  }
+  assert(calls === 0, "no unauthorized RPC");
 });
