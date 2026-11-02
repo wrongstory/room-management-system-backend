@@ -1,4 +1,5 @@
 import { createLegacyUpgradeHistory } from './lib/legacy-upgrade-history.mjs';
+import { assertLegacyImpactRows } from './lib/legacy-impact-contract.mjs';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
@@ -151,12 +152,7 @@ try {
   const afterImpact = JSON.parse(sql(impactSql));
   assert.equal(afterImpact.impactFingerprint, priorImpact.impactFingerprint,
     'Additive display metadata cannot invalidate unchanged commit impact fingerprint');
-  const stripMetadata = (rows) => rows.map((row) => Object.fromEntries(
-    Object.entries(row).filter(([key]) => !metadataKeys.includes(key))));
-  for (const key of ['committableDrafts', 'blockedDrafts', 'remainingUnassignedTargets']) {
-    assert.deepEqual(stripMetadata(afterImpact[key]), priorImpact[key],
-      'Installation preserves every original impact row field');
-  }
+  assertLegacyImpactRows(priorImpact, afterImpact);
   const afterPreview = JSON.parse(sql(`select private.assignment_preview_snapshot_at('${id(1)}',
     '${serviceDate}','${commandAt}');`));
   assert.deepEqual(afterPreview.sequenceReservations, priorPreview.sequenceReservations,
@@ -182,6 +178,8 @@ try {
   const card = newResponse.notifiedAssignments[0];
   assert.equal(newResponse.notifiedAssignments.length, 1);
   assert(metadataKeys.every((key) => Object.hasOwn(card, key)), 'New commit card has every additive key');
+  assert(Object.hasOwn(card, 'instructionMemo') && card.instructionMemo === null,
+    'Legacy draft new receipt has explicit null memo');
   assert.equal(card.cleaningTargetId, id(1002));
   assert.equal(card.targetAssignmentVersion, 2);
   assert.equal(card.cleaningKind, 'stayover');
@@ -212,6 +210,7 @@ try {
   console.error(`Assignment metadata upgrade FAIL: ${JSON.stringify({ phase,
     kind: error instanceof assert.AssertionError ? 'ASSERTION_FAILED' : 'VALIDATION_FAILED',
     stable_domain_code: error instanceof Error && knownDomainCodes.has(error.stableDomainCode) ? error.stableDomainCode : null,
+    impactContractCode: /^LEGACY_IMPACT_(committableDrafts|blockedDrafts|remainingUnassignedTargets)_(ARRAY|COUNT|MEMO_NULL|UNASSIGNED_MEMO|ORIGINAL_FIELDS)$/.test(error?.message ?? '') ? error.message : null,
     sourceLine: sourceLine ? Number(sourceLine) : null })}`);
   process.exitCode = 1;
 } finally {
