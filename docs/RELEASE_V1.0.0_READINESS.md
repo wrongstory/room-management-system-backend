@@ -1,6 +1,14 @@
 # v1.0.0 개발·배포 준비 상태
 
-## 2026-11-02 — 최신 통합147의 소스 정합성 보완
+## 2026-11-03 현재 통합148 기준
+
+#577 관리자 타입별 기본 청소 단가와 #579 퇴실 검사 시각 보완, PR581의 Swagger 게시 계약 보완을 포함한다. 현재 source는 migration148개·SQL119파일·upgrade28개·직접 경합13개이며 정상 경로 reset은81회(checkpoint1+upgrade61+static2+경합17)다. workflow 상한은 application20분/DB60분이며 개별 제한·검사 기준은 유지한다. API 계약은0.6.0의161경로/174operation이고 실제 CI 후보 번들은19,961,858 bytes(20,000,000 제한까지38,142 bytes)다.
+
+PR581의 CI41474461400은 Node6,297건/232파일·Python142건 및 application/manifest PASS다. 개발 CI의 실제 DB 단계는 SKIPPED이며 전체 DB 성공을 뜻하지 않는다. 작성 시 진행 중인 FINAL-148-R2/run41472392339는 Swagger 보완 전6bf37e7 입력이다. 그 결과는 변경된 최종 입력의 성공 증거로 사용하지 않는다. 정확한 최종 source/tree/입력 지문·각 실행 결과와 현재 실행 권한은 진행 채팅의 단일 USER_DECISIONS.md로 확인한다. 최종 후보의 전체 DB·main 승격·운영 적용 완료를 이 문서로 선언하지 않는다.
+
+운영 history/pending은 새로 관측하기 전 미확정이며148을 적용 건수로 해석하지 않는다. 운영 migration은 실행 직전 별도 사용자 승인 대상이다. 승인된 DB→API·Swagger→프런트→실사용 확인 순서, 실제 초기화 비활성·사진 삭제 HOLD 및 기존 예약 전용 백업은 유지한다. 아래 날짜별 숫자와147/141 등 이전 후보는 당시 snapshot으로 보존한다.
+
+## 과거 2026-11-02 — 통합147의 소스 정합성 보완
 
 #558은 PR561/dev69dd35c로 보호된 병합을 마쳤다. required CI run41364851930은 application과
 migration 목록 검사 PASS이며 실제 DB 단계는 모두 SKIPPED다. Node6056·Python139,
@@ -78,7 +86,7 @@ DB 없는 재현에서 의도적으로 미분류인 메모 원장을 전체 읽�
 해당 실제 SQL·RLS·경합은 승인된 최종 격리 CI에서 실행할 항목이며 아직 **NOT RUN**이다.
 
 보호 dev 병합 뒤 main 인증 수정 이력을 보존해 로컬 release에 통합하고, source/tree/manifest/전체
-입력 지문·API160경로/173operation·실제 번들 크기를 재대조한다. 기존143개 실행안과 다른 PR의
+입력 지문·API161경로/174operation·실제 번들 크기를 재대조한다. 기존143개 실행안과 다른 PR의
 성공 proof를 새 입력에 사용하지 않는다. 정확한 최종1회안은 단일 USER_DECISIONS.md에 기록한다.
 release push/PR로 전체 DB를 시작하기 전 승인, 실제 운영 history/pending 확인 후 운영 migration 직전
 별도 승인이 필요하다. DB→API/Swagger→프런트 #268/#270/#290/#291→역할별 확인 순서를 유지한다.
@@ -397,7 +405,7 @@ pending2건이다. 활성 Cron은 여전히 예약 전이 하나다. 배포 목�
 photo-purge11도 배포 목록에 있으나 사진 삭제 HOLD와 Cron 미활성 경계를 유지한다.
 
 OpenAPI의 기존 계약 표기0.6.0과 npm package 표기0.1.0은 현재 source 값이다.
-source OpenAPI·Pages·계약 검사는 157경로169동작이며 운영의154/166과 다르다.
+현재 source OpenAPI·Pages·계약 검사는161경로174동작이다. 이전 source157/169와 2026-10-25 운영154/166은 과거 snapshot이며 새 운영 배포 상태로 사용하지 않는다.
 [v0.7.0](RELEASE_V0.7.0.md)과 [v0.9.4](RELEASE_V0.9.4_DEPLOYED.md)의 기존 방침대로
 Git 제품 릴리스, HTTP 계약 버전, private npm package 버전을 별도로 관리한다.
 v1 태그를 위해 계약을 임의로 1.0.0으로 올리지 않는다. 최종 릴리스에서는 tag/main SHA,

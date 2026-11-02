@@ -1,6 +1,14 @@
 # v1.0.0 최종 DB 검증 계획 — 객실 고정 메모 포함
 
-## 최신147 입력 준비와 추가 회귀 범위
+## 2026-11-03 현재 통합148 기준
+
+#577 관리자 타입별 기본 청소 단가와 #579 퇴실 검사 시각 보완, PR581의 Swagger 게시 계약 보완을 포함한다. 현재 source는 migration148개·SQL119파일·upgrade28개·직접 경합13개이며 정상 경로 reset은81회(checkpoint1+upgrade61+static2+경합17)다. workflow 상한은 application20분/DB60분이며 개별 제한·검사 기준은 유지한다. API 계약은0.6.0의161경로/174operation이고 실제 CI 후보 번들은19,961,858 bytes(20,000,000 제한까지38,142 bytes)다.
+
+PR581의 CI41474461400은 Node6,297건/232파일·Python142건 및 application/manifest PASS다. 개발 CI의 실제 DB 단계는 SKIPPED이며 전체 DB 성공을 뜻하지 않는다. 작성 시 진행 중인 FINAL-148-R2/run41472392339는 Swagger 보완 전6bf37e7 입력이다. 그 결과는 변경된 최종 입력의 성공 증거로 사용하지 않는다. 정확한 최종 source/tree/입력 지문·각 실행 결과와 현재 실행 권한은 진행 채팅의 단일 USER_DECISIONS.md로 확인한다. 최종 후보의 전체 DB·main 승격·운영 적용 완료를 이 문서로 선언하지 않는다.
+
+운영 history/pending은 새로 관측하기 전 미확정이며148을 적용 건수로 해석하지 않는다. 운영 migration은 실행 직전 별도 사용자 승인 대상이다. 승인된 DB→API·Swagger→프런트→실사용 확인 순서, 실제 초기화 비활성·사진 삭제 HOLD 및 기존 예약 전용 백업은 유지한다. 아래 날짜별 숫자와147/141 등 이전 후보는 당시 snapshot으로 보존한다.
+
+## 과거 통합147 입력 준비 기록
 
 #558은 dev 병합 및 DB 없는 CI/독립 QA를 마쳤다. #559의 후속147과 기존 검사3곳의
 현재/다음 주 정책 정합성 보완을 통합한 뒤 최종 입력을 고정한다. 기존146개 migration 원문을
@@ -104,11 +112,11 @@ Markdown 서술은 기존 gate 입력에서 제외되지만 이번 catalog harne
 
 “1회”는 최종 workflow run/attempt1회를 뜻한다. 내부의 기존 fresh/upgrade/격리 fixture와
 여러 reset·자원 정리를 포함하며 SQL 한 번이나 reset 한 번이라는 의미가 아니다.
-현재 정상 성공 경로는 reset79회(122 checkpoint1 + upgrade61 + static2 + concurrency15),
-28개 upgrade 프로그램·12개 경합 진입점을 포함한다. 최초 설치와 합성 복구 DB1개,
-TLS fixture1개도 범위에 들어간다. #551 경합은 기존 reservation fixture 구간을 재사용하며 reset을 추가하지 않는다.
+현재 정상 성공 경로는 reset81회(122 checkpoint1 + upgrade61 + static2 + concurrency17),
+28개 upgrade 프로그램·13개 직접 경합 진입점을 포함한다. 최초 설치와 합성 복구 DB1개,
+TLS fixture1개도 범위에 들어간다. #551 경합은 기존 reservation fixture 구간을 재사용하며 reset을 추가하지 않는다. #577 직접 경합의 준비/finally reset2회는 concurrency17/전체81에 포함된다.
 실패 시 정리는 별도 결과로 확인하며 강제 취소 후 정리가 끝났다고 추정하지 않는다.
-workflow의 application20분/migration40분 상한과 검사 항목을 바꾸지 않는다. 자동 재실행하지 않는다.
+workflow의 application20분/migration60분 상한과 검사 항목을 유지한다. 자동 재실행하지 않는다.
 실패·취소·UNKNOWN·입력 변경이면 증거를 보존하고 원인/수정을 정리한 뒤 재실행 전에 다시 승인받는다.
 
 개발 PR의 migration PASS는 source/manifest 검사다. `Full DB NOT RUN`과 구분한다.
