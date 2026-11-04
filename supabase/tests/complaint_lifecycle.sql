@@ -458,5 +458,28 @@ select is((select count(*) from public.complaint_cases),0::bigint,
   'temporary-password admin RLS sees no complaint cases');
 reset role;
 
+-- #586: owner-definer RPC still generates an identity without direct sequence grants.
+select pg_temp.approved_source(9,2,interval '1 day');
+create temporary table authority_complaint_before as select id,to_jsonb(e) as row_value from public.complaint_case_events e;
+grant select,insert on complaint_results to service_role;
+set local role service_role;
+insert into complaint_results values('authority33',public.create_complaint_case(
+  pg_temp.pid(1),pg_temp.pid(5009),'cleanliness_general',0,'complaint-authority33',repeat('7',64)));
+reset role;
+select is((select value->>'status' from complaint_results where label='authority33'),'received',
+  'service complaint RPC succeeds after sequence privilege revocation');
+select is((select count(*) from public.complaint_case_events e
+  where e.complaint_case_id=(select (value->>'id')::uuid from complaint_results where label='authority33')
+    and e.id>0 and e.event_type='received'),1::bigint,'normal complaint append generates one identity');
+select ok(not exists(select 1 from authority_complaint_before b left join public.complaint_case_events e on e.id=b.id
+  where e.id is null or to_jsonb(e) is distinct from b.row_value),'prior complaint events retain all rows and fields');
+-- No nextval/setval denial probes: sequence changes would survive rollback if a guard regressed.
+select ok(not has_sequence_privilege('service_role','public.complaint_case_events_id_seq','USAGE')
+  and not has_sequence_privilege('service_role','public.complaint_case_events_id_seq','UPDATE'),
+  'service cannot advance or reset the sequence directly');
+set local role service_role;
+select throws_ok($$select last_value from public.complaint_case_events_id_seq$$,'42501',
+  'permission denied for sequence complaint_case_events_id_seq','direct sequence read is denied');
+reset role;
 select * from finish();
 rollback;

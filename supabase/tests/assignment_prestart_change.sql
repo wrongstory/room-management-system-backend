@@ -282,5 +282,34 @@ from public.cleaning_targets where id=pg_temp.pid(312);
 select public.save_cleaning_assignment_draft(pg_temp.pid(1),pg_temp.pid(313),pg_temp.pid(2),40,1,'prestart-reclean-draft',repeat('d',64));
 select throws_ok($$select pg_temp.command(13,'change','reclean-wrong-maid-0013',3,40)$$,'23514','RECLEAN_MAID_IMMUTABLE','prestart cannot reassign reclean to other maid');
 select lives_ok($$select pg_temp.command(13,'change','reclean-sequence-0013',2,41)$$,'reclean sequence change retains original maid');
+-- #586: service INSERT remains valid; UPDATE must fail at ACL, before row triggers.
+grant select on stayover_case to service_role;
+set local role service_role;
+select lives_ok($$insert into public.room_occupancy_events(event_key,room_id,reservation_id,event_type,
+  effective_at,actor_profile_id,reason_code,after_state)
+  select 'authority33-occupancy',room_id,reservation_id,'occupancy_correction',now(),pg_temp.pid(1),'TEST','{}'
+  from stayover_case$$,'service occupancy history append retained');
+select lives_ok($$insert into public.room_candle_events(room_id,count_before,count_after,reason_code,actor_profile_id,effective_at)
+  select room_id,0,0,'TEST',pg_temp.pid(1),now() from stayover_case$$,'service candle history append retained');
+reset role;
+create temporary table authority_history_before(name text primary key,rows jsonb);
+insert into authority_history_before select 'room_occupancy_events',jsonb_agg(to_jsonb(r) order by r.id) from public.room_occupancy_events r;
+insert into authority_history_before select 'room_pin_sync_events',jsonb_agg(to_jsonb(r) order by r.id) from public.room_pin_sync_events r;
+insert into authority_history_before select 'room_candle_events',jsonb_agg(to_jsonb(r) order by r.id) from public.room_candle_events r;
+insert into authority_history_before select 'cleaning_target_schedule_revisions',jsonb_agg(to_jsonb(r) order by r.id) from public.cleaning_target_schedule_revisions r;
+insert into authority_history_before select 'reservation_schedule_revisions',jsonb_agg(to_jsonb(r) order by r.id) from public.reservation_schedule_revisions r;
+select ok(rows is not null and jsonb_array_length(rows)>0,name||' fixture is nonempty') from authority_history_before order by name;
+set local role service_role;
+select throws_ok($$update public.room_occupancy_events set id=id$$,'42501','permission denied for table room_occupancy_events','service room_occupancy_events UPDATE denied by ACL');
+select throws_ok($$update public.room_pin_sync_events set id=id$$,'42501','permission denied for table room_pin_sync_events','service room_pin_sync_events UPDATE denied by ACL');
+select throws_ok($$update public.room_candle_events set id=id$$,'42501','permission denied for table room_candle_events','service room_candle_events UPDATE denied by ACL');
+select throws_ok($$update public.cleaning_target_schedule_revisions set id=id$$,'42501','permission denied for table cleaning_target_schedule_revisions','service cleaning_target_schedule_revisions UPDATE denied by ACL');
+select throws_ok($$update public.reservation_schedule_revisions set id=id$$,'42501','permission denied for table reservation_schedule_revisions','service reservation_schedule_revisions UPDATE denied by ACL');
+reset role;
+select is((select jsonb_agg(to_jsonb(r) order by r.id) from public.room_occupancy_events r),(select rows from authority_history_before where name='room_occupancy_events'),'room_occupancy_events all rows and fields preserved');
+select is((select jsonb_agg(to_jsonb(r) order by r.id) from public.room_pin_sync_events r),(select rows from authority_history_before where name='room_pin_sync_events'),'room_pin_sync_events all rows and fields preserved');
+select is((select jsonb_agg(to_jsonb(r) order by r.id) from public.room_candle_events r),(select rows from authority_history_before where name='room_candle_events'),'room_candle_events all rows and fields preserved');
+select is((select jsonb_agg(to_jsonb(r) order by r.id) from public.cleaning_target_schedule_revisions r),(select rows from authority_history_before where name='cleaning_target_schedule_revisions'),'cleaning_target_schedule_revisions all rows and fields preserved');
+select is((select jsonb_agg(to_jsonb(r) order by r.id) from public.reservation_schedule_revisions r),(select rows from authority_history_before where name='reservation_schedule_revisions'),'reservation_schedule_revisions all rows and fields preserved');
 select * from finish();
 rollback;
