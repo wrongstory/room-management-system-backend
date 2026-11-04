@@ -236,6 +236,36 @@ select set_config('request.jwt.claim.sub',pg_temp.pid(102)::text,true);
 select is((select count(*) from public.assignment_change_requests),0::bigint,'upload-only cannot read general requests');
 reset role;
 update public.profiles set status='active' where id=pg_temp.pid(2);
+-- #584: effective privileges must deny destructive commands even with BYPASSRLS.
+select ok(has_table_privilege('service_role','public.assignment_change_requests','SELECT')
+  and has_table_privilege('service_role','public.assignment_change_requests','INSERT')
+  and has_table_privilege('service_role','public.assignment_change_requests','UPDATE'),
+  'service command read/insert/update grants retained');
+select ok(not has_table_privilege('service_role','public.assignment_change_requests','DELETE')
+  and not has_table_privilege('service_role','public.assignment_change_requests','TRUNCATE'),
+  'service role has no effective delete or truncate privilege');
+set local role service_role;
+select lives_ok($$select pg_temp.command(12,'request','acl-maid-request-0012')$$,
+  'service role can still create a cancellation request through RPC');
+select lives_ok($$select pg_temp.command(12,'decision','acl-reject-request-0012',
+  request_id=>(select id from public.assignment_change_requests where assignment_id=pg_temp.pid(412)),
+  decision=>'rejected')$$,'service role can still decide a cancellation request through RPC');
+reset role;
+select is((select status from public.assignment_change_requests where assignment_id=pg_temp.pid(412)),
+  'rejected','service RPC retains the decided request');
+insert into results values('history-before-acl-denials',
+  (select jsonb_agg(to_jsonb(r) order by r.id) from public.assignment_change_requests r));
+set local role service_role;
+select throws_ok($$delete from public.assignment_change_requests$$,'42501',
+  'permission denied for table assignment_change_requests','service DELETE denied before row guard');
+select throws_ok($$truncate table public.assignment_change_requests$$,'42501',
+  'permission denied for table assignment_change_requests','service TRUNCATE denied');
+select throws_ok($$truncate table public.assignment_change_requests cascade$$,'42501',
+  'permission denied for table assignment_change_requests','service TRUNCATE CASCADE denied');
+reset role;
+select is((select jsonb_agg(to_jsonb(r) order by r.id) from public.assignment_change_requests r),
+  (select value from results where name='history-before-acl-denials'),
+  'denied destructive commands preserve every request field and row');
 -- 재청소는 원 maid에게만 귀속한다. #27 재배정도 같은 불변식을 재검증한다.
 insert into public.cleaning_attempts(id,cleaning_target_id,assignment_id,maid_profile_id,attempt_number,status,assignment_revision,ended_at,end_reason,template_snapshot,room_snapshot)
 values(pg_temp.pid(512),pg_temp.pid(312),pg_temp.pid(412),pg_temp.pid(2),1,'rejected',2,now(),'INSPECTION_REJECTED','{}','{}');

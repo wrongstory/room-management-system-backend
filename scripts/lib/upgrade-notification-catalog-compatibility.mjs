@@ -24,8 +24,9 @@ function checkExpectedCount(expectedCount) {
   // 144 adds room memo revisions; 145 changes current-week approval timing.
   // 146 replaces six existing function bodies without adding catalog rows.
   // 147 removes one unused private helper argument without notification catalog changes.
-  assert(Number.isSafeInteger(expectedCount) && expectedCount >= 95 && expectedCount <= 148,
-    'Only the audited95..148 upgrade range is supported; 112..148 add no catalog rows');
+  // 149 only revokes destructive request-history grants; notification rows remain exact.
+  assert(Number.isSafeInteger(expectedCount) && expectedCount >= 95 && expectedCount <= 149,
+    'Only the audited95..149 upgrade range is supported; 112..149 add no catalog rows');
 }
 function catalogRows(value) {
   assert(Array.isArray(value), 'An existing baseline notification catalog is required');
