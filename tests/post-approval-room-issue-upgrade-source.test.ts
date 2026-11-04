@@ -221,8 +221,36 @@ describe('#336 isolated110->111 source/preflight only (no DB PASS claim)', () =>
     expect(() => validatePostApprovalUpgradeSource(manifest, renamed)).toThrow();
   });
 
+  it('rejects self-rehashed149 privilege expansion and timestamp renames', () => {
+    const changed = clone(entries), changedManifest = clone(manifest);
+    const tail = changed[148], record = changedManifest.migrations[148];
+    if (!tail || !record) throw new Error('EXPECTED149_TAIL');
+    tail.raw = Buffer.from('grant truncate on public.assignment_change_requests to service_role;\n');
+    record.sha256 = createHash('sha256').update(tail.raw).digest('hex');
+    expect(() => validatePostApprovalUpgradeSource(changedManifest, changed)).toThrow('Only reviewed request-history ACL149 tail');
+    const renamed = clone(entries), renamedTail = renamed[148];
+    if (!renamedTail) throw new Error('EXPECTED149_TAIL');
+    renamedTail.file = renamedTail.file.replace('20261104144746_', '20261104144747_');
+    expect(() => validatePostApprovalUpgradeSource(manifest, renamed)).toThrow();
+    expect(execFileSync).not.toHaveBeenCalled();
+  });
+
+  it('rejects self-rehashed150 privilege expansion and timestamp renames', () => {
+    const changed = clone(entries), changedManifest = clone(manifest);
+    const tail = changed[149], record = changedManifest.migrations[149];
+    if (!tail || !record) throw new Error('EXPECTED150_TAIL');
+    tail.raw = Buffer.from('grant truncate on public.assignment_change_requests to service_role;\n');
+    record.sha256 = createHash('sha256').update(tail.raw).digest('hex');
+    expect(() => validatePostApprovalUpgradeSource(changedManifest, changed)).toThrow('Only reviewed finite-authority150 tail');
+    const renamed = clone(entries), renamedTail = renamed[149];
+    if (!renamedTail) throw new Error('EXPECTED150_TAIL');
+    renamedTail.file = renamedTail.file.replace('20261104211056_', '20261104211057_');
+    expect(() => validatePostApprovalUpgradeSource(manifest, renamed)).toThrow();
+    expect(execFileSync).not.toHaveBeenCalled();
+  });
+
   it('accepts the unchanged historical145 prefix and exact reviewed146 extension', () => {
-    expect(source.entries).toHaveLength(148);
+    expect(source.entries).toHaveLength(150);
     expect(source.entries[145]?.file).toBe('20261101235131_db_lint_source_corrections.sql');
     expect(source.entries[145]?.sha256).toBe('b7f6834b471877e8a209116e669c566320bd2d67894952947abb351149377282');
     const historical = clone(manifest) as typeof manifest & { head: string; pending: { head: string; count: number } };

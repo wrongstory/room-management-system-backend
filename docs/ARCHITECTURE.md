@@ -893,6 +893,10 @@ DB impact도1,001 sentinel로 전체 후보 상한1,000을 확인한 뒤에만 f
 
 `assignment_change_requests`는 source identity 불변, assignment별 pending partial unique, terminal 수정/DELETE 금지입니다. authenticated에는 SELECT만 주며 RLS는 active admin 전체/maid 자기 요청만 허용합니다. developer는 business 요청을 읽지 못합니다. source assignment 종료 trigger가 pending을 superseded로 바꾸므로 예약 취소/조기 checkout 같은 기존 command도 ghost pending을 남기지 않습니다.
 
+#584 후속 migration은 provider 기본 권한에서 남을 수 있는 `service_role`의 DELETE/TRUNCATE를 명시 회수합니다. 행 트리거가 차단하지 못하는 TRUNCATE도 권한 단계에서 거부하며 SELECT/INSERT/UPDATE와 기존 요청·결정 RPC는 유지합니다. 실제 역할 거부·이력 보존 회귀 SQL은 최종 승인된 전체 DB 검증에서 실행합니다. 소스 검증만으로 운영 적용 완료를 뜻하지 않습니다.
+
+#586은 사용자 선택에 따라 요청표의 REFERENCES/TRIGGER/MAINTAIN과 기존 이력표5·가능일 view·민원 event sequence의 잔여 권한을 포함해 정확33권한만 추가 회수합니다. 업무권한14·RPC·일반 사용자/RLS·소유자/default ACL은 유지하고 이름/종류/identity와 effective 권한을 적용 거래 안에서 검사합니다. [권한 표·검증 경계](FINITE_SERVICE_ROLE_AUTHORITY_586.md)를 따르며 실제 DB 적용 승인은 별도입니다.
+
 변경은 과거 snapshot을 수정하지 않고 current 종료와 새 revision을 기록합니다. draft에는 알림이 없고 notified에는 기존 actionable notice resolve 및 새 notification/outbox가 receipt/audit와 함께 commit됩니다. 승인 결정은 request를 terminal로 만든 뒤 담당을 해제하며 반려는 담당을 유지합니다. source가 바뀐 요청은 새 assignment를 해제할 수 없습니다.
 
 일정 변경은 생성 command의 정확한 `manual_room_request + additional` 또는 `stayover_request + stayover` 조합에서 같은 날짜의 기존 창 축소만 구현합니다. stayover는 actual check-in 이후 active reservation의 같은 객실·점유 구간을 다시 검증합니다. source-kind 불일치와 checkout 원장 시간 변경은 거부합니다. 미래 planned checkout 재배정도 target identity를 그대로 쓰며 실제 checkout/PIN/attempt를 활성화하지 않습니다.
