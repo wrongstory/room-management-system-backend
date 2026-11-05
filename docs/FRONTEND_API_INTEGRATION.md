@@ -1,3 +1,11 @@
+## #589 런타임 버전 구분 — 개발 후보
+
+개발자 runtime-status와 overview의 source에 `releaseVersion`(백엔드 소스 릴리스)과
+`apiSchemaVersion`(OpenAPI info.version)을 추가한다. 기존 `apiVersion`은 명세 버전의
+호환 별칭으로 유지한다. 현재 후보는 각각 `1.0.0` / `0.6.0`이며 Deno 엔진 버전과 다르다.
+구형 응답의 릴리스는 추측하지 않고 확인 불가로 표시한다. 개발자 전용 권한을 유지하며
+아직 운영 재배포·프런트 수정 완료가 아니다. [표시·fallback·검증 계약](RUNTIME_VERSION_589.md)을 따른다.
+
 ## #577 관리자 타입별 단가 변경 추가
 
 사용자 선택으로 v1.0.0에 `PUT /v1/room-types/{roomTypeId}/cleaning-fee`를 추가한다. 기존 GET의 가격/version으로 확인하고 `baseCleaningFee`·`expectedVersion`·`confirmFutureTargetsOnly:true`와 Idempotency-Key를 보낸다. 기존 미래청소/진행청소/확정수당은 유지한다. 성공·재전송·409 후 목록을 새로 조회한다. API source는161paths/174operations다. 프런트정본의기준snapshot을 임의변경하지않으며 관리자화면연결/활성화/실사용은미완료다. [전체계약·운영경계](ROOM_TYPE_CLEANING_FEE_577.md)를 따른다.

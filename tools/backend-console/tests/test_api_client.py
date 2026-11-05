@@ -188,6 +188,37 @@ def test_runtime_target_mismatch_locks_session_before_mutation_ui_can_open() -> 
     assert account_error.value.code == "AUTHENTICATION_REQUIRED"
 
 
+@pytest.mark.parametrize("split_versions", [False, True])
+@pytest.mark.parametrize("target_matches", [False, True])
+def test_runtime_version_additions_preserve_target_guard_and_raw_fields(
+    split_versions: bool, target_matches: bool
+) -> None:
+    payload = runtime_response().json()
+    source = payload["runtime"]["source"]
+    if split_versions:
+        source.update(releaseVersion="1.0.0", apiSchemaVersion=source["apiVersion"])
+    if not target_matches:
+        payload["runtime"]["environment"] = "recovery"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/v1/developer/runtime-status"):
+            return httpx.Response(200, json=payload)
+        if request.url.path.endswith("/auth/v1/logout"):
+            return httpx.Response(204)
+        return httpx.Response(200, json=login_response())
+
+    client = BackendApiClient(config(), transport=httpx.MockTransport(handler))
+    if target_matches:
+        client.login("admin", "not-a-real-password")
+        assert client.is_authenticated
+        assert client.developer_runtime_status()["source"] == source
+    else:
+        with pytest.raises(ApiError) as error:
+            client.login("admin", "not-a-real-password")
+        assert error.value.code == "RUNTIME_TARGET_MISMATCH"
+        assert not client.is_authenticated
+
+
 def test_network_retry_reuses_command_key_without_retaining_phone_payload() -> None:
     command_keys: list[str] = []
     attempts = 0
