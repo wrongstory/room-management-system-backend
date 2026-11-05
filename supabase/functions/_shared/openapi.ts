@@ -9131,12 +9131,28 @@ export const openApiDocument = {
             type: "object",
             additionalProperties: false,
             required: [
+              "releaseVersion",
+              "apiSchemaVersion",
               "apiVersion",
               "expectedMigration",
               "fastifyRollbackBaseline",
             ],
             properties: {
-              apiVersion: { type: "string" },
+              releaseVersion: {
+                type: "string",
+                description: "Bundled backend source release (no v prefix).",
+                example: "1.0.0",
+              },
+              apiSchemaVersion: {
+                type: "string",
+                description: "Bundled OpenAPI info.version, not the release.",
+                example: "0.6.0",
+              },
+              apiVersion: {
+                type: "string",
+                deprecated: true,
+                description: "Compatibility alias of apiSchemaVersion.",
+              },
               expectedMigration: {
                 type: "string",
                 pattern: "^[a-z][a-z0-9_]{2,100}$",
