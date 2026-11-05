@@ -1,5 +1,6 @@
 import {
   assertEmptyDiagnosticRequestBody,
+  backendReleaseVersion,
   changeDeveloperRoomTypeCapacity,
   createDeveloperRoom,
   developerAuditEvents,
@@ -149,6 +150,51 @@ Deno.test("developer audit mapper exposes only the bounded camelCase projection"
   assert(event.actorProfileId !== null, "actorProfileId must be mapped");
   assert(!("before_state" in event), "raw before_state must never leak");
   assert(!("after_state" in event), "raw after_state must never leak");
+});
+
+Deno.test("developer runtime separates the bundled release from schema and engine versions", () => {
+  const get = Deno.env.get;
+  try {
+    // No arbitrary deployment/version environment value may override the bundle.
+    Deno.env.get = () => "synthetic-untrusted-version";
+    const result = developerRuntimeStatus();
+    const source = result.source as Record<string, unknown>;
+    const schema = openApiDocument.components.schemas.DeveloperRuntimeStatus
+      .properties.source;
+    assert(
+      backendReleaseVersion === "1.0.0",
+      "current source release identity",
+    );
+    assert(source.releaseVersion === backendReleaseVersion, "bundled release");
+    assert(
+      source.apiSchemaVersion === openApiDocument.info.version,
+      "schema identity comes from the same bundled OpenAPI",
+    );
+    assert(
+      source.apiVersion === source.apiSchemaVersion,
+      "legacy alias preserved",
+    );
+    assert(
+      (result.runtime as Record<string, unknown>).version === Deno.version.deno,
+      "engine version remains Deno's actual version",
+    );
+    assert(
+      Object.keys(source).sort().join() ===
+        Object.keys(schema.properties).sort().join(),
+      "response source keys match the closed OpenAPI schema",
+    );
+    assert(
+      schema.required.every((key) => typeof source[key] === "string"),
+      "required source fields are present strings",
+    );
+    assert(schema.properties.apiVersion.deprecated, "legacy alias documented");
+    assert(
+      !JSON.stringify(source).includes("synthetic-untrusted-version"),
+      "environment contents do not become release metadata",
+    );
+  } finally {
+    Deno.env.get = get;
+  }
 });
 
 Deno.test("developer source migration head uses a stable migration name", () => {
