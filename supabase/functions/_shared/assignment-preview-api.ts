@@ -2,6 +2,7 @@ import { readJsonBody } from "./account-api.ts";
 import {
   AssignmentPreviewError,
   optimizeAssignmentPreview,
+  previewStrategies,
 } from "./assignment-preview-core.ts";
 import {
   type EdgeActor,
@@ -54,9 +55,11 @@ export async function previewAssignments(
   const body = await readJsonBody(request);
   if (
     Object.keys(body).some((key) =>
-      !["serviceDate", "previewSeed"].includes(key)
+      !["serviceDate", "previewSeed", "strategy"].includes(key)
     )
   ) invalid();
+  const strategy = previewStrategies.find((value) => value === body.strategy);
+  if (body.strategy !== undefined && strategy === undefined) invalid();
   const serviceDate = previewServiceDate(body.serviceDate);
   const seed = body.previewSeed === undefined
     ? crypto.randomUUID()
@@ -73,7 +76,7 @@ export async function previewAssignments(
   );
   if (error || !data) throw previewDatabaseError(error);
   try {
-    return await optimizeAssignmentPreview(data, seed);
+    return await optimizeAssignmentPreview(data, seed, strategy);
   } catch (error) {
     if (error instanceof AssignmentPreviewError) {
       throw previewDatabaseError({ message: error.code });

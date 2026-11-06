@@ -364,3 +364,32 @@ describe('assignment preview Fastify parity', () => {
     await app.close();
   });
 });
+
+it('prioritizes route, fee or room count on the same six-room preview', async () => {
+  const serviceDate = today();
+  const base = zeroPreviewSnapshot(serviceDate);
+  const maids = ['a', 'b'].map(maidProfileId => ({
+    ...base.maids[0], maidProfileId, available: true, availabilityVersion: 1
+  }));
+  const targets = [1000, 5000, 1000, 3000, 4000, 4000].map((feeSnapshot, i) => ({
+    ...base.targets[i], feeSnapshot, elevatorZone: i < 2 ? 'A' : 'B'
+  }));
+  const rpc = vi.fn(async () => ({ data: { ...base, maids, targets }, error: null }));
+  const app = await appWith(new SupabaseAssignmentPreviewService(clientsWithRpc(rpc)));
+  const preview = (strategy?: string) => app.inject({ method: 'POST', url: '/v1/assignments/preview',
+    payload: { serviceDate, previewSeed: 'strategy', strategy } });
+  try {
+    const legacy = (await preview()).json();
+    expect((await preview('proximity')).json()).toEqual(legacy);
+    const fee = (await preview('fee_balance')).json();
+    const count = (await preview('room_count_balance')).json();
+    const summary = (result: typeof legacy) => result.maidSummaries.map(
+      (maid: { proposedCount: number; totalFee: number }) => [maid.proposedCount, maid.totalFee]);
+    expect(summary(legacy)).toEqual([[4, 10000], [2, 8000]]);
+    expect(summary(fee)).toEqual([[4, 9000], [2, 9000]]);
+    expect(summary(count)).toEqual([[3, 7000], [3, 11000]]);
+    expect(new Set([legacy.inputFingerprint, fee.inputFingerprint, count.inputFingerprint]).size).toBe(3);
+    expect((await preview('unknown')).statusCode).toBe(400);
+    expect(rpc).toHaveBeenCalledTimes(4);
+  } finally { await app.close(); }
+});
