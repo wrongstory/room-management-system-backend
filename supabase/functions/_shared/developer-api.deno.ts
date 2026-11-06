@@ -162,7 +162,7 @@ Deno.test("developer runtime separates the bundled release from schema and engin
     const schema = openApiDocument.components.schemas.DeveloperRuntimeStatus
       .properties.source;
     assert(
-      backendReleaseVersion === "1.0.4",
+      backendReleaseVersion === "1.0.6",
       "current source release identity",
     );
     assert(source.releaseVersion === backendReleaseVersion, "bundled release");
