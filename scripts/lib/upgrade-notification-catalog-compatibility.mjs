@@ -72,6 +72,26 @@ function catalogRows(value) {
   return [...value].sort((a, b) => a.event_family.localeCompare(b.event_family));
 }
 
+/** The 56/73 cumulative probes allow later additions but preserve every old whole row. */
+export function assertCumulativeNotificationCatalog(before, after, expectedCount) {
+  assert(Number.isSafeInteger(expectedCount) && expectedCount >= 78 && expectedCount <= 152,
+    'Only the audited 78..152 cumulative upgrade range is supported');
+  const previous = catalogRows(before), installed = catalogRows(after);
+  assert(previous.length > 0, 'The existing cumulative baseline catalog cannot be empty');
+  if (expectedCount === 152) {
+    assert.equal(previous.filter(row => APPROVED_ALL_PUSH_FAMILIES.includes(row.event_family)
+      && row.push_eligible === false).length, APPROVED_ALL_PUSH_FAMILIES.length,
+    'Exactly sixteen existing false-to-true flags are reviewed');
+  }
+  const byFamily = new Map(installed.map(row => [row.event_family, row]));
+  for (const row of previous) {
+    const expected = expectedCount === 152 && APPROVED_ALL_PUSH_FAMILIES.includes(row.event_family)
+      ? { ...row, push_eligible: true } : row;
+    assert.deepEqual(byFamily.get(row.event_family), expected,
+      'Every cumulative baseline catalog row must remain exact except the approved sixteen push flags');
+  }
+}
+
 /** Compare every whole old catalog row; permit only the exact new111 metadata. */
 export function assertUpgradeNotificationCatalog(before, after, expectedCount) {
   checkExpectedCount(expectedCount);

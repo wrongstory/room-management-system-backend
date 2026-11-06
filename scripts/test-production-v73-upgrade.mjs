@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { assertCumulativeNotificationCatalog } from "./lib/upgrade-notification-catalog-compatibility.mjs";
 
 const root = new URL("..", import.meta.url);
 const supabaseCli = fileURLToPath(
@@ -91,9 +92,15 @@ function baselineTableShape() {
   );
 }
 
-function tableRowHashes({ table_schema: schema, table_name: table, columns }) {
+function tableRowsSnapshot({ table_schema: schema, table_name: table, columns }) {
   const qualified = `${quoteIdentifier(schema)}.${quoteIdentifier(table)}`;
   const selected = columns.map(quoteIdentifier).join(",");
+  // Catalog metadata is non-sensitive. Keep it unfiltered so the reviewed flag
+  // transition is checked directly, without masking changes in the actual rows.
+  if (schema === "private" && table === "notification_event_catalog") {
+    return JSON.parse(psql(`select coalesce(jsonb_agg(to_jsonb(source_rows)
+      order by event_family),'[]'::jsonb) from (select ${selected} from ${qualified}) source_rows`));
+  }
   return JSON.parse(psql(`with source_rows as (
       select ${selected} from ${qualified}
     ), row_hashes as (
@@ -109,7 +116,7 @@ function tableRowHashes({ table_schema: schema, table_name: table, columns }) {
 
 function captureBaseline(shape) {
   return Object.fromEntries(
-    shape.map((table) => [`${table.table_schema}.${table.table_name}`, tableRowHashes(table)]),
+    shape.map((table) => [`${table.table_schema}.${table.table_name}`, tableRowsSnapshot(table)]),
   );
 }
 
@@ -118,7 +125,7 @@ function assertRowsPreserved(before, after, table) {
   for (const hash of after) remaining.set(hash, (remaining.get(hash) ?? 0) + 1);
   for (const hash of before) {
     const count = remaining.get(hash) ?? 0;
-    assert(count > 0, `migration 74 -> 77 changed or removed an existing ${table} row`);
+    assert(count > 0, `cumulative upgrade from 73 changed or removed an existing ${table} row`);
     remaining.set(hash, count - 1);
   }
 }
@@ -171,7 +178,11 @@ try {
   assertHistory(migrationHistory(), expectedMigrations, "release candidate");
   const after = captureBaseline(shape);
   for (const [table, hashes] of Object.entries(before)) {
-    assertRowsPreserved(hashes, after[table], table);
+    if (table === "private.notification_event_catalog") {
+      assertCumulativeNotificationCatalog(hashes, after[table], expectedMigrations.length);
+    } else {
+      assertRowsPreserved(hashes, after[table], table);
+    }
   }
 
   const finalState = psql(`select concat_ws('|',
@@ -191,7 +202,7 @@ try {
 
   passed = true;
   process.stdout.write(
-    `production-baseline 73 -> 78 cumulative upgrade: PASS (${shape.length} baseline tables preserved)\n`,
+    `production-baseline 73 -> ${expectedMigrations.length} cumulative upgrade: PASS (${shape.length} baseline tables preserved)\n`,
   );
 } finally {
   try {
