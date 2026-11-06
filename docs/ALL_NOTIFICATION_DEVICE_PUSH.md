@@ -12,6 +12,10 @@
 
 ## 실제 실행 상태
 
+2026-11-06 사용자 승인 후보d298266의 PR #598/run42148654613은 application PASS다. 전체 DB job127666193914는 누적56/73을 포함한 업그레이드 체인을 지나 최종SQL121파일/6,635건을 실행했으나 두 파일에서 실패했다. 가능일 알림 fixture가 업무 계정 뒤에 개발자를 직접 생성해 `DEVELOPER_ALREADY_EXISTS`로22개 assertion 실행 전에 종료됐고, 주급 시작 fixture는 새 정책과 달리 push0개를 기대했다. local Supabase stop과 job cleanup은 성공했다. 이후 static-warning·clock·경합 및 최종 proof는 실행되지 않았으며 운영 반영은0회다.
+
+PR #599는 정보성 주급 시작의 push1개·requires_action=false 기대를 보완했고 개발 CI를 통과해dev6cb59fd로 병합됐다(Full DB NOT RUN). 후속 fixture 수정은 공식 bootstrap 명령으로 개발자를 먼저 생성한 다음 관리자·메이드를 등록한다. 개발자 수신 제외를 포함한 기존22개 assertion과 운영 계정 보호 규칙을 유지한다. 알림 migration·API·worker는 변경하지 않는다. 수정 통합 후보의 전체 DB는 별도1회 승인이 필요하다.
+
 2026-11-06 수정 후보fbd7583의 run42143097303 attempt1은 검증용54322 포트 충돌로 DB 시작 전에 실패했다. 사용자 승인 후 실패 job만1회 재실행한 attempt2/job127650248891은 fresh152·최종 catalog·template·TLS/atomic fixture·승인된 lint baseline·합성 backup dry-run을 통과했다. 이어 누적56→152 업그레이드의 기존 catalog 행 보존 검사가 요청된16개 push flag 변경을 거부해 실패했고 cleanup은 성공했다. 전체SQL·나머지upgrade·경합은 완료되지 않았고 운영 적용은0회다.
 
 후속 수정은56/73 누적 업그레이드 두 곳에서 catalog 원문 메타데이터를 별도로 대조한다. 기존16개가 모두false였다는 전제 아래152에서만true를 기대하며, 수신자·정보성 상태·링크·나머지 모든 기존 필드와 다른 테이블의 행 해시 보존은 그대로 검사한다. 소스SQL·API·worker·운영 실행 범위는 바꾸지 않는다. 새 입력의 전체DB 재실행은 별도1회 승인이 필요하다.
