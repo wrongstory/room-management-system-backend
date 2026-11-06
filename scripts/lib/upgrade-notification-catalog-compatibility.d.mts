@@ -10,6 +10,9 @@ export const APPROVED_UPGRADE_NOTIFICATION_CATALOG_ROW: Readonly<Record<string, 
 export function assertUpgradeNotificationCatalog(
   before: unknown, after: unknown, expectedCount: number
 ): void;
+export function assertCumulativeNotificationCatalog(
+  before: unknown, after: unknown, expectedCount: number
+): void;
 export function upgradeHistorySnapshotSql(
   shape: UpgradeHistoryShape[], expectedCount: number, excludeApprovedAddition?: boolean
 ): string;

@@ -1,12 +1,50 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
 import { validatePostApprovalUpgradeSource } from '../scripts/test-post-approval-room-issue-upgrade.mjs';
-import { APPROVED_ALL_PUSH_FAMILIES, APPROVED_AVAILABILITY_NOTIFICATION_ROWS, APPROVED_UPGRADE_NOTIFICATION_CATALOG_ROW as addition, assertUpgradeNotificationCatalog,
+import { APPROVED_ALL_PUSH_FAMILIES, APPROVED_AVAILABILITY_NOTIFICATION_ROWS, APPROVED_UPGRADE_NOTIFICATION_CATALOG_ROW as addition, assertUpgradeNotificationCatalog, assertCumulativeNotificationCatalog,
   upgradeHistorySnapshotSql } from '../scripts/lib/upgrade-notification-catalog-compatibility.mjs';
 
 const old = [{ event_family: 'existing.family', category: 'existing-category', preserved: { value: 1 } }];
 const installed = () => structuredClone([...old, addition]);
 describe('historical upgrade notification catalog compatibility', () => {
+  const cumulativeBefore = () => [...old, ...APPROVED_ALL_PUSH_FAMILIES.map(event_family => ({
+    event_family, push_eligible: false, requires_action: false, recipient_capability: 'same-recipient',
+    deep_link_kind: 'same-link', preserved: { value: 1 },
+  }))];
+  const cumulativeAfter = () => [...cumulativeBefore().map(row => APPROVED_ALL_PUSH_FAMILIES.includes(row.event_family)
+    ? { ...row, push_eligible: true } : row), addition, ...APPROVED_AVAILABILITY_NOTIFICATION_ROWS];
+  it('checks56/73 baseline rows directly while allowing their later additive families', () => {
+    expect(() => assertCumulativeNotificationCatalog(cumulativeBefore(), cumulativeAfter().reverse(), 152)).not.toThrow();
+    for (const count of [78, 94, 111, 151]) {
+      expect(() => assertCumulativeNotificationCatalog(cumulativeBefore(), [...cumulativeBefore(), addition], count)).not.toThrow();
+      expect(() => assertCumulativeNotificationCatalog(cumulativeBefore(), cumulativeAfter(), count)).toThrow();
+    }
+  });
+  it.each(['push_eligible', 'requires_action', 'recipient_capability', 'deep_link_kind', 'preserved'])(
+    'rejects every unexpected cumulative baseline %s change', key => {
+      for (const family of APPROVED_ALL_PUSH_FAMILIES) {
+        const after = cumulativeAfter().map(row => row.event_family === family ? { ...row, [key]: 'unreviewed' } : row);
+        expect(() => assertCumulativeNotificationCatalog(cumulativeBefore(), after, 152)).toThrow();
+      }
+    });
+  it('rejects lost/duplicated old rows, incomplete flag changes and invalid cumulative baselines', () => {
+    const before = cumulativeBefore(), after = cumulativeAfter();
+    for (const row of before) {
+      expect(() => assertCumulativeNotificationCatalog(before, after.filter(item => item.event_family !== row.event_family), 152)).toThrow();
+      expect(() => assertCumulativeNotificationCatalog(before, [...after, row], 152)).toThrow();
+    }
+    for (const invalidBefore of [[], before.slice(0, -1), [...before, before[0]],
+      before.map(row => row.event_family === APPROVED_ALL_PUSH_FAMILIES[0] ? { ...row, push_eligible: true } : row)]) {
+      expect(() => assertCumulativeNotificationCatalog(invalidBefore, after, 152)).toThrow();
+    }
+    expect(() => assertCumulativeNotificationCatalog(before.filter(row => row.event_family !== APPROVED_ALL_PUSH_FAMILIES[0]), after, 152)).toThrow();
+    expect(() => assertCumulativeNotificationCatalog(before, before, 152)).toThrow();
+    expect(() => assertCumulativeNotificationCatalog(before, after.map(row => row.event_family === old[0]?.event_family
+      ? { ...row, push_eligible: true } : row), 152)).toThrow();
+    for (const count of [77, 153, 152.5, Number.NaN]) {
+      expect(() => assertCumulativeNotificationCatalog(before, after, count)).toThrow();
+    }
+  });
   it('permits only the complete approved111 addition with every original whole row intact', () => {
     expect(() => assertUpgradeNotificationCatalog(old, installed(), 111)).not.toThrow();
     expect(() => assertUpgradeNotificationCatalog(old, installed().reverse(), 111)).not.toThrow();

@@ -12,7 +12,11 @@
 
 ## 실제 실행 상태
 
-PR #595 최초 전체 DB run42141304313은 source151 함수 타입 오류로 strict lint에서 실패했다. fresh 적용·catalog·template·TLS 검사 후 중단했고 cleanup은 성공했다. SQL 전체·upgrade·경합은 완료되지 않았다. 재실행 및 운영 적용은 아직 하지 않았다.
+2026-11-06 수정 후보fbd7583의 run42143097303 attempt1은 검증용54322 포트 충돌로 DB 시작 전에 실패했다. 사용자 승인 후 실패 job만1회 재실행한 attempt2/job127650248891은 fresh152·최종 catalog·template·TLS/atomic fixture·승인된 lint baseline·합성 backup dry-run을 통과했다. 이어 누적56→152 업그레이드의 기존 catalog 행 보존 검사가 요청된16개 push flag 변경을 거부해 실패했고 cleanup은 성공했다. 전체SQL·나머지upgrade·경합은 완료되지 않았고 운영 적용은0회다.
+
+후속 수정은56/73 누적 업그레이드 두 곳에서 catalog 원문 메타데이터를 별도로 대조한다. 기존16개가 모두false였다는 전제 아래152에서만true를 기대하며, 수신자·정보성 상태·링크·나머지 모든 기존 필드와 다른 테이블의 행 해시 보존은 그대로 검사한다. 소스SQL·API·worker·운영 실행 범위는 바꾸지 않는다. 새 입력의 전체DB 재실행은 별도1회 승인이 필요하다.
+
+PR #595 최초 전체 DB run42141304313은 source151 함수 타입 오류로 strict lint에서 실패했다. fresh 적용·catalog·template·TLS 검사 후 중단했고 cleanup은 성공했다. 이후 재실행 결과는 위 기록을 따르며 운영 적용은 아직 하지 않았다.
 
 읽기 확인: 운영은150 migrations, Web Push 구독/revision0, notification Cron0, Vault 호출키0, pending10(모두24시간 경과)·target0. VAPID 및 binding/invoke Function Secrets도 없다. 단순 Edge ACTIVE를 전달 성공으로 보지 않는다.
 
