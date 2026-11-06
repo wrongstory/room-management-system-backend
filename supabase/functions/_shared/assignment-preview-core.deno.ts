@@ -54,19 +54,19 @@ Deno.test("room proximity and room uniqueness preserve fixed work in the Edge co
   const before = JSON.stringify(input);
   const r = await optimizeAssignmentPreview(input, "floor");
   if (
-    r.proposedAssignments[0]?.maidProfileId !== "b" ||
-    r.objectiveScore.routeScore.floorDistance !== 1 ||
+    r.proposedAssignments[0]?.maidProfileId !== "a" ||
+    r.objectiveScore.routeScore.floorDistance !== 0 ||
     JSON.stringify(input) !== before ||
     r.fixedAssignments.length !== 2 ||
     r.proposedAssignments[0]?.proposedSequenceNumber !== 2
   ) {
     throw new Error(
-      "Room-distance priority or fixed snapshot preservation failed",
+      "Elevator/floor priority or fixed snapshot preservation failed",
     );
   }
   b.feeSnapshot = 90000;
   const balanced = await optimizeAssignmentPreview(input, "fee");
-  if (balanced.proposedAssignments[0]?.maidProfileId !== "b") {
+  if (balanced.proposedAssignments[0]?.maidProfileId !== "a") {
     throw new Error("Fee balance overrode room proximity");
   }
   const dense = await optimizeAssignmentPreview({
