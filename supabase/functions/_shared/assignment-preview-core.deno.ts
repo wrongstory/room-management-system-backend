@@ -3,7 +3,7 @@ import {
   type PreviewTarget,
 } from "./assignment-preview-core.ts";
 
-Deno.test("floor proximity preserves fixed work and fee priority in the Edge core", async () => {
+Deno.test("room proximity and room uniqueness preserve fixed work in the Edge core", async () => {
   const makeTarget = (id: string, roomNumber: string): PreviewTarget => ({
     cleaningTargetId: id,
     roomId: `room-${id}`,
@@ -54,20 +54,38 @@ Deno.test("floor proximity preserves fixed work and fee priority in the Edge cor
   const before = JSON.stringify(input);
   const r = await optimizeAssignmentPreview(input, "floor");
   if (
-    r.proposedAssignments[0]?.maidProfileId !== "a" ||
-    r.objectiveScore.routeScore.floorDistance !== 0 ||
+    r.proposedAssignments[0]?.maidProfileId !== "b" ||
+    r.objectiveScore.routeScore.floorDistance !== 1 ||
     JSON.stringify(input) !== before ||
     r.fixedAssignments.length !== 2 ||
     r.proposedAssignments[0]?.proposedSequenceNumber !== 2
   ) {
     throw new Error(
-      "Same-floor assignment or fixed snapshot preservation failed",
+      "Room-distance priority or fixed snapshot preservation failed",
     );
   }
-  a.feeSnapshot = 60000;
+  b.feeSnapshot = 90000;
   const balanced = await optimizeAssignmentPreview(input, "fee");
   if (balanced.proposedAssignments[0]?.maidProfileId !== "b") {
-    throw new Error("Floor proximity overrode fee balance");
+    throw new Error("Fee balance overrode room proximity");
+  }
+  const duplicate = [
+    makeTarget("old-350", "350"),
+    makeTarget("new-350", "350"),
+  ];
+  for (const t of duplicate) t.roomId = "room-350";
+  const conflicted = await optimizeAssignmentPreview({
+    ...input,
+    targets: [a, b, ...duplicate],
+  }, "duplicate");
+  if (
+    conflicted.proposedAssignments.length ||
+    conflicted.blockedTargets.length !== 2 ||
+    conflicted.blockedTargets.some((t) =>
+      t.reason !== "ASSIGNMENT_ROOM_CONFLICT"
+    )
+  ) {
+    throw new Error("Different targets double-booked a physical room");
   }
 });
 
