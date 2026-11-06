@@ -5,11 +5,13 @@ import type { SupabaseClients } from '../../lib/supabase.js';
 import {
   AssignmentPreviewError,
   optimizeAssignmentPreview,
+  type PreviewStrategy,
   type AssignmentPreviewResult
 } from './assignment-preview-core.js';
 
 export interface AssignmentPreviewInput {
   serviceDate: string;
+  strategy?: PreviewStrategy | undefined;
   previewSeed?: string | undefined;
 }
 
@@ -96,7 +98,7 @@ export class SupabaseAssignmentPreviewService implements AssignmentPreviewServic
     });
     if (error || !data) throw previewError(error);
     try {
-      return await optimizeAssignmentPreview(data, previewSeed);
+      return await optimizeAssignmentPreview(data, previewSeed, input.strategy);
     } catch (error) {
       if (error instanceof AssignmentPreviewError) {
         throw previewError({ message: error.code });

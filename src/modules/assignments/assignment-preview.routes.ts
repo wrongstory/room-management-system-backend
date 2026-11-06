@@ -3,9 +3,12 @@ import { z } from 'zod';
 import { AppError } from '../../lib/app-error.js';
 import type { AssignmentPreviewService } from './assignment-preview.service.js';
 
+import { previewStrategies } from './assignment-preview-core.js';
+
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const previewBody = z.object({
   serviceDate: date,
+  strategy: z.enum(previewStrategies).optional(),
   previewSeed: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/).optional()
 }).strict();
 

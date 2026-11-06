@@ -359,3 +359,28 @@ Deno.test("historical duration config is read-only and confirmation is retired",
     "historical GET is read-only",
   );
 });
+
+Deno.test("selected preview strategies reach the shared planner and unknown values fail before RPC", async () => {
+  const serviceDate = today(), data = zeroPreviewSnapshot(serviceDate);
+  const mock = clients(null, data);
+  for (const strategy of ["fee_balance", "room_count_balance"] as const) {
+    const response = await previewAssignments(
+      request({ serviceDate, previewSeed: "chosen", strategy }),
+      mock.client,
+      admin,
+    );
+    const expected = await optimizeAssignmentPreview(data, "chosen", strategy);
+    assert(response.inputFingerprint === expected.inputFingerprint, strategy);
+  }
+  let rejected = false;
+  try {
+    await previewAssignments(
+      request({ serviceDate, strategy: "unknown" }),
+      mock.client,
+      admin,
+    );
+  } catch (error) {
+    rejected = error instanceof EdgeError && error.status === 400;
+  }
+  assert(rejected && mock.calls.length === 2, "unknown strategy rejected");
+});

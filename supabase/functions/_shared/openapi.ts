@@ -7726,6 +7726,13 @@ export const openApiDocument = {
             format: "date",
             description: "KST 오늘 또는 내일",
           },
+          strategy: {
+            type: "string",
+            enum: ["proximity", "fee_balance", "room_count_balance"],
+            default: "proximity",
+            description:
+              "배정 건수와 요금 목표 초과분을 먼저 비교한 뒤 동선, 요금 균등 또는 고정 업무 포함 객실 건수 균등을 우선합니다.",
+          },
           previewSeed: {
             type: "string",
             minLength: 1,
