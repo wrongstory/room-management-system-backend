@@ -15,3 +15,5 @@ export function upgradeHistorySnapshotSql(
 ): string;
 
 export const APPROVED_AVAILABILITY_NOTIFICATION_ROWS: ReadonlyArray<Readonly<Record<string, string | number | boolean>>>;
+
+export const APPROVED_ALL_PUSH_FAMILIES: ReadonlyArray<string>;

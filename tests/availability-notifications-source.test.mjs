@@ -11,6 +11,8 @@ describe('availability notification source preparation (DB NOT RUN)', () => {
     const parser = require(`@pgsql/parser/v${version}`);
     expect((await parser.parse(migration)).stmts.length).toBeGreaterThan(10);
     expect((await parser.parse(regression)).stmts.length).toBeGreaterThan(25);
+    expect((await parser.parse(read('supabase/migrations/20261106010813_all_notification_device_push.sql'))).stmts.length).toBe(5);
+    expect((await parser.parse(read('ops/notification-delivery/activate.sql'))).stmts.length).toBe(5);
     expect(regression.trim()).toMatch(/^begin;[\s\S]*rollback;$/);
   });
   it('pins the appended migration and limits new private functions to their owner', () => {
@@ -18,6 +20,7 @@ describe('availability notification source preparation (DB NOT RUN)', () => {
     expect(manifest.migrations[150]).toEqual({order:151,name:'availability_change_notifications',sha256:createHash('sha256').update(migration).digest('hex')});
     expect(migration).toContain('from public,anon,authenticated,service_role');
     expect(migration).not.toMatch(/grant\s|update public\.availability|delete from|insert into public\.notifications/i);
+    expect(migration).toContain('request.status::text=p_phase');
     expect(migration).toContain('private.emit_notification_v1(');
     expect(migration).toContain('private.resolve_notifications_v1(');
   });
