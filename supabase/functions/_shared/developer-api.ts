@@ -13,7 +13,7 @@ import {
 } from "./runtime.ts";
 import { validateWebPushProviderConfig } from "./web-push-provider.ts";
 
-export const expectedMigrationName = "availability_change_notifications";
+export const expectedMigrationName = "all_notification_device_push";
 // Bundled source release identity, independent of OpenAPI and Deno versions.
 // This is not evidence that rollout, migrations or user acceptance are complete.
 export const backendReleaseVersion = "1.0.1";

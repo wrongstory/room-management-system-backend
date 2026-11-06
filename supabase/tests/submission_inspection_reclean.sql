@@ -324,6 +324,10 @@ select is((select count(*) from public.earnings where submission_id=(select (val
 select ok(not (select requires_action from public.notifications
   where event_family like 'inspection.%approved' and source_entity_id=(select value->>'decisionId' from submission_results where label='bomb-approved')),
   'approval notification is informational and creates no false unresolved action');
+select ok(exists(select 1 from private.notification_delivery_outbox o join public.notifications n on n.id=o.notification_id
+  where n.event_family='inspection.original_approved' and not n.requires_action),
+  'inspection approval queues device push while remaining informational');
+
 select is(public.report_bomb_room(pg_temp.pid(2),pg_temp.pid(503),array[(select photo_version_id from private.attempt_photo_current where cleaning_attempt_id=pg_temp.pid(503))],
  '폭탄방 합성 메모','bomb-report-key',repeat('1',64)),(select value from submission_results where label='bomb-report'),'bomb report retry remains replayable after approval');
 

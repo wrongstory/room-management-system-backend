@@ -16,6 +16,24 @@ export const APPROVED_AVAILABILITY_NOTIFICATION_ROWS = Object.freeze(['requested
   resolver_kind: phase === 'requested' ? 'availability_decision' : 'none', deep_link_kind: 'availabilityRequest',
   group_family: `availability_change_${phase}`, group_scope_kind: 'availabilityRequest', contract_version: 1,
 })));
+export const APPROVED_ALL_PUSH_FAMILIES = Object.freeze([
+  'inspection.original_approved',
+  'inspection.reclean_approved',
+  'inspection.complaint_rework_approved',
+  'inspection.complaint_rework_rejected',
+  'complaint.received',
+  'complaint.corrected',
+  'complaint.acknowledged',
+  'complaint.closed',
+  'payroll.adjustment_recorded',
+  'payroll.adjustment_reversed',
+  'payroll.late_earning_carried',
+  'payroll.payment_started',
+  'payroll.offset_settled',
+  'payroll.payment_check_recorded',
+  'payroll.payment_paid',
+  'payroll.payment_reopened'
+]);
 const approvedAdditions = expectedCount => [APPROVED_UPGRADE_NOTIFICATION_CATALOG_ROW,
   ...(expectedCount >= 151 ? APPROVED_AVAILABILITY_NOTIFICATION_ROWS : [])];
 const catalogTable = 'private.notification_event_catalog';
@@ -36,8 +54,8 @@ function checkExpectedCount(expectedCount) {
   // 147 removes one unused private helper argument without notification catalog changes.
   // 150 narrows exactly 33 service privileges without catalog row changes.
   // 149 only revokes destructive request-history grants; notification rows remain exact.
-  assert(Number.isSafeInteger(expectedCount) && expectedCount >= 95 && expectedCount <= 151,
-    'Only the audited95..151 upgrade range is supported; 151 adds exactly three availability families');
+  assert(Number.isSafeInteger(expectedCount) && expectedCount >= 95 && expectedCount <= 152,
+    'Only the audited95..152 upgrade range is supported; 151 adds exactly three availability families');
 }
 function catalogRows(value) {
   assert(Array.isArray(value), 'An existing baseline notification catalog is required');
@@ -71,7 +89,13 @@ export function assertUpgradeNotificationCatalog(before, after, expectedCount) {
   assert.deepEqual(catalogRows(installed.filter(row => families.has(row.event_family))), catalogRows(additions),
     'Every approved typed metadata field must match, with no missing or extra family or field');
   assert.equal(installed.length, previous.length + additions.length, 'No other catalog addition is permitted');
-  assert.deepEqual(installed.filter(row => !families.has(row.event_family)), previous,
+  const expectedPrevious = previous.map(row => expectedCount >= 152 && APPROVED_ALL_PUSH_FAMILIES.includes(row.event_family)
+    ? {...row, push_eligible: true} : row);
+  if (expectedCount >= 152) {
+    assert.equal(previous.filter(row => APPROVED_ALL_PUSH_FAMILIES.includes(row.event_family) && row.push_eligible === false).length,
+      APPROVED_ALL_PUSH_FAMILIES.length, 'Exactly sixteen existing false-to-true flags are reviewed');
+  }
+  assert.deepEqual(installed.filter(row => !families.has(row.event_family)), expectedPrevious,
     'Every baseline catalog whole row remains exact; no mutation, removal or extra family');
 }
 
@@ -94,9 +118,12 @@ export function upgradeHistorySnapshotSql(shape, expectedCount, excludeApprovedA
     assert(Array.isArray(columns) && columns.length > 0 && new Set(columns).size === columns.length
       && columns.every(column => typeof column === 'string' && /^[a-z_][a-z_0-9]*$/.test(column)),
     'Original baseline column identifiers');
+    const projection = exclude && expectedCount >= 152 && table === catalogTable
+      ? `case when t.event_family in (${APPROVED_ALL_PUSH_FAMILIES.map(literal).join(',')}) then to_jsonb(t)||jsonb_build_object('push_eligible',false) else to_jsonb(t) end`
+      : 'to_jsonb(t)';
     const where = exclude && table === catalogTable
       ? ` where ${approvedAdditions(expectedCount).map(row => `t.event_family<>${literal(row.event_family)}`).join(' and ')}` : '';
-    return `select ${literal(table)} tag,(select jsonb_object_agg(key,value) from jsonb_each(to_jsonb(t))
+    return `select ${literal(table)} tag,(select jsonb_object_agg(key,value) from jsonb_each(${projection})
       where key=any(array[${columns.map(literal).join(',')}]::text[]))::text data from ${table} t${where}`;
   });
   const wholeCatalog = catalog
