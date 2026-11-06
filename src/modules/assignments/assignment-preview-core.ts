@@ -641,10 +641,12 @@ function parseSnapshot(input: unknown): PreviewSnapshot {
 /** 금액 편차는 평균의 부동소수점 오차 없이 Σ(n*fee - Σfee)^2 정수로 비교한다. */
 function compare(a: Score, b: Score): number {
   if (a.count !== b.count) return b.count - a.count;
+  const route = a.distance - b.distance || a.zones - b.zones ||
+    a.floorDistance - b.floorDistance;
+  if (route) return route;
   if (a.spread !== b.spread) return a.spread - b.spread;
   if (a.deviation !== b.deviation) return a.deviation < b.deviation ? -1 : 1;
-  return a.zones - b.zones || a.floorDistance - b.floorDistance ||
-    a.distance - b.distance;
+  return 0;
 }
 function boardKey(board: Board): string {
   return JSON.stringify(
@@ -758,7 +760,7 @@ export async function optimizeAssignmentPreview(
       seen.add(slot);
     }
   }
-  const candidates = snapshot.targets.filter((t) => {
+  const eligibleTargets = snapshot.targets.filter((t) => {
     if (t.currentAssignment || t.activeAttempt) return false;
     const reason = t.blockedReason ??
       (!candidateDateAllowed(t.serviceDate)
@@ -774,6 +776,24 @@ export async function optimizeAssignmentPreview(
         : null);
     if (reason) {
       blocked.push({ ...targetMetadata(t), reason });
+      return false;
+    }
+    return true;
+  });
+  // A target identifies a cleaning obligation, not a physical room. Backlog
+  // and today's obligation can therefore share a room. Do not silently choose
+  // or delete one of those obligations, or assign the room to two people.
+  const fixedRooms = new Set(fixed.map((t) => t.roomId));
+  const roomCounts = new Map<string, number>();
+  for (const t of eligibleTargets) {
+    roomCounts.set(t.roomId, (roomCounts.get(t.roomId) ?? 0) + 1);
+  }
+  const candidates = eligibleTargets.filter((t) => {
+    if (fixedRooms.has(t.roomId) || required(roomCounts.get(t.roomId)) > 1) {
+      blocked.push({
+        ...targetMetadata(t),
+        reason: "ASSIGNMENT_ROOM_CONFLICT",
+      });
       return false;
     }
     return true;
@@ -843,6 +863,7 @@ export async function optimizeAssignmentPreview(
   );
   function evaluate(board: Board): Score | null {
     if (++evaluations > PREVIEW_LIMITS.evaluations) limited();
+    const rooms = new Set(fixedRooms);
     const fees: number[] = [];
     let count = 0, zones = 0, floorDistance = 0, distance = 0;
     for (let i = 0; i < maids.length; i++) {
@@ -861,6 +882,8 @@ export async function optimizeAssignmentPreview(
       floorDistance += required(fixedRoute[i]).floorDistance;
       distance += required(fixedRoute[i]).distance;
       for (const t of newRows) {
+        if (rooms.has(t.roomId)) return null;
+        rooms.add(t.roomId);
         fee += t.feeSnapshot;
         if (prev) {
           const delta = routeDelta(prev, t);
@@ -896,6 +919,30 @@ export async function optimizeAssignmentPreview(
       bestScore = score;
     }
   }
+  // Nearby first seeds can occupy every empty maid route in one corridor.
+  // Moving one seed later is locally worse even when splitting a distant
+  // cluster would greatly improve the whole plan. Include a farthest-first
+  // start so separated room clusters each get a seed before nearby rooms fill.
+  const spatialOrder: PreviewTarget[] = [];
+  const spatialPending = [...candidates].sort((a, b) =>
+    Number(a.roomNumber) - Number(b.roomNumber) ||
+    a.cleaningTargetId.localeCompare(b.cleaningTargetId)
+  );
+  while (spatialPending.length) {
+    const separation = (t: PreviewTarget) =>
+      spatialOrder.length
+        ? Math.min(
+          ...spatialOrder.map((seed) =>
+            Math.abs(Number(t.roomNumber) - Number(seed.roomNumber))
+          ),
+        )
+        : 0;
+    spatialPending.sort((a, b) =>
+      separation(b) - separation(a) ||
+      a.cleaningTargetId.localeCompare(b.cleaningTargetId)
+    );
+    spatialOrder.push(required(spatialPending.shift()));
+  }
   const orders = [
     [...candidates].sort((a, b) =>
       Number(b.recleanMaidProfileId !== null) -
@@ -910,11 +957,7 @@ export async function optimizeAssignmentPreview(
         Date.parse(b.dueAt ?? "9999-01-01") ||
       a.cleaningTargetId.localeCompare(b.cleaningTargetId)
     ),
-    [...candidates].sort((a, b) =>
-      Number(b.recleanMaidProfileId !== null) -
-        Number(a.recleanMaidProfileId !== null) ||
-      a.cleaningTargetId.localeCompare(b.cleaningTargetId)
-    ),
+    spatialOrder,
     [...candidates].sort((a, b) =>
       Date.parse(a.availableFrom) - Date.parse(b.availableFrom) ||
       a.cleaningTargetId.localeCompare(b.cleaningTargetId)
