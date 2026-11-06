@@ -3,6 +3,10 @@
 이 문서는 #112 source를 release/main 이후 실제 운영에 활성화할 때의 순서와 복구 경계를 고정한다.
 feature PR은 production, Vault, Cron, `pg_net`, Function Secrets를 변경하지 않는다.
 
+## 2026-11-06 v1.0.4 운영 활성화
+
+사용자 승인에 따라 PR #605의 최종 전체 DB 성공과 main 증거 재사용을 확인한 뒤 API/worker, pending migration2개, 푸시 키, Vault, 매분 signed-v1 Cron을 적용했다. 정확한 실행 횟수·검증·실기기 미확인 한계는 [v1.0.4 운영 기록](RELEASE_V1.0.4_DEPLOYED.md)을 따른다. 아래 미활성 문구와 2026-09-23 기기 수신은 과거 시점의 기록이다.
+
 ## 2026-10-25 운영 재확인과 v1 준비
 
 읽기 점검에서 notification-delivery13은 배포돼 있지만 heartbeat와 해당 Cron은 확인되지 않았다.

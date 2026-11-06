@@ -32,8 +32,8 @@ const effectiveParameters = (pathItem, operation) => {
 
 assert(document.openapi === '3.1.1', `Frontend generator requires OpenAPI 3.1.1, received ${document.openapi}.`);
 assert(document.info.version === '0.6.0', `Unexpected source API version ${document.info.version}.`);
-assert(Object.keys(document.paths).length === 161, 'Update the frontend contract snapshot and reviewed path inventory.');
-assert(operations.length === 174, 'Update the frontend contract snapshot and reviewed operation inventory.');
+assert(Object.keys(document.paths).length === 162, 'Update the frontend contract snapshot and reviewed path inventory.');
+assert(operations.length === 176, 'Update the frontend contract snapshot and reviewed operation inventory.');
 const fee = document.paths['/v1/room-types/{roomTypeId}/cleaning-fee']?.put;
 assert(fee?.operationId==='setRoomTypeCleaningFee' && fee['x-required-roles']?.join(',')==='admin', 'Admin fee contract is missing.');
 const feeBody=fee.requestBody.content['application/json'].schema;

@@ -322,6 +322,7 @@ const MAX_SEQUENCE_NUMBER = 2147483647;
 interface Score {
   count: number;
   balanceExcess: number;
+  countSpread: number;
   spread: number;
   deviation: bigint;
   zones: number;
@@ -640,10 +641,20 @@ function parseSnapshot(input: unknown): PreviewSnapshot {
 }
 
 /** 금액 편차는 평균의 부동소수점 오차 없이 Σ(n*fee - Σfee)^2 정수로 비교한다. */
-function compare(a: Score, b: Score): number {
+export const previewStrategies = ["proximity", "fee_balance", "room_count_balance"] as const;
+export type PreviewStrategy = typeof previewStrategies[number];
+
+function compare(a: Score, b: Score, strategy: PreviewStrategy): number {
   if (a.count !== b.count) return b.count - a.count;
   if (a.balanceExcess !== b.balanceExcess) {
     return a.balanceExcess - b.balanceExcess;
+  }
+  if (strategy === "room_count_balance" && a.countSpread !== b.countSpread) {
+    return a.countSpread - b.countSpread;
+  }
+  if (strategy === "fee_balance") {
+    if (a.spread !== b.spread) return a.spread - b.spread;
+    if (a.deviation !== b.deviation) return a.deviation < b.deviation ? -1 : 1;
   }
   const route = a.zones - b.zones || a.floorDistance - b.floorDistance ||
     a.distance - b.distance;
@@ -664,6 +675,7 @@ function clone(board: Board): Board {
 export async function optimizeAssignmentPreview(
   input: unknown,
   previewSeed: string,
+  strategy: PreviewStrategy = "proximity",
 ): Promise<AssignmentPreviewResult> {
   if (!/^[A-Za-z0-9_-]{1,128}$/.test(previewSeed)) {
     throw new AssignmentPreviewError("INVALID_PREVIEW_SEED");
@@ -891,6 +903,7 @@ export async function optimizeAssignmentPreview(
     if (++evaluations > PREVIEW_LIMITS.evaluations) limited();
     const rooms = new Set(fixedRooms);
     const fees: number[] = [];
+    let minRooms = Infinity, maxRooms = 0;
     let count = 0, zones = 0, floorDistance = 0, distance = 0;
     for (let i = 0; i < maids.length; i++) {
       const newRows = required(board[i]);
@@ -919,7 +932,12 @@ export async function optimizeAssignmentPreview(
         }
         prev = t;
       }
-      if (!unavailable.has(i)) fees.push(fee);
+      if (!unavailable.has(i)) {
+        fees.push(fee);
+        const roomsAssigned = required(fixedByMaid[i]).length + newRows.length;
+        minRooms = Math.min(minRooms, roomsAssigned);
+        maxRooms = Math.max(maxRooms, roomsAssigned);
+      }
       count += newRows.length;
     }
     const total = fees.reduce((sum, x) => sum + BigInt(x), 0n),
@@ -927,6 +945,7 @@ export async function optimizeAssignmentPreview(
     const spread = fees.length ? Math.max(...fees) - Math.min(...fees) : 0;
     return {
       count,
+      countSpread: fees.length ? maxRooms - minRooms : 0,
       balanceExcess: Math.max(0, spread - feeGapLimit),
       spread,
       deviation: fees.reduce(
@@ -941,7 +960,7 @@ export async function optimizeAssignmentPreview(
   const empty = (): Board => maids.map(() => []);
   let best = empty(), bestScore = required(evaluate(best));
   function remember(board: Board, score: Score) {
-    const c = compare(score, bestScore);
+    const c = compare(score, bestScore, strategy);
     if (c < 0 || (c === 0 && boardKey(board) < boardKey(best))) {
       best = board;
       bestScore = score;
@@ -995,7 +1014,7 @@ export async function optimizeAssignmentPreview(
         const proposal = clone(board);
         required(proposal[i]).push(t);
         const s = evaluate(proposal);
-        if (s && compare(s, score) < 0) {
+        if (s && compare(s, score, strategy) < 0) {
           next = proposal;
           score = s;
         }
@@ -1233,6 +1252,7 @@ export async function optimizeAssignmentPreview(
     decisionReady: true,
     // Display-only additions do not change the established planning fingerprint.
     inputFingerprint: await sha(canonical({
+      ...(strategy === "proximity" ? {} : { strategy }),
       ...snapshot,
       targets: snapshot.targets.map(({ readMetadata: _metadata, ...target }) =>
         target

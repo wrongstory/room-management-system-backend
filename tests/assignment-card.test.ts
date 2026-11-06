@@ -613,6 +613,7 @@ describe('#534 assignment instruction read snapshots', () => {
 describe('assignment card Fastify routes', () => {
   it('returns no-store list/history envelopes and rejects query aliases', async () => {
     const assignmentService: AssignmentService = {
+      recallCandidate: vi.fn(), forceRecall: vi.fn(),
       list: vi.fn(async () => [{ assignmentId: assignmentIds[0], cleaningKind: 'checkout' }]),
       history: vi.fn(async () => [{ assignmentId: assignmentIds[0], cleaningKind: 'checkout' }])
     };
@@ -620,11 +621,23 @@ describe('assignment card Fastify routes', () => {
     app.decorateRequest('actor');
     app.decorate('authenticate', async (request) => { request.actor = admin; });
     app.decorate('requirePasswordChanged', async () => {});
+    app.decorate('requireAdmin', async () => { if (admin.role !== 'admin') throw new AppError(403,'ADMIN_REQUIRED','관리자만 허용됩니다.'); });
     app.setErrorHandler((error, _request, reply) => reply
       .code(error instanceof AppError ? error.statusCode : 400)
       .send({ error: { code: error instanceof AppError ? error.code : 'VALIDATION_ERROR' } }));
     await app.register(createAssignmentRoutes(assignmentService), { prefix: '/v1/assignments' });
 
+    const recallPath = `/v1/assignments/${targetIds[0]}/force-recall`;
+    const candidate = {expectedCurrentAssignmentId: assignmentIds[0], expectedAssignmentVersion: 2,
+      expectedAttemptId: targetIds[0], expectedExecutionVersion: 3};
+    vi.mocked(assignmentService.recallCandidate).mockResolvedValue({candidate});
+    vi.mocked(assignmentService.forceRecall).mockResolvedValue({status:'unassigned'});
+    const preview = await app.inject({method:'GET',url:recallPath});
+    expect(preview.json()).toEqual({candidate});
+    expect(preview.headers['cache-control']).toBe('no-store');
+    const recall = await app.inject({method:'POST',url:recallPath,payload:candidate,headers:{'idempotency-key':'recall-http-142'}});
+    expect(recall.statusCode).toBe(200);
+    expect(assignmentService.forceRecall).toHaveBeenCalledWith(admin,targetIds[0],candidate,'recall-http-142');
     const listed = await app.inject({ method: 'GET', url: '/v1/assignments?serviceDate=2026-09-20' });
     const history = await app.inject({ method: 'GET', url: `/v1/assignments/${targetIds[0]}/history` });
     const alias = await app.inject({ method: 'GET', url: '/v1/assignments?service_date=2026-09-20' });

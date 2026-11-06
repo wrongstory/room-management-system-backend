@@ -54,8 +54,8 @@ function checkExpectedCount(expectedCount) {
   // 147 removes one unused private helper argument without notification catalog changes.
   // 150 narrows exactly 33 service privileges without catalog row changes.
   // 149 only revokes destructive request-history grants; notification rows remain exact.
-  assert(Number.isSafeInteger(expectedCount) && expectedCount >= 95 && expectedCount <= 152,
-    'Only the audited95..152 upgrade range is supported; 151 adds exactly three availability families');
+  assert(Number.isSafeInteger(expectedCount) && expectedCount >= 95 && expectedCount <= 153,
+    'Only the audited95..153 upgrade range is supported; 151 adds exactly three availability families');
 }
 function catalogRows(value) {
   assert(Array.isArray(value), 'An existing baseline notification catalog is required');
@@ -74,18 +74,18 @@ function catalogRows(value) {
 
 /** The 56/73 cumulative probes allow later additions but preserve every old whole row. */
 export function assertCumulativeNotificationCatalog(before, after, expectedCount) {
-  assert(Number.isSafeInteger(expectedCount) && expectedCount >= 78 && expectedCount <= 152,
-    'Only the audited 78..152 cumulative upgrade range is supported');
+  assert(Number.isSafeInteger(expectedCount) && expectedCount >= 78 && expectedCount <= 153,
+    'Only the audited 78..153 cumulative upgrade range is supported');
   const previous = catalogRows(before), installed = catalogRows(after);
   assert(previous.length > 0, 'The existing cumulative baseline catalog cannot be empty');
-  if (expectedCount === 152) {
+  if (expectedCount >= 152) {
     assert.equal(previous.filter(row => APPROVED_ALL_PUSH_FAMILIES.includes(row.event_family)
       && row.push_eligible === false).length, APPROVED_ALL_PUSH_FAMILIES.length,
     'Exactly sixteen existing false-to-true flags are reviewed');
   }
   const byFamily = new Map(installed.map(row => [row.event_family, row]));
   for (const row of previous) {
-    const expected = expectedCount === 152 && APPROVED_ALL_PUSH_FAMILIES.includes(row.event_family)
+    const expected = expectedCount >= 152 && APPROVED_ALL_PUSH_FAMILIES.includes(row.event_family)
       ? { ...row, push_eligible: true } : row;
     assert.deepEqual(byFamily.get(row.event_family), expected,
       'Every cumulative baseline catalog row must remain exact except the approved sixteen push flags');

@@ -3238,3 +3238,86 @@ Deno.test("room fixed memo exact HTTP GET/PUT routes and private errors", async 
     "CAS reload error",
   );
 });
+
+Deno.test("admin force recall uses separate GET and POST dispatch and rejects submitted work", async () => {
+  const room = "10000000-0000-4000-8000-000000000142",
+    path = "/v1/assignments/" + room + "/force-recall";
+  const candidate = {
+    expectedCurrentAssignmentId: room,
+    expectedAssignmentVersion: 4,
+    expectedAttemptId: room,
+    expectedExecutionVersion: 3,
+  };
+  const result = {
+    cleaningTargetId: room,
+    assignmentId: room,
+    attemptId: room,
+    reassignTargetId: room,
+    assignmentVersion: 5,
+    status: "unassigned",
+  };
+  const calls: string[] = [];
+  let conflict = false;
+  const deps: ApiHandlerDependencies = {
+    authenticateRequest: () => Promise.resolve({ ...actor, role: "admin" }),
+    createClients: () =>
+      ({
+        admin: {
+          rpc(name: string, args: Record<string, unknown>) {
+            if (name === "record_authorization_denial") {
+              return Promise.resolve(
+                { data: null, error: null },
+              );
+            }
+            calls.push(name);
+            assert(
+              typeof args.p_session_id === "string",
+              "verified session bound",
+            );
+            return Promise.resolve({
+              data: conflict
+                ? null
+                : name === "get_assignment_force_recall_candidate"
+                ? { candidate }
+                : result,
+              error: conflict
+                ? { message: "ASSIGNMENT_FORCE_RECALL_NOT_ALLOWED" }
+                : null,
+            });
+          },
+        },
+      }) as unknown as EdgeClients,
+  };
+  const read = await handleApiRequest(request("GET", path), deps);
+  assert(
+    read.status === 200 &&
+      (await read.json()).candidate.expectedExecutionVersion === 3,
+    "eligible preview",
+  );
+  const saved = await handleApiRequest(request("POST", path, candidate), deps);
+  assert(
+    saved.status === 200 && (await saved.json()).reassignTargetId === room,
+    "reassignable target",
+  );
+  const denied = await handleApiRequest(request("POST", path, candidate), {
+    ...deps,
+    authenticateRequest: () => Promise.resolve({ ...actor, role: "maid" }),
+  });
+  assert(
+    denied.status === 403 && calls.length === 2,
+    "maid blocked before command: " + denied.status + " calls=" +
+      calls.join(","),
+  );
+  conflict = true;
+  const stale = await handleApiRequest(request("POST", path, candidate), deps);
+  assert(
+    stale.status === 409 &&
+      await errorCode(stale) === "ASSIGNMENT_FORCE_RECALL_NOT_ALLOWED",
+    "no submitted recall",
+  );
+  assert(
+    calls.join(",") ===
+      "get_assignment_force_recall_candidate,force_recall_cleaning_assignment,force_recall_cleaning_assignment",
+    "no legacy command dispatched",
+  );
+});
