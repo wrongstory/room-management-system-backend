@@ -321,6 +321,7 @@ export interface PreviewSnapshot {
 const MAX_SEQUENCE_NUMBER = 2147483647;
 interface Score {
   count: number;
+  balanceExcess: number;
   spread: number;
   deviation: bigint;
   zones: number;
@@ -641,6 +642,9 @@ function parseSnapshot(input: unknown): PreviewSnapshot {
 /** 금액 편차는 평균의 부동소수점 오차 없이 Σ(n*fee - Σfee)^2 정수로 비교한다. */
 function compare(a: Score, b: Score): number {
   if (a.count !== b.count) return b.count - a.count;
+  if (a.balanceExcess !== b.balanceExcess) {
+    return a.balanceExcess - b.balanceExcess;
+  }
   const route = a.distance - b.distance || a.zones - b.zones ||
     a.floorDistance - b.floorDistance;
   if (route) return route;
@@ -808,6 +812,15 @@ export async function optimizeAssignmentPreview(
   const fixedFees = fixedByMaid.map((rows) =>
     rows.reduce((sum, t) => sum + t.feeSnapshot, 0)
   );
+  // One indivisible cleaning fee is the allowed gap, not an exact-equality
+  // objective. Blocked rooms and excluded maids must not inflate that budget.
+  const feeGapLimit = Math.max(
+    0,
+    ...candidates.map((t) => t.feeSnapshot),
+    ...fixedByMaid.flatMap((rows, i) =>
+      unavailable.has(i) ? [] : rows.map((t) => t.feeSnapshot)
+    ),
+  );
   const reservedSequences = new Map(
     (snapshot.sequenceReservations ?? []).map((r) => [
       JSON.stringify([r.maidProfileId, r.serviceDate]),
@@ -893,14 +906,16 @@ export async function optimizeAssignmentPreview(
         }
         prev = t;
       }
-      fees.push(fee);
+      if (!unavailable.has(i)) fees.push(fee);
       count += newRows.length;
     }
     const total = fees.reduce((sum, x) => sum + BigInt(x), 0n),
       n = BigInt(fees.length);
+    const spread = fees.length ? Math.max(...fees) - Math.min(...fees) : 0;
     return {
       count,
-      spread: fees.length ? Math.max(...fees) - Math.min(...fees) : 0,
+      balanceExcess: Math.max(0, spread - feeGapLimit),
+      spread,
       deviation: fees.reduce(
         (sum, x) => sum + (n * BigInt(x) - total) ** 2n,
         0n,
@@ -979,6 +994,47 @@ export async function optimizeAssignmentPreview(
       board = next;
     }
     remember(board, required(evaluate(board)));
+  }
+  // Also start with contiguous room ranges. Balancing every partial greedy
+  // board can interleave neighboring rooms; shifting complete boundaries
+  // gives the improvement search a balanced, spatially coherent starting point.
+  const maidOrder = maids.map((_, i) => i).filter((i) => !unavailable.has(i))
+    .sort((a, b) =>
+      Number(fixedByMaid[a]?.at(-1)?.roomNumber ?? 0) -
+        Number(fixedByMaid[b]?.at(-1)?.roomNumber ?? 0) || a - b
+    );
+  if (maidOrder.length) {
+    const board = empty();
+    for (const t of candidates.filter((t) => t.recleanMaidProfileId !== null)) {
+      const i = maidOrder.find((i) =>
+        maids[i]?.maidProfileId === t.recleanMaidProfileId
+      );
+      if (i !== undefined) required(board[i]).push(t);
+    }
+    const pending = candidates.filter((t) => t.recleanMaidProfileId === null)
+      .sort((a, b) =>
+        Number(a.roomNumber) - Number(b.roomNumber) ||
+        a.cleaningTargetId.localeCompare(b.cleaningTargetId)
+      );
+    const desired = (maidOrder.reduce((sum, i) =>
+      sum + required(fixedFees[i]) +
+      required(board[i]).reduce((fee, t) => fee + t.feeSnapshot, 0), 0) +
+      pending.reduce((sum, t) => sum + t.feeSnapshot, 0)) / maidOrder.length;
+    for (const [position, i] of maidOrder.entries()) {
+      let fee = required(fixedFees[i]) +
+        required(board[i]).reduce((sum, t) => sum + t.feeSnapshot, 0);
+      while (pending.length) {
+        const next = required(pending[0]);
+        if (
+          position < maidOrder.length - 1 &&
+          Math.abs(fee + next.feeSnapshot - desired) > Math.abs(fee - desired)
+        ) break;
+        required(board[i]).push(required(pending.shift()));
+        fee += next.feeSnapshot;
+      }
+    }
+    const score = evaluate(board);
+    if (score) remember(board, score);
   }
   for (let pass = 0; pass < PREVIEW_LIMITS.passes; pass++) {
     const before = boardKey(best),

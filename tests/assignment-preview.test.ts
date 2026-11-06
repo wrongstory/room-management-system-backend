@@ -90,6 +90,70 @@ function fixed(
   };
 }
 describe("assignment preview pure optimizer", () => {
+  it("limits fee imbalance to one cleaning fee while moving nearby group boundaries", async () => {
+    const s = snapshot([101, 102, 103, 104, 105, 106, 131, 132].map((room) =>
+      target(String(room), { roomNumber: String(room), feeSnapshot: 20000 })
+    ));
+    const r = await optimizeAssignmentPreview(s, "balance");
+    expect(r.proposedAssignments).toHaveLength(8);
+    expect(r.objectiveScore.feeSpread).toBeLessThanOrEqual(20000);
+    const groups = s.maids.map((m) => r.proposedAssignments.filter((t) => t.maidProfileId === m.maidProfileId).map((t) => Number(t.roomNumber))).sort((a, b) => Math.min(...a) - Math.min(...b));
+    expect(Math.max(...required(groups[0]))).toBeLessThan(Math.min(...required(groups[1])));
+    expect(r.objectiveScore.routeScore.roomDistance).toBeLessThanOrEqual(32);
+  });
+
+  it("balances around fixed assignments without changing them or leaving work unassigned", async () => {
+    const old = [101, 102, 103].map((room, i) => fixed(`a-${room}`, "a", i + 1, { roomNumber: String(room), feeSnapshot: 20000 }));
+    const s = snapshot([...old, fixed("b", "b", 1, { roomNumber: "130", feeSnapshot: 20000 }), target("new", { roomNumber: "104", feeSnapshot: 20000 })]);
+    const before = JSON.stringify(s);
+    const r = await optimizeAssignmentPreview(s, "fixed-balance");
+    expect(r.proposedAssignments[0]?.maidProfileId).toBe("b");
+    expect(r.objectiveScore.feeSpread).toBe(20000);
+    expect(r.fixedAssignments).toHaveLength(4);
+    expect(JSON.stringify(s)).toBe(before);
+    const impossible = await optimizeAssignmentPreview(snapshot(old), "fixed-only");
+    expect(impossible.objectiveScore.feeSpread).toBe(60000);
+    expect(impossible.fixedAssignments).toHaveLength(3);
+  });
+
+  it("keeps the closer route inside the one-fee tolerance instead of forcing equal totals", async () => {
+    const s = snapshot([
+      fixed("a", "a", 1, { roomNumber: "101", feeSnapshot: 20000 }),
+      fixed("b", "b", 1, { roomNumber: "130", feeSnapshot: 10000 }),
+      target("new", { roomNumber: "102", feeSnapshot: 10000 }),
+    ]);
+    const r = await optimizeAssignmentPreview(s, "within-tolerance");
+    expect(r.proposedAssignments[0]?.maidProfileId).toBe("a");
+    expect(r.objectiveScore.feeSpread).toBe(20000);
+    const zero = await optimizeAssignmentPreview(snapshot([target("zero", { feeSnapshot: 0 })]), "zero");
+    expect(zero.objectiveScore.feeSpread).toBe(0);
+    expect(zero.proposedAssignments).toHaveLength(1);
+  });
+
+  it("excludes blocked high fees and fixed-excluded maids from the balance target", async () => {
+    const old = [101, 102, 103].map((room, i) => fixed(`a-${room}`, "a", i + 1, { roomNumber: String(room), feeSnapshot: 20000 }));
+    const invalid = fixed("invalid", "c", 1, { feeSnapshot: 900000 });
+    if (!invalid.currentAssignment) throw new Error("Missing fixed assignment");
+    invalid.currentAssignment.targetAssignmentVersion = 2;
+    const s = snapshot([...old, fixed("b", "b", 1, { roomNumber: "130", feeSnapshot: 20000 }), target("new", { roomNumber: "104", feeSnapshot: 20000 }), target("blocked", { feeSnapshot: 900000, blockedReason: "ROOM_ON_HOLD" }), invalid]);
+    s.maids.push({ ...required(s.maids[0]), maidProfileId: "c" });
+    const r = await optimizeAssignmentPreview(s, "excluded");
+    expect(r.proposedAssignments).toHaveLength(1);
+    expect(r.proposedAssignments[0]?.maidProfileId).toBe("b");
+    expect(r.objectiveScore.feeSpread).toBe(20000);
+    expect(r.diagnostics.fixedExcludedMaidCount).toBe(1);
+    expect(r.fixedAssignments).toHaveLength(5);
+  });
+
+  it("balances heterogeneous fees across three available maids without dropping targets", async () => {
+    const s = snapshot([16000, 20000, 16000, 28000, 16000, 20000, 28000, 16000, 20000].map((fee, i) => target(String(i), { roomNumber: String(101 + i), feeSnapshot: fee })));
+    s.maids.push({ ...required(s.maids[0]), maidProfileId: "c" });
+    const r = await optimizeAssignmentPreview(s, "mixed");
+    expect(r.proposedAssignments).toHaveLength(9);
+    expect(r.objectiveScore.feeSpread).toBeLessThanOrEqual(28000);
+    expect(new Set(r.proposedAssignments.map(t => t.cleaningTargetId)).size).toBe(9);
+  });
+
   it("blocks both overdue obligations for room 350 without deleting or choosing a source", async () => {
     const s = snapshot([
       target("old-350", { roomId: "room-350", roomNumber: "350", serviceDate: "2037-01-03" }),
