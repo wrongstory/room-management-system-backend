@@ -9,6 +9,7 @@ import {
 } from '../src/modules/notifications/notification-cursor.js';
 import { createNotificationRoutes } from '../src/modules/notifications/notification.routes.js';
 import {
+  notificationProjection,
   type NotificationService,
   SupabaseNotificationService
 } from '../src/modules/notifications/notification.service.js';
@@ -42,6 +43,14 @@ const notice = {
 const secret = 'notification-cursor-test-secret-123456789';
 
 describe('notification cursor and service', () => {
+  it('projects availability request links but rejects invented kinds and unsafe extra fields', () => {
+    const deepLink = { kind: 'availabilityRequest', entityId: notice.id };
+    expect(notificationProjection({ ...notice, deepLink })).toEqual({ ...notice, deepLink });
+    for (const invalid of [{ ...deepLink, kind: 'availabilityAdmin' }, { ...deepLink, reason: 'private' }, { ...deepLink, entityId: '../admin' }]) {
+      expect(() => notificationProjection({ ...notice, deepLink: invalid })).toThrow();
+    }
+  });
+
   it('binds the signed cursor to actor, role, stream, and sort', () => {
     const codec = new NotificationCursorCodec(secret);
     const scope = notificationCursorScope(actor);

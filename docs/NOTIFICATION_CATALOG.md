@@ -1,5 +1,7 @@
 # 알림 이벤트 카탈로그 v1
 
+2026-11-06 후속: 이번 주 가능일 변경 요청·승인·반려의 3개 family/category와 `availabilityRequest` 링크를 추가한다. 상세 계약과 실행 상태는 [가능일 변경 알림](./AVAILABILITY_NOTIFICATIONS.md)을 따른다. 기존 60개 family를 포함한 새 source는 63개 family / 45개 category이며, 아래 과거 통합 기록은 당시 기준을 보존한다.
+
 2026-10-02 현재 source/dev 기준은 `dev@4fe6c981`의 92 migrations다.
 #308 [PR #340](https://github.com/wrongstory/room-management-system-backend/pull/340)과
 #343 [PR #346](https://github.com/wrongstory/room-management-system-backend/pull/346)은 각각

@@ -8,6 +8,16 @@ export const APPROVED_UPGRADE_NOTIFICATION_CATALOG_ROW = Object.freeze({
   requires_action: false, push_eligible: true, resolver_kind: 'none', deep_link_kind: 'submission',
   group_family: 'post_approval_room_issue_reported', group_scope_kind: 'room', contract_version: 1,
 });
+export const APPROVED_AVAILABILITY_NOTIFICATION_ROWS = Object.freeze(['requested','approved','rejected'].map(phase => Object.freeze({
+  event_family: `availability.change_${phase}`, category: `availability_change_${phase}`,
+  source_entity_kind: 'availability_change_request',
+  recipient_capability: phase === 'requested' ? 'admin.availability_decider' : 'maid.availability_owner',
+  requires_action: phase === 'requested', push_eligible: true,
+  resolver_kind: phase === 'requested' ? 'availability_decision' : 'none', deep_link_kind: 'availabilityRequest',
+  group_family: `availability_change_${phase}`, group_scope_kind: 'availabilityRequest', contract_version: 1,
+})));
+const approvedAdditions = expectedCount => [APPROVED_UPGRADE_NOTIFICATION_CATALOG_ROW,
+  ...(expectedCount >= 151 ? APPROVED_AVAILABILITY_NOTIFICATION_ROWS : [])];
 const catalogTable = 'private.notification_event_catalog';
 const literal = value => `'${value.replaceAll("'", "''")}'`;
 
@@ -26,8 +36,8 @@ function checkExpectedCount(expectedCount) {
   // 147 removes one unused private helper argument without notification catalog changes.
   // 150 narrows exactly 33 service privileges without catalog row changes.
   // 149 only revokes destructive request-history grants; notification rows remain exact.
-  assert(Number.isSafeInteger(expectedCount) && expectedCount >= 95 && expectedCount <= 150,
-    'Only the audited95..150 upgrade range is supported; 112..150 add no catalog rows');
+  assert(Number.isSafeInteger(expectedCount) && expectedCount >= 95 && expectedCount <= 151,
+    'Only the audited95..151 upgrade range is supported; 151 adds exactly three availability families');
 }
 function catalogRows(value) {
   assert(Array.isArray(value), 'An existing baseline notification catalog is required');
@@ -56,14 +66,12 @@ export function assertUpgradeNotificationCatalog(before, after, expectedCount) {
     return;
   }
   const previous = catalogRows(before), installed = catalogRows(after);
-  const family = APPROVED_UPGRADE_NOTIFICATION_CATALOG_ROW.event_family;
-  assert(!previous.some(row => row.event_family === family), 'The111 family cannot pre-exist the baseline');
-  const added = installed.filter(row => row.event_family === family);
-  assert.equal(added.length, 1, 'Exactly one approved111 notification catalog row is required');
-  assert.deepEqual(added[0], APPROVED_UPGRADE_NOTIFICATION_CATALOG_ROW,
-    'Every one of the11 approved typed metadata fields must match, with no extra fields');
-  assert.equal(installed.length, previous.length + 1, 'No other catalog addition is permitted');
-  assert.deepEqual(installed.filter(row => row.event_family !== family), previous,
+  const additions = approvedAdditions(expectedCount), families = new Set(additions.map(row => row.event_family));
+  assert(!previous.some(row => families.has(row.event_family)), 'Approved additions cannot pre-exist the baseline');
+  assert.deepEqual(catalogRows(installed.filter(row => families.has(row.event_family))), catalogRows(additions),
+    'Every approved typed metadata field must match, with no missing or extra family or field');
+  assert.equal(installed.length, previous.length + additions.length, 'No other catalog addition is permitted');
+  assert.deepEqual(installed.filter(row => !families.has(row.event_family)), previous,
     'Every baseline catalog whole row remains exact; no mutation, removal or extra family');
 }
 
@@ -87,7 +95,7 @@ export function upgradeHistorySnapshotSql(shape, expectedCount, excludeApprovedA
       && columns.every(column => typeof column === 'string' && /^[a-z_][a-z_0-9]*$/.test(column)),
     'Original baseline column identifiers');
     const where = exclude && table === catalogTable
-      ? ` where t.event_family<>${literal(APPROVED_UPGRADE_NOTIFICATION_CATALOG_ROW.event_family)}` : '';
+      ? ` where ${approvedAdditions(expectedCount).map(row => `t.event_family<>${literal(row.event_family)}`).join(' and ')}` : '';
     return `select ${literal(table)} tag,(select jsonb_object_agg(key,value) from jsonb_each(to_jsonb(t))
       where key=any(array[${columns.map(literal).join(',')}]::text[]))::text data from ${table} t${where}`;
   });

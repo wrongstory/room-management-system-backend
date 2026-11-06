@@ -360,6 +360,7 @@ function safePayload(raw: string, notificationId: string): string {
     "complaintCase",
     "payrollCycle",
     "payrollProfile",
+    "availabilityRequest",
   ]);
   if (
     typeof link.kind !== "string" || !kinds.has(link.kind) ||
