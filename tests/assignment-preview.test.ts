@@ -90,6 +90,62 @@ function fixed(
   };
 }
 describe("assignment preview pure optimizer", () => {
+  it("blocks both overdue obligations for room 350 without deleting or choosing a source", async () => {
+    const s = snapshot([
+      target("old-350", { roomId: "room-350", roomNumber: "350", serviceDate: "2037-01-03" }),
+      target("new-350", { roomId: "room-350", roomNumber: "350", serviceDate: "2037-01-04" }),
+      target("nearby", { roomNumber: "351" }),
+    ]);
+    const before = JSON.stringify(s);
+    const r = await optimizeAssignmentPreview(s, "duplicates");
+    expect(r.proposedAssignments.map((t) => t.cleaningTargetId)).toEqual(["nearby"]);
+    expect(r.blockedTargets.map((t) => [t.cleaningTargetId, t.reason])).toEqual([
+      ["new-350", "ASSIGNMENT_ROOM_CONFLICT"], ["old-350", "ASSIGNMENT_ROOM_CONFLICT"],
+    ]);
+    expect(JSON.stringify(s)).toBe(before);
+  });
+
+  it("reserves a fixed room even when its owner is unavailable and preserves the fixed assignment", async () => {
+    const s = snapshot([
+      fixed("fixed", "a", 1, { roomId: "room-350", roomNumber: "350" }),
+      target("duplicate", { roomId: "room-350", roomNumber: "350" }),
+    ]);
+    required(s.maids[0]).available = false;
+    const r = await optimizeAssignmentPreview(s, "fixed-room");
+    expect(r.proposedAssignments).toEqual([]);
+    expect(r.fixedAssignments[0]).toMatchObject({ cleaningTargetId: "fixed", maidProfileId: "a" });
+    expect(r.blockedTargets[0]).toMatchObject({ cleaningTargetId: "duplicate", reason: "ASSIGNMENT_ROOM_CONFLICT" });
+  });
+
+  it("prioritizes room distance, then elevator, then floor, then fees", async () => {
+    const choose = async (a: Partial<PreviewTarget>, b: Partial<PreviewTarget>) => {
+      const r = await optimizeAssignmentPreview(snapshot([
+        fixed("a-fixed", "a", 1, a), fixed("b-fixed", "b", 1, b),
+        target("new", { roomNumber: "199", elevatorZone: "A" }),
+      ]), "priority");
+      return r.proposedAssignments[0]?.maidProfileId;
+    };
+    expect(await choose({ roomNumber: "120", elevatorZone: "A" }, { roomNumber: "201", elevatorZone: "B", feeSnapshot: 90000 })).toBe("b");
+    expect(await choose({ roomNumber: "198", elevatorZone: "B" }, { roomNumber: "200", elevatorZone: "A", feeSnapshot: 90000 })).toBe("b");
+    expect(await choose({ roomNumber: "198", feeSnapshot: 90000 }, { roomNumber: "200" })).toBe("a");
+    expect(await choose({ roomNumber: "198", feeSnapshot: 90000 }, { roomNumber: "198" })).toBe("b");
+  });
+
+  it("clusters 117/118, 349/350 and 755/756 before balancing fees", async () => {
+    const s = snapshot([117, 118, 349, 350, 755, 756].map((n) => target(String(n), {
+      roomNumber: String(n), elevatorZone: n < 200 ? "A" : n < 400 ? "B" : "C",
+      feeSnapshot: n < 200 ? 20000 : 16000,
+    })));
+    s.maids.push({ ...required(s.maids[0]), maidProfileId: "c" });
+    const r = await optimizeAssignmentPreview(s, "clusters");
+    expect(r.proposedAssignments).toHaveLength(6);
+    const owner = new Map(r.proposedAssignments.map((t) => [t.roomNumber, t.maidProfileId]));
+    expect(owner.get("117")).toBe(owner.get("118"));
+    expect(owner.get("349")).toBe(owner.get("350"));
+    expect(owner.get("755")).toBe(owner.get("756"));
+    expect(new Set(owner.values()).size).toBe(3);
+  });
+
   it.each([101, 1001])("preserves a snapshot display name of %i characters without relaxing routing classifiers", async (length) => {
     const name = "n".repeat(length);
     const t = target("long-name");
@@ -869,7 +925,7 @@ describe("assignment preview pure optimizer", () => {
     );
     expect(cross.proposedAssignments).toHaveLength(1);
   });
-  it("zone then room proximity only break equal fee scores", async () => {
+  it("prefers the closest room before elevator and fee ties", async () => {
     const s = snapshot([
       fixed("a-fixed", "a", 1, { elevatorZone: "A", roomNumber: "601" }),
       fixed("b-fixed", "b", 1, { elevatorZone: "B", roomNumber: "650" }),
@@ -889,10 +945,10 @@ describe("assignment preview pure optimizer", () => {
     ).toBe("a");
   });
   it.each([
-    ["199", "120", "201", "a", 0],
+    ["199", "120", "201", "b", 1],
     ["350", "199", "499", "b", 1],
-    ["999", "920", "1001", "a", 0],
-  ])("compares floors before raw room-number distance for %s", async (room, sameOrNear, other, maid, floorDistance) => {
+    ["999", "920", "1001", "b", 1],
+  ])("compares full room-number distance before floors for %s", async (room, sameOrNear, other, maid, floorDistance) => {
     const s = snapshot([
       fixed("a-fixed", "a", 1, { roomNumber: sameOrNear }),
       fixed("b-fixed", "b", 1, { roomNumber: other }),
@@ -908,7 +964,7 @@ describe("assignment preview pure optimizer", () => {
     expect(await optimizeAssignmentPreview({ ...s, targets: [...s.targets].reverse(), maids: [...s.maids].reverse() }, "floor"))
       .toEqual(r);
   });
-  it("keeps fee balance and elevator priority ahead of floor proximity", async () => {
+  it("keeps availability mandatory without imposing a floor cap", async () => {
     const s = snapshot([
       fixed("a-fixed", "a", 1, { roomNumber: "120", feeSnapshot: 60000 }),
       fixed("b-fixed", "b", 1, { roomNumber: "201", feeSnapshot: 30000 }),
@@ -1104,7 +1160,7 @@ describe("assignment preview pure optimizer", () => {
     expect((await optimizeAssignmentPreview(s, "s")).proposedAssignments)
       .toHaveLength(1);
   });
-  it("uses deviation before route when completed count and fee spread tie", async () => {
+  it("uses elevator proximity before fee deviation when room distance ties", async () => {
     const s = snapshot([
       fixed("fa", "a", 1, { feeSnapshot: 0, elevatorZone: "A" }),
       fixed("fb", "b", 1, { feeSnapshot: 0, elevatorZone: "A" }),
@@ -1117,9 +1173,9 @@ describe("assignment preview pure optimizer", () => {
       maidProfileId: id,
     }));
     const r = await optimizeAssignmentPreview(s, "s");
-    expect(["a", "b"]).toContain(r.proposedAssignments[0]?.maidProfileId);
+    expect(r.proposedAssignments[0]?.maidProfileId).toBe("c");
     expect(r.objectiveScore.feeSpread).toBe(4000);
-    expect(r.objectiveScore.feeDeviation).toBe("140000000");
+    expect(r.objectiveScore.feeDeviation).toBe("204000000");
   });
   it("does not block a maid using a fabricated delayed interval", async () => {
     const s = snapshot([
