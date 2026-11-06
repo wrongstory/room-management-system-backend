@@ -3860,7 +3860,8 @@ export const openApiDocument = {
             in: "query",
             required: true,
             schema: { type: "string", format: "date" },
-            description: "조회할 예정 청소일(YYYY-MM-DD, 한국 시간). 과거 날짜와 includeHistory 조회는 각 배정 버전의 planningDate를 사용합니다.",
+            description:
+              "조회할 예정 청소일(YYYY-MM-DD, 한국 시간). 과거 날짜와 includeHistory 조회는 각 배정 버전의 planningDate를 사용합니다.",
           },
           {
             name: "maidProfileId",
