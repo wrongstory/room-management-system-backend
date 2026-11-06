@@ -12,6 +12,10 @@
 
 ## 실제 실행 상태
 
+2026-11-06 사용자 승인 후보6e2bb86의 PR #598/run42153743798은 application 6,351개 검사와 전체 SQL121파일/6,657개 검사를 통과했다. 앞선 fixture 두 오류는 해소됐고 업그레이드·static-warning·KST clock5개도 통과했다. 동시성 검사 중 알림 전달·객실 이동·PIN 시트 full-resync는 통과했으나 가능일 경합의 사후 관찰자가 원래 SELECT 권한이 없는 service_role로 raw notifications를 읽어 실패했다. 후속 경합과 최종 proof는 완료되지 않았으며 Supabase stop·cleanup은 성공했다. 운영 실행은0회다.
+
+후속 보완은 이 관찰자를 기존 배정 알림 검사와 같은 격리 DB의 읽기 전용 owner 조회로 바꾼다. API 권한을 늘리지 않으며, 잘못 사용한 로컬 assert.equal 호출을 실제 Node assertion을 쓰는 공통 검증 함수로 교체한다. 승인 승자의 알림1개·패자의0개·중복 방지·수신자·typed link를 모두 유지하고 잘못된 결과를 거부하는 합성 회귀 검사를 추가한다. 새 전체 DB 실행은 별도1회 승인 전까지 수행하지 않는다.
+
 2026-11-06 사용자 승인 후보d298266의 PR #598/run42148654613은 application PASS다. 전체 DB job127666193914는 누적56/73을 포함한 업그레이드 체인을 지나 최종SQL121파일/6,635건을 실행했으나 두 파일에서 실패했다. 가능일 알림 fixture가 업무 계정 뒤에 개발자를 직접 생성해 `DEVELOPER_ALREADY_EXISTS`로22개 assertion 실행 전에 종료됐고, 주급 시작 fixture는 새 정책과 달리 push0개를 기대했다. local Supabase stop과 job cleanup은 성공했다. 이후 static-warning·clock·경합 및 최종 proof는 실행되지 않았으며 운영 반영은0회다.
 
 PR #599는 정보성 주급 시작의 push1개·requires_action=false 기대를 보완했고 개발 CI를 통과해dev6cb59fd로 병합됐다(Full DB NOT RUN). 후속 fixture 수정은 공식 bootstrap 명령으로 개발자를 먼저 생성한 다음 관리자·메이드를 등록한다. 개발자 수신 제외를 포함한 기존22개 assertion과 운영 계정 보호 규칙을 유지한다. 알림 migration·API·worker는 변경하지 않는다. 수정 통합 후보의 전체 DB는 별도1회 승인이 필요하다.
