@@ -958,6 +958,21 @@ assert(
 assert(isExpectedAvailabilityCommitCollision(availabilityRace),
   'availability writer must hit the notified-assignment guard; date or policy errors are not collision evidence');
 
+// Approval notification must share the winning domain transaction; the stale loser emits nothing.
+if (availabilityWriteMode === 'approve_current_week') {
+  const { data: availabilityNotices, error: availabilityNoticeError } = await client.from('notifications')
+    .select('id,recipient_profile_id,event_family,deep_link_kind,deep_link_entity_id')
+    .eq('event_family','availability.change_approved').eq('source_entity_id',changeRequestId);
+  assert(!availabilityNoticeError, 'availability race notification projection must be readable');
+  assert.equal(availabilityNotices.length, availabilityRace[1].error ? 0 : 1,
+    'exactly the approval winner may emit one notification');
+  for (const notice of availabilityNotices) {
+    assert.equal(notice.recipient_profile_id,logicalAccountId);
+    assert.equal(notice.deep_link_kind,'availabilityRequest');
+    assert.equal(notice.deep_link_entity_id,changeRequestId);
+  }
+}
+
 // Future checkout planning races use public commands, not synthetic materialization.
 const { data: planningRooms, error: planningRoomsError } = await client.from('rooms')
   .select('id,room_number,state_version').order('room_number').range(50, 56);

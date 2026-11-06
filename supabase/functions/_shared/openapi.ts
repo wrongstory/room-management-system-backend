@@ -14419,6 +14419,7 @@ export const openApiDocument = {
                     "complaintCase",
                     "payrollCycle",
                     "payrollProfile",
+                    "availabilityRequest",
                   ],
                 },
                 entityId: { type: "string", format: "uuid" },

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
 import { validatePostApprovalUpgradeSource } from '../scripts/test-post-approval-room-issue-upgrade.mjs';
-import { APPROVED_UPGRADE_NOTIFICATION_CATALOG_ROW as addition, assertUpgradeNotificationCatalog,
+import { APPROVED_AVAILABILITY_NOTIFICATION_ROWS, APPROVED_UPGRADE_NOTIFICATION_CATALOG_ROW as addition, assertUpgradeNotificationCatalog,
   upgradeHistorySnapshotSql } from '../scripts/lib/upgrade-notification-catalog-compatibility.mjs';
 
 const old = [{ event_family: 'existing.family', category: 'existing-category', preserved: { value: 1 } }];
@@ -27,7 +27,7 @@ describe('historical upgrade notification catalog compatibility', () => {
       expect(() => assertUpgradeNotificationCatalog(old, after, 111)).toThrow();
     }
     expect(() => assertUpgradeNotificationCatalog(installed(), installed(), 111)).toThrow();
-    for (const count of [94, 151, 111.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+    for (const count of [94, 152, 111.5, Number.NaN, Number.POSITIVE_INFINITY]) {
       expect(() => assertUpgradeNotificationCatalog(old, installed(), count)).toThrow();
     }
   });
@@ -48,6 +48,21 @@ describe('historical upgrade notification catalog compatibility', () => {
     for (const exclude of [false, true]) {
       expect(upgradeHistorySnapshotSql(shape, count, exclude)).toBe(upgradeHistorySnapshotSql(shape, 111, exclude));
     }
+  });
+  it('permits only the exact three151 availability families and preserves all prior rows', () => {
+    const after = [...installed(), ...APPROVED_AVAILABILITY_NOTIFICATION_ROWS];
+    expect(() => assertUpgradeNotificationCatalog(old, after, 151)).not.toThrow();
+    expect(() => assertUpgradeNotificationCatalog(old, after, 150)).toThrow();
+    for (const row of APPROVED_AVAILABILITY_NOTIFICATION_ROWS) {
+      expect(() => assertUpgradeNotificationCatalog(old, after.filter(item => item !== row), 151)).toThrow();
+      for (const key of Object.keys(row)) {
+        expect(() => assertUpgradeNotificationCatalog(old, after.map(item => item === row ? {...row, [key]: 'unreviewed'} : item), 151)).toThrow();
+      }
+    }
+    const shape = [{table: 'private.notification_event_catalog', columns: Object.keys(addition)}];
+    const sql = upgradeHistorySnapshotSql(shape, 151, true);
+    for (const row of APPROVED_AVAILABILITY_NOTIFICATION_ROWS) expect(sql).toContain(`t.event_family<>'${row.event_family}'`);
+    expect(sql).not.toContain('like');
   });
   it('accepts the actual source-reviewed manifest before constructing any DB snapshot', () => {
     const directory = new URL('../supabase/migrations/', import.meta.url);

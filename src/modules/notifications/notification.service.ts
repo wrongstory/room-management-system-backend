@@ -63,7 +63,7 @@ function deepLink(value: unknown): { kind: string; entityId: string } | null {
   const parsed = object(value);
   if (Object.keys(parsed).sort().join(',') !== 'entityId,kind') throw databaseError(null);
   const kind = text(parsed.kind);
-  if (!['cleaningTarget', 'assignmentRequest', 'submission', 'complaintCase', 'payrollCycle', 'payrollProfile'].includes(kind)) {
+  if (!['cleaningTarget', 'assignmentRequest', 'submission', 'complaintCase', 'payrollCycle', 'payrollProfile', 'availabilityRequest'].includes(kind)) {
     throw databaseError(null);
   }
   return { kind, entityId: uuid(parsed.entityId) };

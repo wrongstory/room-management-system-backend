@@ -2,7 +2,7 @@ begin;
 
 select plan(65);
 
-select is((select count(*) from private.notification_event_catalog),60::bigint,
+select is((select count(*) from private.notification_event_catalog),63::bigint,
   'source-controlled catalog contains every approved event family');
 select is((select to_jsonb(c) from private.notification_event_catalog c
   where event_family='post_approval_room_issue.reported_admin'),
@@ -11,10 +11,10 @@ select is((select to_jsonb(c) from private.notification_event_catalog c
     "requires_action":false,"push_eligible":true,"resolver_kind":"none","deep_link_kind":"submission",
     "group_family":"post_approval_room_issue_reported","group_scope_kind":"room","contract_version":1}'::jsonb,
   'post-approval family has exactly the approved eleven metadata fields');
-select is((select count(distinct category) from private.notification_event_catalog),42::bigint,
-  'event families map to exactly 42 public categories');
-select ok(bool_and(deep_link_kind in ('cleaningTarget','assignmentRequest','submission','complaintCase','payrollCycle','payrollProfile')),
-  'catalog deep links use only the six approved kinds') from private.notification_event_catalog;
+select is((select count(distinct category) from private.notification_event_catalog),45::bigint,
+  'event families map to exactly 45 public categories');
+select ok(bool_and(deep_link_kind in ('cleaningTarget','assignmentRequest','submission','complaintCase','payrollCycle','payrollProfile','availabilityRequest')),
+  'catalog deep links use only the seven approved kinds') from private.notification_event_catalog;
 select ok((select bool_and(push_eligible and not requires_action)
   from private.notification_event_catalog where event_family in (
     'reservation.extension_revoked','reservation.cancelled_revoked',

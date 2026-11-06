@@ -13,3 +13,5 @@ export function assertUpgradeNotificationCatalog(
 export function upgradeHistorySnapshotSql(
   shape: UpgradeHistoryShape[], expectedCount: number, excludeApprovedAddition?: boolean
 ): string;
+
+export const APPROVED_AVAILABILITY_NOTIFICATION_ROWS: ReadonlyArray<Readonly<Record<string, string | number | boolean>>>;

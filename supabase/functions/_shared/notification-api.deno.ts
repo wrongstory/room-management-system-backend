@@ -46,7 +46,10 @@ const notice = {
   body: "업무 앱에서 최신 배정을 확인해 주세요.",
   roomId: null,
   cleaningTargetId: null,
-  deepLink: null,
+  deepLink: {
+    kind: "availabilityRequest",
+    entityId: "10800000-0000-4000-8000-000000001002",
+  },
   groupId: null,
   requiresAction: true,
   readAt: null,
