@@ -645,8 +645,8 @@ function compare(a: Score, b: Score): number {
   if (a.balanceExcess !== b.balanceExcess) {
     return a.balanceExcess - b.balanceExcess;
   }
-  const route = a.distance - b.distance || a.zones - b.zones ||
-    a.floorDistance - b.floorDistance;
+  const route = a.zones - b.zones || a.floorDistance - b.floorDistance ||
+    a.distance - b.distance;
   if (route) return route;
   if (a.spread !== b.spread) return a.spread - b.spread;
   if (a.deviation !== b.deviation) return a.deviation < b.deviation ? -1 : 1;
@@ -855,7 +855,10 @@ export async function optimizeAssignmentPreview(
       n = required(roomNumbers.get(t.cleaningTargetId));
     if (!Number.isSafeInteger(p) || !Number.isSafeInteger(n)) invalid();
     return {
-      zones: prev.elevatorZone === t.elevatorZone ? 0 : 1,
+      zones: ["A", "B", "C"].includes(prev.elevatorZone) &&
+          prev.elevatorZone === t.elevatorZone
+        ? 0
+        : 1,
       // The catalog encodes the floor before the last two room-number digits.
       // Legacy numbers below 100 have no encoded floor; keep their old fallback.
       floorDistance: p >= 100 && n >= 100
@@ -864,6 +867,16 @@ export async function optimizeAssignmentPreview(
       distance: Math.abs(n - p),
     };
   };
+  const compareLocation = (a: PreviewTarget, b: PreviewTarget) =>
+    a.elevatorZone.localeCompare(b.elevatorZone) ||
+    Number(a.roomNumber) - Number(b.roomNumber) ||
+    a.cleaningTargetId.localeCompare(b.cleaningTargetId);
+  const compareLeg = (
+    a: ReturnType<typeof routeDelta>,
+    b: ReturnType<typeof routeDelta>,
+  ) =>
+    a.zones - b.zones || a.floorDistance - b.floorDistance ||
+    a.distance - b.distance;
   const fixedRoute = fixedByMaid.map((rows) =>
     rows.slice(1).reduce((r, t, j) => {
       const d = routeDelta(required(rows[j]), t);
@@ -939,22 +952,18 @@ export async function optimizeAssignmentPreview(
   // cluster would greatly improve the whole plan. Include a farthest-first
   // start so separated room clusters each get a seed before nearby rooms fill.
   const spatialOrder: PreviewTarget[] = [];
-  const spatialPending = [...candidates].sort((a, b) =>
-    Number(a.roomNumber) - Number(b.roomNumber) ||
-    a.cleaningTargetId.localeCompare(b.cleaningTargetId)
-  );
+  const spatialPending = [...candidates].sort(compareLocation);
   while (spatialPending.length) {
     const separation = (t: PreviewTarget) =>
       spatialOrder.length
-        ? Math.min(
-          ...spatialOrder.map((seed) =>
-            Math.abs(Number(t.roomNumber) - Number(seed.roomNumber))
-          ),
+        ? required(
+          spatialOrder.map((seed) => routeDelta(seed, t)).sort(compareLeg)[0],
         )
-        : 0;
+        : { zones: 0, floorDistance: 0, distance: 0 };
+    const gaps = new Map(spatialPending.map((t) => [t, separation(t)]));
     spatialPending.sort((a, b) =>
-      separation(b) - separation(a) ||
-      a.cleaningTargetId.localeCompare(b.cleaningTargetId)
+      compareLeg(required(gaps.get(b)), required(gaps.get(a))) ||
+      compareLocation(a, b)
     );
     spatialOrder.push(required(spatialPending.shift()));
   }
@@ -995,13 +1004,16 @@ export async function optimizeAssignmentPreview(
     }
     remember(board, required(evaluate(board)));
   }
-  // Also start with contiguous room ranges. Balancing every partial greedy
+  // Also start with contiguous elevator/floor ranges. Balancing every partial greedy
   // board can interleave neighboring rooms; shifting complete boundaries
   // gives the improvement search a balanced, spatially coherent starting point.
   const maidOrder = maids.map((_, i) => i).filter((i) => !unavailable.has(i))
     .sort((a, b) =>
-      Number(fixedByMaid[a]?.at(-1)?.roomNumber ?? 0) -
-        Number(fixedByMaid[b]?.at(-1)?.roomNumber ?? 0) || a - b
+      (fixedByMaid[a]?.at(-1)?.elevatorZone ?? "").localeCompare(
+        fixedByMaid[b]?.at(-1)?.elevatorZone ?? "",
+      ) || Number(fixedByMaid[a]?.at(-1)?.roomNumber ?? 0) -
+        Number(fixedByMaid[b]?.at(-1)?.roomNumber ?? 0) ||
+      a - b
     );
   if (maidOrder.length) {
     const board = empty();
@@ -1012,10 +1024,7 @@ export async function optimizeAssignmentPreview(
       if (i !== undefined) required(board[i]).push(t);
     }
     const pending = candidates.filter((t) => t.recleanMaidProfileId === null)
-      .sort((a, b) =>
-        Number(a.roomNumber) - Number(b.roomNumber) ||
-        a.cleaningTargetId.localeCompare(b.cleaningTargetId)
-      );
+      .sort(compareLocation);
     const desired = (maidOrder.reduce((sum, i) =>
       sum + required(fixedFees[i]) +
       required(board[i]).reduce((fee, t) => fee + t.feeSnapshot, 0), 0) +
@@ -1035,6 +1044,68 @@ export async function optimizeAssignmentPreview(
     }
     const score = evaluate(board);
     if (score) remember(board, score);
+  }
+  // An average-sized global stripe can straddle elevators even when assigning
+  // different numbers of maids to A/B/C yields a balanced, unmixed plan.
+  // Try every bounded zone quota (at most 171 for 20 maids), then cut each
+  // elevator's floor-sorted rooms near that zone's own average fee.
+  // Existing work/reclean ownership still uses the general constrained search.
+  if (
+    maidOrder.length && maidOrder.every((i) => !fixedByMaid[i]?.length) &&
+    candidates.every((t) =>
+      t.recleanMaidProfileId === null &&
+      ["A", "B", "C"].includes(t.elevatorZone)
+    )
+  ) {
+    const groups = ["A", "B", "C"].map((zone) =>
+      candidates.filter((t) => t.elevatorZone === zone).sort(compareLocation)
+    ).filter((rows) => rows.length);
+    const quotas: number[] = [];
+    const allocate = (position: number, remaining: number) => {
+      if (position === groups.length) {
+        if (remaining) return;
+        const board = empty();
+        let maidPosition = 0;
+        for (const [g, rows] of groups.entries()) {
+          const quota = required(quotas[g]);
+          let cursor = 0,
+            remainingFee = rows.reduce((sum, t) => sum + t.feeSnapshot, 0);
+          for (let part = 0; part < quota; part++) {
+            const route = required(board[required(maidOrder[maidPosition++])]);
+            const desired = remainingFee / (quota - part);
+            let fee = 0;
+            while (cursor < rows.length) {
+              const t = required(rows[cursor]);
+              if (
+                part < quota - 1 && route.length && (
+                  rows.length - cursor <= quota - part - 1 ||
+                  Math.abs(fee + t.feeSnapshot - desired) >
+                    Math.abs(fee - desired)
+                )
+              ) break;
+              route.push(t);
+              fee += t.feeSnapshot;
+              cursor++;
+            }
+            remainingFee -= fee;
+          }
+        }
+        const score = evaluate(board);
+        if (score) remember(board, score);
+        return;
+      }
+      const rows = required(groups[position]);
+      for (
+        let count = 1;
+        count <=
+          Math.min(rows.length, remaining - (groups.length - position - 1));
+        count++
+      ) {
+        quotas[position] = count;
+        allocate(position + 1, remaining - count);
+      }
+    };
+    allocate(0, Math.min(maidOrder.length, candidates.length));
   }
   for (let pass = 0; pass < PREVIEW_LIMITS.passes; pass++) {
     const before = boardKey(best),
