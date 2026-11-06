@@ -2,7 +2,7 @@
 
 근무 가능일 변경 요청→관리자, 승인·반려→요청 메이드 알림과 모든 알림 종류의 PC·휴대폰 Web Push를 연결한다. 사용자 최신 결정은 [전체 기기 푸시](./ALL_NOTIFICATION_DEVICE_PUSH.md), 도메인 계약은 [가능일 알림](./AVAILABILITY_NOTIFICATIONS.md)을 따른다.
 
-현재main575bf32는 배정 긴급 수정v1.0.1이다. 이 릴리스는 해당 소스와 릴리스 기록을 보존한 최신dev에서v1.0.2로 준비했다. PR #597의 application/migration(source-only) CI run42145317362가 통과했고dev cd87ca5로 병합됐다. main과dev의 squash 이력 연결 뒤 전체 tree가 검증된dev와 같은지 확인했다.
+현재main575bf32는 배정 긴급 수정v1.0.1이다. 이 릴리스는 해당 소스와 릴리스 기록을 보존한 최신dev에서v1.0.2로 준비했다. PR #597의 application/migration(source-only) CI run42145317362가 통과했고dev cd87ca5로 병합됐다. main과dev의 squash 이력 연결 뒤 전체 tree가 검증된dev와 같은지 확인했다. 후속 검사 보완 #599·#600도 각각 개발 CI42150476938·42151956226을 통과해 최신dev4eeca38로 통합했다.
 
 ## 준비된 운영 변경
 
@@ -18,7 +18,9 @@
 
 fbd7583의 run42143097303 attempt1은54322 포트 충돌로 DB 시작 전에 실패했다. 별도로 승인된 실패job1회 재실행(attempt2/job127650248891)은 fresh152·catalog·template·TLS/atomic·승인 lint baseline·합성 backup을 통과했다. 누적56→152 upgrade의 이전 카탈로그 보존 기준이16종 push 변경을 거부해 실패했고 cleanup은 성공했다. 전체SQL·나머지upgrade·경합의 성공 증거는 없다.
 
-후속 PR #597은 누적56/73 검사에 정확한16개 false→true 예외를 연결하며 다른 기존 필드·행 보존을 유지한다. 알림SQL·API·worker 변경은fbd7583과 동일하며, 이미 운영 배포된v1.0.1의 배정 긴급 수정도 보존한다. 로컬234파일/6,351개 검사와 typecheck/build/manifest가 통과했다. 이 새 입력은 **Full DB NOT RUN / 운영 적용 NOT RUN**이며, 재승인 전 release push/DB 실행을 하지 않는다.
+후속 PR #597은 누적56/73 검사에 정확한16개 false→true 예외를 연결하며 다른 기존 필드·행 보존을 유지한다. 승인된d298266의 PR #598/run42148654613은 application PASS, 전체 DB는 업그레이드 체인 이후 최종SQL121파일/6,635건에서 실패했다. 가능일 알림 fixture가 업무 계정 뒤 개발자를 직접 생성해22개 assertion 실행 전에 종료됐고, 주급 시작 fixture는 이전 push0 기대1건이 남아 있었다. Supabase stop·cleanup 성공, 후속static-warning·clock·경합/최종proof는 미실행, 운영 적용0회다.
+
+#599는 주급 시작의 push1개·정보성 상태 보존을 확인하고, #600은 공식 bootstrap으로 개발자를 먼저 생성해 기존22개 가능일 assertion을 유지한다. 알림SQL·API·worker와 운영 범위는d298266과 동일하며 배정 긴급 수정도 보존한다. 통합 입력은 테스트SQL2개와 서술 문서만 달라졌다. 로컬234파일/6,351개 검사·typecheck/build 및 PostgreSQL15/17 문법 검사와 개발 CI가 통과했다. 수정 통합본은 **Full DB NOT RUN / 운영 적용 NOT RUN**이며, 재승인 전 release push/DB 실행을 하지 않는다.
 
 필요한 재승인은 새 최종 후보의 격리 CI 전체 DB1회(fresh·SQL·upgrade·경합·정리)다. 통과 뒤의 main 보호 병합·동일 검증 지문 재사용, pending2개 운영 적용1회와 API/worker·키/Vault/Cron·검증/활성화는 기존 승인 범위를 따른다. 실패·입력 변경 시 자동 반복하지 않는다.
 
