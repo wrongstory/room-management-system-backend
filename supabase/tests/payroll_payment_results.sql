@@ -307,10 +307,12 @@ select ok((select bool_and(after_state::text not like '%ABC-12.XY%' and after_st
   from public.audit_events where event_type like 'payroll.payment_%'),'audit payload never contains bank reference');
 select ok((select bool_and(body not like '%ABC-12.XY%' and body not like '%REF:AB12%')
   from public.notifications where category like 'payroll_payment_%'),'notification never contains bank reference');
-select is((select count(*) from private.notification_delivery_outbox outbox join public.notifications notice
-  on notice.id=outbox.notification_id where notice.category in ('payroll_payment_check','payroll_payment_paid',
-  'payroll_payment_reopened')),0::bigint,
-  'informational payment results are inbox-only');
+select ok(exists(select 1 from public.notifications where event_family='payroll.payment_paid')
+  and not exists(select 1 from public.notifications n join public.profiles p on p.id=n.recipient_profile_id
+    where n.event_family in ('payroll.payment_check_recorded','payroll.payment_paid','payroll.payment_reopened')
+      and p.status='active' and not p.must_change_password and n.actor_profile_id<>n.recipient_profile_id
+      and not exists(select 1 from private.notification_delivery_outbox o where o.notification_id=n.id)),
+  'every eligible informational payment result also queues device push');
 select ok((select bool_and(summary ? 'status' and summary ? 'version'
   and not summary ? 'paidAmount' and not summary ? 'canonicalReference'
   and summary::text not like '%ABC-12.XY%' and summary::text not like '%REF:AB12%')

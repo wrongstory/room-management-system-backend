@@ -61,7 +61,7 @@ begin
      'requestHash',evidence.after_state->>'requestHash')
    and exists(select 1 from public.profiles where id=evidence.actor_profile_id and role='maid' and status='active');
  elsif p_phase in ('approved','rejected') then
-  return request.status=p_phase and evidence.event_type='availability.change_decided'
+  return request.status::text=p_phase and evidence.event_type='availability.change_decided'
    and evidence.actor_profile_id=request.decided_by and evidence.effective_at=request.decided_at
    and evidence.reason_code=request.decision_reason_code and evidence.before_state->>'status'='pending'
    and evidence.after_state=jsonb_build_object('status',request.status,'approvedVersionId',request.approved_version_id,
