@@ -1,5 +1,7 @@
 # v1.0.2 근무 가능일 알림과 전체 기기 푸시
 
+이 후보는 최종 DB 검증에서 실패해 운영에 배포되지 않았다. 후속 배정 수정까지 보존한 [v1.0.4 통합 후보](RELEASE_V1.0.4.md)로 이어가며, 이 문서는 v1.0.2의 실제 실행 이력을 보존한다.
+
 근무 가능일 변경 요청→관리자, 승인·반려→요청 메이드 알림과 모든 알림 종류의 PC·휴대폰 Web Push를 연결한다. 사용자 최신 결정은 [전체 기기 푸시](./ALL_NOTIFICATION_DEVICE_PUSH.md), 도메인 계약은 [가능일 알림](./AVAILABILITY_NOTIFICATIONS.md)을 따른다.
 
 현재main575bf32는 배정 긴급 수정v1.0.1이다. 이 릴리스는 해당 소스와 릴리스 기록을 보존한 최신dev에서v1.0.2로 준비했다. PR #597의 application/migration(source-only) CI run42145317362가 통과했고dev cd87ca5로 병합됐다. main과dev의 squash 이력 연결 뒤 전체 tree가 검증된dev와 같은지 확인했다. 후속 검사 보완 #599·#600도 각각 개발 CI42150476938·42151956226을 통과해 최신dev4eeca38로 통합했다.
@@ -23,5 +25,7 @@ fbd7583의 run42143097303 attempt1은54322 포트 충돌로 DB 시작 전에 실
 #599는 주급 시작의 push1개·정보성 상태 보존을 확인하고, #600은 공식 bootstrap으로 개발자를 먼저 생성해 기존22개 가능일 assertion을 유지한다. 알림SQL·API·worker와 운영 범위는d298266과 동일하며 배정 긴급 수정도 보존한다. 통합 입력은 테스트SQL2개와 서술 문서만 달라졌다. 로컬234파일/6,351개 검사·typecheck/build 및 PostgreSQL15/17 문법 검사와 개발 CI가 통과했다. 수정 통합본은 **Full DB NOT RUN / 운영 적용 NOT RUN**이며, 재승인 전 release push/DB 실행을 하지 않는다.
 
 필요한 재승인은 새 최종 후보의 격리 CI 전체 DB1회(fresh·SQL·upgrade·경합·정리)다. 통과 뒤의 main 보호 병합·동일 검증 지문 재사용, pending2개 운영 적용1회와 API/worker·키/Vault/Cron·검증/활성화는 기존 승인 범위를 따른다. 실패·입력 변경 시 자동 반복하지 않는다.
+
+이후 사용자 승인 후보6e2bb86/run42153743798은 application6,351개와 SQL121파일/6,657개, 업그레이드·static-warning·KST clock5개를 통과했다. 동시성 일부 통과 뒤 가능일 알림 관찰자의 권한 없는 raw Data API 조회에서 실패했다. Supabase stop·cleanup 성공, 최종 proof·운영 반영은 미완료다. #604는 이 조회와 잘못된 assertion 호출을 수정해 개발 CI를 통과했고dev a8db83e로 병합됐다.
 
 프런트 PR #315(dev)/#316(main d6f6e376, SW2026-11-06-7)는 운영 배포돼 typed link·기기별 권한 안내·ID 중복 억제를 제공한다. 실제 기기 표시는 각 기기 권한/구독과 실제 신규 알림으로 확인해야 한다. provider 수락이나 UI 합성 검사를 실제 기기 전달로 표현하지 않는다.
