@@ -142,6 +142,17 @@ function service(overrides: Partial<Record<string, Row[]>> = {}, clock: () => Da
   return new SupabaseAssignmentService({
     admin: { from, rpc: vi.fn(async (name: string, args: Record<string, unknown>) => {
       onRpc?.(name);
+      if (name === 'list_assignment_rows_for_planning_date') {
+        expect(args.p_session_id).toBe(sessionId);
+        const rows = (tables.cleaning_assignments ?? []).filter(row =>
+          (row.planning_date ?? row.service_date) === args.p_date &&
+          (args.p_include_history || row.is_current) &&
+          (!args.p_maid_profile_id || row.maid_profile_id === args.p_maid_profile_id) &&
+          (args.p_expected_actor_role === 'admin' || (row.maid_profile_id === args.p_actor_profile_id && row.notified_at !== null)));
+        await beforeRead?.(name);
+        return {data: rows, error: counts.cleaning_assignments !== undefined && counts.cleaning_assignments !== rows.length
+          ? {message:'ASSIGNMENT_QUERY_LIMIT'} : null};
+      }
       expect(args.p_session_id).toBe(sessionId);
       if (name === 'get_assignment_card_hydration') {
         const ids = args.p_assignment_ids as string[];
@@ -221,8 +232,9 @@ describe('assignment hydration dependency pipeline', () => {
     expect(result).toHaveLength(size);
     expect(batches.every((size) => size <= 100)).toBe(true);
     // Exact-date list: one list read plus one hydration and one final guard per batch.
-    expect(calls.filter(name => name === 'cleaning_assignments')).toHaveLength(1);
-    expect(1 + rpcCalls.length).toBe(size === 1000 ? 21 : 3);
+    expect(calls.filter(name => name === 'list_assignment_rows_for_planning_date')).toHaveLength(1);
+    expect(rpcCalls.length).toBe(size === 1000 ? 21 : 3);
+    expect(rpcCalls.shift()).toBe('list_assignment_rows_for_planning_date');
     expect(rpcCalls).toHaveLength(2 * Math.ceil(size / 100));
     expect(rpcCalls.slice(0, Math.ceil(size / 100))).toEqual(Array(Math.ceil(size / 100)).fill('get_assignment_card_hydration'));
     expect(rpcCalls.slice(Math.ceil(size / 100))).toEqual(Array(Math.ceil(size / 100)).fill('get_assignment_schedule_read_for_plan'));
@@ -651,5 +663,29 @@ describe('assignment card Fastify routes', () => {
     expect(assignmentService.list).toHaveBeenCalledOnce();
     expect(assignmentService.history).toHaveBeenCalledOnce();
     await app.close();
+  });
+});
+
+
+describe('#616 planned date history', () => {
+  it('finds the notice by the date of that revision, never by its original checkout date', async () => {
+    const past = {...assignments[0], revision:1, service_date:'2026-10-08', planning_date:'2026-11-07',
+      is_current:false, notified_at:'2026-11-06T09:00:00Z', ended_at:'2026-11-06T10:00:00Z'};
+    const current = {...past, id:assignmentIds[1], revision:past.revision+1, is_current:true,
+      ended_at:null, planning_date:'2026-11-08'};
+    const rows = [past,current];
+    const subject=service({cleaning_assignments:rows},()=>new Date('2026-11-10T00:00:00Z'),{},undefined,args=>({
+      data:(args.p_assignment_ids as string[]).map(id=>({assignmentId:id,scheduleSnapshot:null,currentDeparture:null,
+        planningDate:rows.find(row=>row.id===id)?.planning_date})),error:null
+    }));
+    for(const actor of [admin,maid]) {
+      expect(await subject.list(actor,{serviceDate:'2026-10-08',includeHistory:true})).toEqual([]);
+      expect(await subject.list(actor,{serviceDate:'2026-11-07',includeHistory:true})).toMatchObject([
+        {assignmentId:past.id,serviceDate:'2026-10-08',planningDate:'2026-11-07'}
+      ]);
+      expect(await subject.list(actor,{serviceDate:'2026-11-07'})).toEqual([]);
+      expect(await subject.list(actor,{serviceDate:'2026-11-08'})).toMatchObject([{assignmentId:current.id}]);
+    }
+    expect(await subject.list({...maid,profileId:otherMaidId},{serviceDate:'2026-11-07',includeHistory:true})).toEqual([]);
   });
 });

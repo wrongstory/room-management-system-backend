@@ -3860,7 +3860,8 @@ export const openApiDocument = {
             in: "query",
             required: true,
             schema: { type: "string", format: "date" },
-            description: "배정 snapshot의 서비스 날짜(YYYY-MM-DD)",
+            description:
+              "조회할 예정 청소일(YYYY-MM-DD, 한국 시간). 과거 날짜와 includeHistory 조회는 각 배정 버전의 planningDate를 사용합니다.",
           },
           {
             name: "maidProfileId",
@@ -4222,7 +4223,7 @@ export const openApiDocument = {
         operationId: "listWorkHistory",
         summary: "주간 업무 기록 조회",
         description:
-          "active/password-complete admin과 maid의 live session 전용입니다. KST 월요일부터 일요일까지 current availability의 가능일, immutable notified assignment 이력, fieldCompletedAt의 실제 KST 완료일을 독립 flag로 반환합니다. 같은 메이드·날짜의 여러 작업은 1일로 집계합니다. maidDisplayName은 과거 snapshot이 아니라 현재 profile 표시명입니다. 잘못된 query/cursor는 각각 INVALID_WORK_HISTORY_QUERY/INVALID_WORK_HISTORY_CURSOR로 반환하며 Fastify와 Edge가 같은 stable 오류 계약을 사용합니다.",
+          "active/password-complete admin과 maid의 live session 전용입니다. KST 월요일부터 일요일까지 current availability의 가능일, 각 배정 버전의 예정 청소일 기준 담당 통보 이력, fieldCompletedAt의 실제 KST 완료일을 독립 flag로 반환합니다. 같은 메이드·날짜의 여러 작업은 1일로 집계합니다. maidDisplayName은 과거 snapshot이 아니라 현재 profile 표시명입니다. 잘못된 query/cursor는 각각 INVALID_WORK_HISTORY_QUERY/INVALID_WORK_HISTORY_CURSOR로 반환하며 Fastify와 Edge가 같은 stable 오류 계약을 사용합니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin", "maid"],
         parameters: [
@@ -5092,7 +5093,7 @@ export const openApiDocument = {
         operationId: "listPayrollWorkDetails",
         summary: "객실별 확정 수익과 미확정 청소 산출 상세",
         description:
-          "현재·과거 KST 월요일 주차의 read-only 조회입니다. active/password-complete 관리자 또는 본인 메이드의 정확한 live session 및 최신 DB role을 재검증합니다. earnings는 earnedOn 주차의 불변 수익이며 0원 보상과 이미 이월된 수익도 포함하고 합계는 summary.accrualAmount와 비교합니다. workflow는 earning이 없는 실제 수행 회차이며 예상·검수 대기 기여액만 설명하고 확정 지급액이 아닙니다. 기존 totalAmount/lateEarningAmount/adjustment/carry/payable 산식을 변경하지 않습니다. 객실·타입·요금은 당시 snapshot만 사용하고 사진 7일 목록이나 현재 카탈로그로 재구성하지 않습니다. 기본25/최대50, entryDate ASC/entryId ASC의 별도 actor·role·session·주차·메이드·kind bound HMAC cursor를 사용합니다. 기존 entries cursor는 거부합니다. 각 요청 summary/page는 동일 SQL snapshot이지만 여러 HTTP 페이지 사이 영구 snapshot은 보장하지 않으므로 상태 변경 뒤 첫 페이지부터 다시 조회합니다. HEAD·다른 method·slash·encoded alias는404이고 모든 응답은 no-store, UTF-8 JSON128KiB 상한입니다.",
+          "현재·과거 KST 월요일 주차의 read-only 조회입니다. active/password-complete 관리자 또는 본인 메이드의 정확한 live session 및 최신 DB role을 재검증합니다. earnings는 earnedOn 주차의 불변 수익이며 0원 보상과 이미 이월된 수익도 포함하고 합계는 summary.accrualAmount와 비교합니다. workflow의 entryDate는 현장 완료 전에는 예정 청소일, 완료 후에는 실제 한국 시간 완료일입니다. workflow는 earning이 없는 실제 수행 회차이며 예상·검수 대기 기여액만 설명하고 확정 지급액이 아닙니다. 기존 totalAmount/lateEarningAmount/adjustment/carry/payable 산식을 변경하지 않습니다. 객실·타입·요금은 당시 snapshot만 사용하고 사진 7일 목록이나 현재 카탈로그로 재구성하지 않습니다. 기본25/최대50, entryDate ASC/entryId ASC의 별도 actor·role·session·주차·메이드·kind bound HMAC cursor를 사용합니다. 기존 entries cursor는 거부합니다. 각 요청 summary/page는 동일 SQL snapshot이지만 여러 HTTP 페이지 사이 영구 snapshot은 보장하지 않으므로 상태 변경 뒤 첫 페이지부터 다시 조회합니다. HEAD·다른 method·slash·encoded alias는404이고 모든 응답은 no-store, UTF-8 JSON128KiB 상한입니다.",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin", "maid"],
         parameters: [
@@ -11113,7 +11114,7 @@ export const openApiDocument = {
             type: "string",
             format: "date",
             description:
-              "통보/담당 변경 근거의 계획일. 원 serviceDate를 덮어쓰지 않으며 생성일·통보일과 다릅니다.",
+              "해당 배정의 예정 청소일. 현재 배정에는 이월을 반영하고 종료된 배정은 그 버전의 통보 기록을 따릅니다.",
           },
           cleaningKind: {
             type: "string",

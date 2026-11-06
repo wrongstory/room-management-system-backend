@@ -41,6 +41,8 @@ insert into limited_session_caller_extensions values
 -- END APPROVED ROOM TYPE FEE SESSION EXTENSION
 insert into limited_session_caller_extensions values ('public.get_assignment_force_recall_candidate(uuid,uuid,uuid)','public.get_assignment_force_recall_candidate','snapshot','s','service-only');
 insert into limited_session_caller_extensions values ('public.force_recall_cleaning_assignment(uuid,uuid,uuid,uuid,bigint,uuid,bigint,text,text)','public.force_recall_cleaning_assignment','fresh','v','service-only');
+insert into limited_session_caller_extensions values
+  ('public.list_assignment_rows_for_planning_date(uuid,uuid,text,date,uuid,boolean)','public.list_assignment_rows_for_planning_date','snapshot','s','service-only');
 -- #551 exact new snapshot/fresh memo signatures, no overload allowance.
 insert into limited_session_caller_extensions values
   ('public.get_room_fixed_memo(uuid,uuid,uuid)','public.get_room_fixed_memo','snapshot','s','service-only'),

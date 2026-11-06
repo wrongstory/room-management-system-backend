@@ -250,7 +250,7 @@ describe('#336 isolated110->111 source/preflight only (no DB PASS claim)', () =>
   });
 
   it('accepts the unchanged historical145 prefix and exact reviewed146 extension', () => {
-    expect(source.entries).toHaveLength(153);
+    expect(source.entries).toHaveLength(154);
     expect(source.entries[145]?.file).toBe('20261101235131_db_lint_source_corrections.sql');
     expect(source.entries[145]?.sha256).toBe('b7f6834b471877e8a209116e669c566320bd2d67894952947abb351149377282');
     const historical = clone(manifest) as typeof manifest & { head: string; pending: { head: string; count: number } };

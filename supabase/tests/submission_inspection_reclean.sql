@@ -29,9 +29,9 @@ select pg_temp.pid(202),id,'checkout',6,'published',30,pg_temp.slots(),pg_temp.p
 insert into public.cleaning_template_versions(id,room_type_id,cleaning_kind,version,status,duration_minutes,photo_slots,created_by)
 select pg_temp.pid(203),id,'stayover',6,'published',30,pg_temp.slots(),pg_temp.pid(1) from public.room_types where code='standard';
 
-create function pg_temp.fixture(n integer,p_maid integer default 2,p_status public.attempt_status default 'field_completed',p_fee integer default 12000,p_kind public.cleaning_kind default 'additional')
+create function pg_temp.fixture(n integer,p_maid integer default 2,p_status public.attempt_status default 'field_completed',p_fee integer default 12000,p_kind public.cleaning_kind default 'additional',p_started timestamptz default null)
 returns void language plpgsql as $$
-declare room_row public.rooms; snapshot jsonb; started timestamptz:=clock_timestamp()-interval '2 hours';
+declare room_row public.rooms; snapshot jsonb; started timestamptz:=coalesce(p_started,clock_timestamp()-interval '2 hours');
 begin
  select * into room_row from public.rooms where room_type_id=(select id from public.room_types where code='standard') order by room_number offset n limit 1;
  snapshot:=jsonb_build_object('id',case when p_kind='stayover' then pg_temp.pid(203) else pg_temp.pid(200) end,'version',6,'durationMinutes',30,'photoSlots',pg_temp.slots());
@@ -113,7 +113,8 @@ create trigger accept_direct_submission_photo
 after insert on private.attempt_photo_versions
 for each row execute function pg_temp.accept_direct_submission_photo();
 
-select pg_temp.fixture(1); select pg_temp.fixture(2); select pg_temp.fixture(3); select pg_temp.fixture(4);
+select pg_temp.fixture(1); select pg_temp.fixture(2); select pg_temp.fixture(3,p_started=>((date_trunc('week',transaction_timestamp() at time zone 'Asia/Seoul')
+  -interval '7 days 30 minutes') at time zone 'Asia/Seoul')); select pg_temp.fixture(4);
 select pg_temp.fixture(5); select pg_temp.fixture(6,2,'scheduled'); select pg_temp.fixture(7); select pg_temp.fixture(8,3);
 select pg_temp.fixture(14,2,'field_completed',0);
 select is((select count(*) from public.cleaning_submissions),0::bigint,'field_completed alone creates no submission');
@@ -321,6 +322,20 @@ insert into submission_results values('bomb-approved',public.approve_cleaning_su
 select is((public.list_room_reports_page(pg_temp.pid(1),pg_temp.pid(201),
  (select room_id from public.cleaning_targets where id=pg_temp.pid(303)))->'items'->0->>'status'),
  'approved','registered report history retains the existing bomb decision after final approval');
+select is((select e.earned_on from public.earnings e where e.submission_id=(select (value->>'id')::uuid from submission_results where label='bomb-submission')),
+  (select (a.field_completed_at at time zone 'Asia/Seoul')::date from public.cleaning_attempts a join public.cleaning_submissions s on s.cleaning_attempt_id=a.id
+    where s.id=(select (value->>'id')::uuid from submission_results where label='bomb-submission')),
+  'approved pay is attributed to the actual KST field completion date');
+select is((select e.earned_on from public.earnings e where e.submission_id=(select (value->>'id')::uuid from submission_results where label='bomb-submission')),
+  date_trunc('week',transaction_timestamp() at time zone 'Asia/Seoul')::date-7,'Sunday start and Monday completion earn on Monday');
+select (to_regprocedure('public.list_payroll_work_details_page(uuid,uuid,text,date,uuid,text,date,uuid,integer)') is not null) as has_payroll_details \gset
+\if :has_payroll_details
+select ok(exists(select 1 from jsonb_array_elements(public.list_payroll_work_details_page(pg_temp.pid(1),pg_temp.pid(201),'admin',
+  date_trunc('week',transaction_timestamp() at time zone 'Asia/Seoul')::date-7,pg_temp.pid(2),'earnings',null,null,50)->'entries') item
+  where item->>'submissionId'=(select value->>'id' from submission_results where label='bomb-submission')
+  and item->>'entryDate'=(date_trunc('week',transaction_timestamp() at time zone 'Asia/Seoul')::date-7)::text),
+  'Monday approved earnings appear in the actual completion week');
+\endif
 select is((select base_amount from public.earnings where submission_id=(select (value->>'id')::uuid from submission_results where label='bomb-submission')),12000,'approved submission earns frozen base fee');
 select is((select bomb_room_bonus from public.earnings where submission_id=(select (value->>'id')::uuid from submission_results where label='bomb-submission')),12000,'approved bomb decision adds exactly one frozen-fee bonus');
 select ok((select e.bomb_room_decision_id=d.id from public.earnings e join private.bomb_room_decisions d on d.submission_id=e.submission_id
