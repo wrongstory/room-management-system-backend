@@ -1,3 +1,5 @@
+import { forceRecallArgs, recallProjection, recallFailure } from './force-recall.js';
+import { requestHash } from '../../lib/command.js';
 import { AssignmentHydrationError, loadAssignmentHydration } from './assignment-hydration.js';
 import { parseInstructionMemoRead } from './instruction-memo.js';
 import type { Actor } from '../../domain/actor.js';
@@ -13,6 +15,8 @@ export interface AssignmentListInput {
 }
 
 export interface AssignmentService {
+  recallCandidate(actor: Actor, target: string): Promise<unknown>;
+  forceRecall(actor: Actor, target: string, body: unknown, key: string): Promise<unknown>;
   list(actor: Actor, input: AssignmentListInput): Promise<unknown[]>;
   history(actor: Actor, cleaningTargetId: string): Promise<unknown[]>;
 }
@@ -80,6 +84,27 @@ function rolloverSnapshot(target: TargetRow, row: AssignmentRow, schedules: Sche
 
 export class SupabaseAssignmentService implements AssignmentService {
   constructor(private readonly clients: SupabaseClients, private readonly clock: () => Date = () => new Date()) {}
+
+  async recallCandidate(actor: Actor, target: string): Promise<unknown> {
+    if (actor.role !== 'admin' || actor.mustChangePassword) throw new AppError(403,'ADMIN_REQUIRED','관리자 권한이 필요합니다.');
+    const {data,error}=await this.clients.admin.rpc('get_assignment_force_recall_candidate',{
+      p_actor_profile_id:actor.profileId,p_session_id:this.sessionId(actor),p_cleaning_target_id:target,
+    });
+    if (error || !data) throw new AppError(...recallFailure(error?.message));
+    return data;
+  }
+
+  async forceRecall(actor: Actor, target: string, body: unknown, key: string): Promise<unknown> {
+    if (actor.role !== 'admin' || actor.mustChangePassword) throw new AppError(403,'ADMIN_REQUIRED','활성 관리자 권한이 필요합니다.');
+    const args = forceRecallArgs(body,target,actor.profileId,this.sessionId(actor));
+    if (!args) throw new AppError(400,'VALIDATION_ERROR','회수 대상과 버전을 확인해 주세요.');
+    const command = 'force_recall_cleaning_assignment';
+    const {data,error} = await this.clients.admin.rpc(command,{...args,p_idempotency_key:key,p_request_hash:requestHash({command,...args})});
+    if (error) throw new AppError(...recallFailure(error.message));
+    const result = recallProjection(data,args);
+    if (!result) throw new AppError(...recallFailure());
+    return result;
+  }
 
   async list(actor: Actor, input: AssignmentListInput): Promise<unknown[]> {
     this.requireReader(actor);

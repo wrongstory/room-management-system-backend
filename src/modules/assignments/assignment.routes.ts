@@ -21,7 +21,21 @@ function exactQuery(request: FastifyRequest): void {
 
 export function createAssignmentRoutes(service: AssignmentService): FastifyPluginAsync {
   return async (app) => {
-    app.get('/', { preHandler: [app.authenticate, app.requirePasswordChanged], prefixTrailingSlash: 'no-slash' },
+    app.get('/:cleaningTargetId/force-recall', { preHandler: [app.authenticate, app.requirePasswordChanged, app.requireAdmin] },
+      async (request, reply) => {
+        z.object({}).strict().parse(request.query);
+        reply.header('cache-control','no-store');
+        return service.recallCandidate(request.actor,historyParams.parse(request.params).cleaningTargetId);
+      });
+    app.post('/:cleaningTargetId/force-recall', { preHandler: [app.authenticate, app.requirePasswordChanged, app.requireAdmin] },
+      async (request, reply) => {
+        z.object({}).strict().parse(request.query);
+        const {cleaningTargetId} = historyParams.parse(request.params);
+        const key = z.string().regex(/^[A-Za-z0-9._:-]{8,128}$/).parse(request.headers['idempotency-key']);
+        reply.header('cache-control','no-store');
+        return service.forceRecall(request.actor,cleaningTargetId,request.body,key);
+      });
+    app.get('/',  { preHandler: [app.authenticate, app.requirePasswordChanged], prefixTrailingSlash: 'no-slash' },
       async (request, reply) => {
         exactQuery(request);
         reply.header('cache-control', 'no-store');

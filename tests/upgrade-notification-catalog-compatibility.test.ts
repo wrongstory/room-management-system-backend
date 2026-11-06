@@ -41,7 +41,7 @@ describe('historical upgrade notification catalog compatibility', () => {
     expect(() => assertCumulativeNotificationCatalog(before, before, 152)).toThrow();
     expect(() => assertCumulativeNotificationCatalog(before, after.map(row => row.event_family === old[0]?.event_family
       ? { ...row, push_eligible: true } : row), 152)).toThrow();
-    for (const count of [77, 153, 152.5, Number.NaN]) {
+    for (const count of [77, 154, 152.5, Number.NaN]) {
       expect(() => assertCumulativeNotificationCatalog(before, after, count)).toThrow();
     }
   });

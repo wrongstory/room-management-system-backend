@@ -13,11 +13,11 @@ const history = ['room_occupancy_events', 'room_pin_sync_events', 'room_candle_e
 describe('#586 finite authority (DB-free; actual SQL behavior NOT RUN)', () => {
   it('preserves the exact 149-entry history and binds append150', () => {
     const manifest = JSON.parse(read('supabase/migration-manifest.dev.json'));
-    expect(manifest.totalCount).toBe(152);
+    expect(manifest.totalCount).toBe(153);
     expect(sha(JSON.stringify(manifest.migrations.slice(0, 149))))
       .toBe('1211a6f45eacfa88b1522126a6d6efc986eb368a7541872fc881578695f6e554');
     expect(manifest.migrations[149].sha256).toBe(sha(migration));
-    expect(manifest.head).toBe('all_notification_device_push');
+    expect(manifest.head).toBe('assignment_force_recall');
   });
 
   it('parses exactly four restricted service-only REVOKEs between two guards', async () => {

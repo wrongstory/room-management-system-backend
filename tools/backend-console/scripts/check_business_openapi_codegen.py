@@ -670,7 +670,7 @@ def main() -> None:
     if document.get("info", {}).get("version") != "0.6.0":
         raise RuntimeError("전체 source OpenAPI version이 0.6.0이 아닙니다.")
     paths = document.get("paths")
-    if not isinstance(paths, dict) or len(paths) != 161:
+    if not isinstance(paths, dict) or len(paths) != 162:
         raise RuntimeError("전체 source OpenAPI path 수가 161이 아닙니다.")
     methods = {"get", "post", "put", "patch", "delete"}
     operation_count = sum(
@@ -680,7 +680,7 @@ def main() -> None:
         for method in path_item
         if method in methods
     )
-    if operation_count != 174:
+    if operation_count != 176:
         raise RuntimeError("전체 source OpenAPI operation 수가 174가 아닙니다.")
     schemas = document.get("components", {}).get("schemas", {})
     check_post_approval_contract(document)
