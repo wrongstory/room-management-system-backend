@@ -13,6 +13,7 @@ const sourcePaths = [
   'src/modules/rooms/room-ready-correction-contract.ts',
   'src/modules/rooms/room-arrival-contract.ts',
   'src/modules/rooms/room-fixed-memo-contract.ts',
+  'src/modules/assignments/force-recall.ts',
   'src/modules/rooms/room-type-fee-contract.ts',
   'supabase/functions/_shared/http-admission.ts',
   'supabase/functions/_shared/http-admission-api.ts',

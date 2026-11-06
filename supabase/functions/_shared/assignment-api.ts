@@ -1,4 +1,9 @@
 import {
+  forceRecallArgs,
+  recallFailure,
+  recallProjection,
+} from "../../../src/modules/assignments/force-recall.ts";
+import {
   AssignmentHydrationError,
   loadAssignmentHydration,
 } from "./assignment-hydration.ts";
@@ -158,6 +163,7 @@ export const unavailabilityReasonCodes = [
 export type PrestartAction =
   | "change"
   | "unassign"
+  | "force-recall"
   | "unavailable-cancel"
   | "cancellation-requests"
   | "decision";
@@ -166,7 +172,7 @@ export function prestartPath(
   path: string,
 ): { id: string; action: PrestartAction } | null {
   const match =
-    /^\/v1\/assignments\/([^/]+)\/(change|unassign|unavailable-cancel|cancellation-requests)$/
+    /^\/v1\/assignments\/([^/]+)\/(change|unassign|force-recall|unavailable-cancel|cancellation-requests)$/
       .exec(path);
   if (match) {
     return {
@@ -232,7 +238,44 @@ export async function prestartCommand(
       );
     }
   } else requireBusinessAdmin(actor);
+  if (action === "force-recall" && request.method === "GET") {
+    if (!sessionId) {
+      throw new EdgeError(401, "INVALID_ACCESS_TOKEN", "다시 로그인해 주세요.");
+    }
+    if (new URL(request.url).search) {
+      validationError("조회 조건을 확인해 주세요.");
+    }
+    const { data, error } = await clients.admin.rpc(
+      "get_assignment_force_recall_candidate",
+      {
+        p_actor_profile_id: actor.profileId,
+        p_session_id: sessionId,
+        p_cleaning_target_id: id,
+      },
+    );
+    if (error || !data) throw new EdgeError(...recallFailure(error?.message));
+    return data;
+  }
   const body = await readJsonBody(request);
+  if (action === "force-recall") {
+    if (!sessionId) {
+      throw new EdgeError(401, "INVALID_ACCESS_TOKEN", "다시 로그인해 주세요.");
+    }
+    const args = forceRecallArgs(body, id, actor.profileId, sessionId);
+    if (!args || new URL(request.url).search) {
+      validationError("회수 대상과 버전을 확인해 주세요.");
+    }
+    const command = "force_recall_cleaning_assignment";
+    const { data, error } = await clients.admin.rpc(command, {
+      ...args,
+      p_idempotency_key: idempotencyKey(request),
+      p_request_hash: await requestHash({ command, ...args }),
+    });
+    if (error) throw new EdgeError(...recallFailure(error.message));
+    const result = recallProjection(data, args);
+    if (!result) throw new EdgeError(...recallFailure());
+    return result;
+  }
   const required = [
     "expectedCurrentAssignmentId",
     "expectedAssignmentVersion",

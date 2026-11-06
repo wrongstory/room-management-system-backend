@@ -1479,5 +1479,20 @@
     "hashArgs": {},
     "keyArgument": "p_idempotency_key",
     "sqlExtension": "ROOM_TYPE_CLEANING_FEE_577"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/assignments/{cleaningTargetId}/force-recall",
+    "routeId": "forceRecallCleaningAssignment",
+    "kind": "BUSINESS_WRITE",
+    "authority": "ACTIVE_SESSION",
+    "rpc": "force_recall_cleaning_assignment",
+    "commandName": "assignment.force_recall",
+    "rpcAliases": [],
+    "bindings": {},
+    "hashMode": "CALLER",
+    "hashArgs": {},
+    "keyArgument": "p_idempotency_key",
+    "sqlExtension": "ASSIGNMENT_FORCE_RECALL_607"
   }
 ]

@@ -1021,7 +1021,11 @@ async function handleApiRequestCore(
         corsHeaders,
       );
     }
-    if (request.method === "POST") {
+    if (
+      request.method === "POST" ||
+      (request.method === "GET" &&
+        /^\/v1\/assignments\/[^/]+\/force-recall$/.test(path))
+    ) {
       const prestart = prestartPath(path);
       if (prestart) {
         return jsonResponse(

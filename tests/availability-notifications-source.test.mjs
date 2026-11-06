@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { describe, expect, it } from 'vitest';
 const require = createRequire(import.meta.url);
-const read = path => readFileSync(path, 'utf8');
+const read = path => readFileSync(path, 'utf8').replaceAll('\r\n', '\n');
 const migration = read('supabase/migrations/20261106002729_availability_change_notifications.sql');
 const regression = read('supabase/tests/availability_notifications.sql');
 describe('availability notification source preparation (DB NOT RUN)', () => {
