@@ -3249,6 +3249,61 @@ export const openApiDocument = {
         "cleaningTargetId",
       ),
     },
+    "/v1/assignments/{cleaningTargetId}/force-recall": {
+      get: {
+        tags: ["Assignments"],
+        operationId: "getAssignmentForceRecallCandidate",
+        summary: "관리자 강제 회수 가능 여부",
+        description:
+          "관리자가 회수할 수 있으면 현재 배정·수행 버전을 반환합니다. candidate가 null이면 회수 버튼을 숨깁니다.",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin"],
+        parameters: [{
+          name: "cleaningTargetId",
+          in: "path",
+          required: true,
+          schema: { type: "string", format: "uuid" },
+        }],
+        responses: {
+          "200": {
+            description: "가능하면 POST 입력, 불가하면 candidate=null",
+            headers: { "Cache-Control": noStoreHeader },
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["candidate"],
+                  additionalProperties: false,
+                  properties: {
+                    candidate: {
+                      anyOf: [{
+                        $ref:
+                          "#/components/schemas/AssignmentForceRecallRequest",
+                      }, { type: "null" }],
+                    },
+                  },
+                },
+              },
+            },
+          },
+          "401": errorResponse,
+          "403": errorResponse,
+          "500": errorResponse,
+        },
+      },
+      post: {
+        ...prestartOperation(
+          "forceRecallCleaningAssignment",
+          "관리자 강제 회수",
+          "AssignmentForceRecallRequest",
+          "AssignmentForceRecallResult",
+          "admin",
+          "cleaningTargetId",
+        ),
+        description:
+          "현장 완료·미제출 업무를 관리자가 강제 회수합니다. 기존 수행과 사진을 보존하며 응답의 reassignTargetId로 새 담당자를 배정/통보합니다.",
+      },
+    },
     "/v1/assignments/{cleaningTargetId}/unavailable-cancel": {
       post: {
         ...prestartOperation(
@@ -10028,6 +10083,42 @@ export const openApiDocument = {
         },
       },
       AssignmentPrestartChangeRequest: prestartRequestSchema("change"),
+      AssignmentForceRecallRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "expectedCurrentAssignmentId",
+          "expectedAssignmentVersion",
+          "expectedAttemptId",
+          "expectedExecutionVersion",
+        ],
+        properties: {
+          expectedCurrentAssignmentId: { type: "string", format: "uuid" },
+          expectedAssignmentVersion: { type: "integer", minimum: 1 },
+          expectedAttemptId: { type: "string", format: "uuid" },
+          expectedExecutionVersion: { type: "integer", minimum: 1 },
+        },
+      },
+      AssignmentForceRecallResult: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "cleaningTargetId",
+          "assignmentId",
+          "attemptId",
+          "reassignTargetId",
+          "assignmentVersion",
+          "status",
+        ],
+        properties: {
+          cleaningTargetId: { type: "string", format: "uuid" },
+          assignmentId: { type: "string", format: "uuid" },
+          attemptId: { type: "string", format: "uuid" },
+          reassignTargetId: { type: "string", format: "uuid" },
+          assignmentVersion: { type: "integer", minimum: 1 },
+          status: { type: "string", const: "unassigned" },
+        },
+      },
       AssignmentPrestartUnassignRequest: prestartRequestSchema("unassign"),
       AssignmentUnavailabilityCancellationRequest: prestartRequestSchema(
         "unavailable",

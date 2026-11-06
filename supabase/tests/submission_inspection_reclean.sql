@@ -125,6 +125,13 @@ select pg_temp.photo(1); select pg_temp.photo(2); select pg_temp.photo(3); selec
 select pg_temp.photo(14);
 create temp table submission_results(label text primary key,value jsonb);
 insert into submission_results values('approve',pg_temp.submit(1));
+-- The submission command won: use the current versions so this checks the submitted boundary itself.
+select throws_ok($$select public.force_recall_cleaning_assignment(pg_temp.pid(1),pg_temp.pid(201),t.id,
+  x.assignment_id,t.assignment_version,x.id,x.execution_version,'submitted-force-recall',repeat('d',64))
+  from public.cleaning_attempts x join public.cleaning_targets t on t.id=x.cleaning_target_id
+  where x.id=pg_temp.pid(501)$$,'55000','ASSIGNMENT_FORCE_RECALL_NOT_ALLOWED','submitted work cannot be forcibly recalled')
+where to_regprocedure('public.force_recall_cleaning_assignment(uuid,uuid,uuid,uuid,bigint,uuid,bigint,text,text)') is not null;
+
 select is((select value->>'version' from submission_results where label='approve'),'1','first submission version is immutable version one');
 select is((select value->>'currentRevision' from submission_results where label='approve'),'1','first submission advances current pointer CAS');
 select is((select count(*) from private.submission_photo_bindings where submission_id=(select (value->>'id')::uuid from submission_results where label='approve')),1::bigint,'submission seals exact current photo set');
