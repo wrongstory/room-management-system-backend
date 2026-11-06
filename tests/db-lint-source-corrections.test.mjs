@@ -41,7 +41,7 @@ describe('#558 exact source corrections (DB-free; PostgreSQL behavior NOT RUN)',
     expect(sha(JSON.stringify(manifest.migrations.slice(0, 145)))).toBe(contract.priorManifestPrefixSha256);
     expect(manifest.migrations[145].name).toBe('db_lint_source_corrections');
     expect(manifest.migrations[145].sha256).toBe(sha(migration));
-    expect(manifest.totalCount).toBe(150);
+    expect(manifest.totalCount).toBe(151);
   });
 
   it.each([15, 17])('parses all prepared statements and preserves function attributes with PostgreSQL %i grammar', async version => {

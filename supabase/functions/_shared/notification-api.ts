@@ -67,6 +67,7 @@ function deepLink(value: unknown): { kind: string; entityId: string } | null {
       "complaintCase",
       "payrollCycle",
       "payrollProfile",
+      "availabilityRequest",
     ].includes(kind)
   ) throw databaseError(null);
   return { kind, entityId: uuid(parsed.entityId) };
