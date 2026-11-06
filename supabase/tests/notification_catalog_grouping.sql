@@ -1,6 +1,6 @@
 begin;
 
-select plan(65);
+select plan(66);
 
 select is((select count(*) from private.notification_event_catalog),63::bigint,
   'source-controlled catalog contains every approved event family');
@@ -23,6 +23,9 @@ select ok((select bool_and(push_eligible and not requires_action)
     'assignment.cancellation_approved','assignment.cancellation_rejected',
     'assignment.scheduled_rolled_over','cleaning.field_completed_admin')),
   'approved informational events are push eligible without becoming actionable');
+
+select ok((select bool_and(push_eligible) from private.notification_event_catalog),
+  'all 63 notification families are eligible for PC and phone push');
 
 insert into auth.users(id) values
   ('10900000-0000-4000-8000-000000000001'),
