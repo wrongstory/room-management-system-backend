@@ -1,11 +1,15 @@
 begin;
 select plan(22);
 insert into auth.users(id) select ('13600000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid from generate_series(1,5) n;
+-- The singleton developer must be bootstrapped before any business profile.
+select public.bootstrap_first_developer_profile(
+ '23600000-0000-4000-8000-000000000005','13600000-0000-4000-8000-000000000005',
+ '가능일 알림 데모 개발자','가능일 알림 데모 개발자','0005',repeat('a',64),'availability-notice-bootstrap');
 insert into public.profiles(id,auth_user_id,display_name,display_name_normalized,login_id,login_id_normalized,login_sequence,role,status,must_change_password)
 select ('23600000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid,('13600000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid,
  '가능일 알림 데모 '||n,'가능일 알림 데모 '||n,'availability-notice-'||n,'availability-notice-'||n,0,
- (case when n<=2 then 'admin' when n<=4 then 'maid' else 'developer' end)::public.app_role,
- 'active',false from generate_series(1,5) n;
+ (case when n<=2 then 'admin' else 'maid' end)::public.app_role,
+ 'active',false from generate_series(1,4) n;
 -- The business inbox is retained for inactive admins, but no push target is enqueued for them.
 update public.profiles set status='inactive' where id='23600000-0000-4000-8000-000000000002';
 
