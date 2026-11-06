@@ -16,7 +16,7 @@ import { validateWebPushProviderConfig } from "./web-push-provider.ts";
 export const expectedMigrationName = "finite_service_role_authority";
 // Bundled source release identity, independent of OpenAPI and Deno versions.
 // This is not evidence that rollout, migrations or user acceptance are complete.
-export const backendReleaseVersion = "1.0.0";
+export const backendReleaseVersion = "1.0.1";
 
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
