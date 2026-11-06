@@ -69,6 +69,19 @@ Deno.test("room proximity and room uniqueness preserve fixed work in the Edge co
   if (balanced.proposedAssignments[0]?.maidProfileId !== "b") {
     throw new Error("Fee balance overrode room proximity");
   }
+  const dense = await optimizeAssignmentPreview({
+    ...input,
+    targets: [101, 102, 103, 104, 105, 106, 131, 132].map((room) =>
+      makeTarget(String(room), String(room))
+    ),
+  }, "balanced-boundaries");
+  if (
+    dense.proposedAssignments.length !== 8 ||
+    dense.objectiveScore.feeSpread > 30000 ||
+    dense.objectiveScore.routeScore.roomDistance > 32
+  ) {
+    throw new Error("Fee tolerance or contiguous nearby ranges failed in Edge");
+  }
   const duplicate = [
     makeTarget("old-350", "350"),
     makeTarget("new-350", "350"),
