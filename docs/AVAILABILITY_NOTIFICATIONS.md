@@ -16,8 +16,12 @@
 
 ## 검증 및 적용 상태
 
+2026-11-06 최종 통합 PR #605의 전체 DB 검증과 main 검사가 성공했고, 운영 migration151·152 및 API61/notification-delivery16을 적용했다. 정기 발송 활성화와 실제 확인 범위는 [v1.0.4 운영 기록](RELEASE_V1.0.4_DEPLOYED.md)을 따른다. 실제 기기 수신 확인은 아직 하지 않았다.
+
+### 최초 개발 후보 검증 이력
+
 - DB 없는 TypeScript·빌드·OpenAPI(161 paths / 174 operations)·manifest(151)·PostgreSQL 15/17 SQL 문법 검사 통과. Vitest 234 files / 6,339 tests 전체 통과, 변경 후 재실행에서 기존 Google Sheets 테스트 1건이 5초 시간 초과했고 해당 파일 16개 검사는 단독 재실행 통과했다. 해당 CI 결과를 별도로 확인한다.
 - Deno 2.1.4의 notification API/provider 합성 검사 11개 통과. 실제 네트워크 발송과 운영 DB 쓰기는 하지 않았다.
 - `supabase/tests/availability_notifications.sql`: 수신자 범위, 초기 승인 대기, 요청/결정 멱등성, 승인/반려 푸시, 관리자 처리 완료, stale 명령 무알림을 롤백 fixture로 검증한다.
 - 기존 최종 fresh/upgrade/경합 검사에 새 migration을 포함한다. upgrade 보존 검사는 기존 catalog 행 전체를 유지하고 정확한 신규 3행만 허용한다.
-- **Full DB NOT RUN**. 이 문서의 구현은 dev 준비 상태이며 운영 DB 적용·Edge API/notification-delivery 재배포·실기기 수신을 완료했다는 증거가 아니다. 저장소 규칙에 따라 최종 통합본 DB 검증과 운영 적용은 실행별 명시 승인 후 수행한다.
+- 최초 개발 후보 작성 당시 **Full DB NOT RUN**이었다. 당시 검증은 운영 DB 적용·Edge 재배포·실기기 수신의 증거가 아니며, 이후 최종 검증과 운영 반영은 위 v1.0.4 기록으로 구분한다.

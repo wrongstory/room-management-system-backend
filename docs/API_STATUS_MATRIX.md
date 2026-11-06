@@ -1,6 +1,10 @@
 # API 구현·Edge 배포·운영 사용 상태 정본
 
-## 2026-11-03 현재 통합148 기준
+## 2026-11-06 알림 운영 적용
+
+[v1.0.4 운영 기록](RELEASE_V1.0.4_DEPLOYED.md): PR #605 / main d761e8e의 최종 전체 DB 성공 및 main 동일 입력 증거 재사용을 확인했다. 운영 migration152개, API61, notification-delivery16과 전체 알림63종의 기기 푸시·매분 signed 호출을 적용했다. 배포 시 등록 구독0개로 실제 PC/휴대폰 표시 확인은 미완료다. 아래 준비 snapshot은 최신 운영 상태로 사용하지 않는다.
+
+## 2026-11-03 통합148 준비 snapshot
 
 #577 관리자 타입별 기본 청소 단가와 #579 퇴실 검사 시각 보완, PR581의 Swagger 게시 계약 보완을 포함한다. 현재 source는 migration148개·SQL119파일·upgrade28개·직접 경합13개이며 정상 경로 reset은81회(checkpoint1+upgrade61+static2+경합17)다. workflow 상한은 application20분/DB60분이며 개별 제한·검사 기준은 유지한다. API 계약은0.6.0의161경로/174operation이고 실제 CI 후보 번들은19,961,858 bytes(20,000,000 제한까지38,142 bytes)다.
 
