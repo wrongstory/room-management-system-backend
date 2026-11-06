@@ -1,3 +1,5 @@
+import assert from 'node:assert/strict';
+
 const dayMillis = 86_400_000;
 function date(value) {
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) throw new Error('Availability fixture date is invalid');
@@ -35,4 +37,19 @@ export function isExpectedAvailabilityCommitCollision(results) {
   return Array.isArray(results) && results.length === 2 && results[0] != null
     && results[0].error == null && results[1]?.error?.code === '40001'
     && results[1].error.message === 'ASSIGNMENT_AVAILABILITY_STALE';
+}
+
+// The observer reads the isolated DB directly: the public Data API deliberately
+// cannot SELECT raw notification rows. Keep the winner/rollback oracle strict.
+export function assertAvailabilityRaceNotifications(notices, { approvalSucceeded, maidProfileId, changeRequestId }) {
+  assert.equal(typeof approvalSucceeded, 'boolean', 'availability race outcome must be known');
+  assert.ok(Array.isArray(notices), 'availability race notification projection must be an array');
+  assert.equal(notices.length, approvalSucceeded ? 1 : 0,
+    'exactly the approval winner may emit one notification');
+  for (const notice of notices) {
+    assert.equal(notice.recipient_profile_id, maidProfileId, 'approval notice must belong to the requesting maid');
+    assert.equal(notice.event_family, 'availability.change_approved', 'approval notice must use the approved family');
+    assert.equal(notice.deep_link_kind, 'availabilityRequest', 'approval notice must link to an availability request');
+    assert.equal(notice.deep_link_entity_id, changeRequestId, 'approval notice must link to the winning request');
+  }
 }
