@@ -726,6 +726,29 @@ function readClients(
     }),
     admin: {
       rpc: async (name: string, args: Record<string, unknown>) => {
+        if (name === "list_assignment_rows_for_planning_date") {
+          access.filters.push(["plannedActor", args.p_actor_profile_id], [
+            "plannedRole",
+            args.p_expected_actor_role,
+          ], ["plannedHistory", args.p_include_history]);
+          const selected = rows.filter((value) => {
+            const row = value as Record<string, unknown>;
+            return (row.planning_date ?? row.service_date) === args.p_date &&
+              (args.p_include_history || row.is_current) &&
+              (!args.p_maid_profile_id ||
+                args.p_maid_profile_id === row.maid_profile_id) &&
+              (args.p_expected_actor_role === "admin" ||
+                (row.maid_profile_id === args.p_actor_profile_id &&
+                  row.notified_at !== null));
+          });
+          return {
+            data: selected,
+            error:
+              options.count !== undefined && options.count !== selected.length
+                ? { message: "ASSIGNMENT_QUERY_LIMIT" }
+                : null,
+          };
+        }
         if (name === "get_assignment_card_hydration") {
           await options.beforeRead?.(name);
           const ids = args.p_assignment_ids as string[];
@@ -1097,8 +1120,8 @@ Deno.test("outside planning days and history reads never expand to past dates", 
         clients,
         admin,
         () => new Date(instant),
-      )).length === 1,
-      "exact date response only",
+      )).length === 0,
+      "original-day row is excluded from another planned date",
     );
     assert(
       overdue.filters.length === 0,
@@ -1193,15 +1216,15 @@ Deno.test("admin and maid read assignment lists through scoped RLS", async () =>
     if (actor.role === "maid") {
       assert(
         access.filters.some(([column, value]) =>
-          column === "maid_profile_id" && value === maid.profileId
+          column === "plannedActor" && value === maid.profileId
         ),
         "maid self filter",
       );
       assert(
         access.filters.some(([column, value]) =>
-          column === "not.notified_at.is" && value === null
+          column === "plannedRole" && value === "maid"
         ),
-        "maid notified-only query",
+        "SQL checks maid notified-only visibility",
       );
       assert(result[0].targetAssignmentVersion === 2, "revision snapshot");
     } else {
@@ -1275,7 +1298,9 @@ Deno.test("maid list and history preserve own notified revisions only, without c
       "past version not current target version",
     );
     assert(
-      access.filters.some(([key]) => key === "not.notified_at.is"),
+      access.filters.some(([key]) =>
+        key === "not.notified_at.is" || key === "plannedRole"
+      ),
       "DB filter required",
     );
     assert(

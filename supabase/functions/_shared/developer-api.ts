@@ -13,7 +13,7 @@ import {
 } from "./runtime.ts";
 import { validateWebPushProviderConfig } from "./web-push-provider.ts";
 
-export const expectedMigrationName = "assignment_force_recall";
+export const expectedMigrationName = "assignment_planned_work_date";
 // Bundled source release identity, independent of OpenAPI and Deno versions.
 // This is not evidence that rollout, migrations or user acceptance are complete.
 export const backendReleaseVersion = "1.0.5";

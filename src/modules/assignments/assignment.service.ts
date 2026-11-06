@@ -115,6 +115,18 @@ export class SupabaseAssignmentService implements AssignmentService {
     const tomorrow = new Date(Date.parse(`${today}T00:00:00Z`) + 86400000).toISOString().slice(0, 10);
     const tomorrowPlanning = actor.role === 'admin' && input.serviceDate === tomorrow;
     const includeOverdue = !input.includeHistory && (input.serviceDate === today || input.serviceDate === tomorrow);
+    if (!includeOverdue) {
+      const {data,error} = await this.clients.admin.rpc('list_assignment_rows_for_planning_date', {
+        p_actor_profile_id: actor.profileId, p_session_id: this.sessionId(actor), p_expected_actor_role: actor.role,
+        p_date: input.serviceDate, p_maid_profile_id: input.maidProfileId ?? null, p_include_history: !!input.includeHistory,
+      });
+      const rows = this.visibleRows(completeRows({data,error,count:Array.isArray(data) ? data.length : null}),actor);
+      const cards = await this.hydrate(actor,rows,!input.includeHistory);
+      return cards.filter(row => {
+        const card = object(row);
+        return (card.planningDate ?? card.serviceDate) === input.serviceDate;
+      });
+    }
     let query = this.clients.forAccessToken(actor.accessToken).from('cleaning_assignments')
       .select(this.assignmentColumns(), { count: 'exact' }).eq('service_date', input.serviceDate)
       .order('sequence_number').order('revision');
@@ -138,7 +150,6 @@ export class SupabaseAssignmentService implements AssignmentService {
         left.sequence_number - right.sequence_number || left.revision - right.revision || left.id.localeCompare(right.id));
     }
     const hydrated = await this.hydrate(actor, rows, !input.includeHistory);
-    if (input.includeHistory || !includeOverdue) return hydrated;
     return hydrated.filter(row => {
       const card = object(row);
       const planningDate = card.planningDate ?? card.serviceDate;

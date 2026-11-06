@@ -1568,6 +1568,7 @@ Deno.test("assignment GET routes expose only own notified revisions and preserve
   ];
   const queries: Array<Array<string>> = [];
   const scheduleModes: unknown[] = [];
+  const exactReads: Record<string, unknown>[] = [];
   function query(data: Array<Record<string, unknown>>) {
     const conditions: Array<(row: Record<string, unknown>) => boolean> = [];
     const filters: string[] = [];
@@ -1640,7 +1641,8 @@ Deno.test("assignment GET routes expose only own notified revisions and preserve
       rpc: async (name: string, args: Record<string, unknown>) => {
         if (
           name !== "get_assignment_schedule_read_for_plan" &&
-          name !== "get_assignment_card_hydration"
+          name !== "get_assignment_card_hydration" &&
+          name !== "list_assignment_rows_for_planning_date"
         ) {
           return Promise.resolve({ data: null, error: null });
         }
@@ -1657,6 +1659,17 @@ Deno.test("assignment GET routes expose only own notified revisions and preserve
             args.p_expected_actor_role === "admin",
           "original role bound",
         );
+        if (name === "list_assignment_rows_for_planning_date") {
+          exactReads.push(args);
+          const selected = rows.filter((row) =>
+            row.service_date === args.p_date &&
+            (args.p_include_history || row.is_current) &&
+            (args.p_expected_actor_role === "admin" ||
+              (row.maid_profile_id === args.p_actor_profile_id &&
+                row.notified_at !== null))
+          );
+          return { data: selected, error: null };
+        }
         const ids = args.p_assignment_ids as string[];
         assert(
           ids.length > 0 && ids.length <= 100 &&
@@ -1725,11 +1738,22 @@ Deno.test("assignment GET routes expose only own notified revisions and preserve
       response.status === 200 && body.assignments.length === count,
       "HTTP visible row count",
     );
-    assert(
-      queries[offset].includes("eq:maid_profile_id") &&
-        queries[offset].includes("not:notified_at"),
-      "route sends self and notified filters",
-    );
+    if (path.endsWith("/history")) {
+      assert(
+        queries[offset].includes("eq:maid_profile_id") &&
+          queries[offset].includes("not:notified_at"),
+        "target history enforces self and notified filters",
+      );
+    } else {
+      const read = exactReads.at(-1);
+      assert(
+        read?.p_actor_profile_id === maid.profileId &&
+          read?.p_expected_actor_role === "maid" &&
+          read?.p_date === "2026-09-04" &&
+          read?.p_include_history === path.includes("includeHistory=true"),
+        "date RPC enforces scoped actor and revision mode",
+      );
+    }
     assert(
       body.assignments.every((row: Record<string, unknown>) =>
         row.notifiedAt !== null && row.maidProfileId === maid.profileId &&
