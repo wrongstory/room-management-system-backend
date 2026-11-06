@@ -162,7 +162,7 @@ Deno.test("developer runtime separates the bundled release from schema and engin
     const schema = openApiDocument.components.schemas.DeveloperRuntimeStatus
       .properties.source;
     assert(
-      backendReleaseVersion === "1.0.3",
+      backendReleaseVersion === "1.0.4",
       "current source release identity",
     );
     assert(source.releaseVersion === backendReleaseVersion, "bundled release");
@@ -199,7 +199,7 @@ Deno.test("developer runtime separates the bundled release from schema and engin
 
 Deno.test("developer source migration head uses a stable migration name", () => {
   assert(
-    expectedMigrationName === "finite_service_role_authority",
+    expectedMigrationName === "all_notification_device_push",
     "expected migration must not depend on a remote execution timestamp",
   );
   const get = Deno.env.get;

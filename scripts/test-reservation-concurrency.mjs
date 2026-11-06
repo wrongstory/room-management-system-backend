@@ -32,7 +32,7 @@ import { configureRoomPinForConcurrency, testRoomPinConcurrency } from './test-r
 import { testRoomPinSheetFullResyncConcurrency } from './test-room-pin-sheet-full-resync-concurrency.mjs';
 import { testRoomPinSheetSyncConcurrency } from './test-room-pin-sheet-sync-concurrency.mjs';
 import { testWebPushConcurrency } from './test-web-push-concurrency.mjs';
-import { availabilityRaceWriteMode, isExpectedAvailabilityCommitCollision } from './lib/availability-race-fixture.mjs';
+import { assertAvailabilityRaceNotifications, availabilityRaceWriteMode, isExpectedAvailabilityCommitCollision } from './lib/availability-race-fixture.mjs';
 
 const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx';
 const status = JSON.parse(execFileSync(
@@ -957,6 +957,27 @@ assert(
 );
 assert(isExpectedAvailabilityCommitCollision(availabilityRace),
   'availability writer must hit the notified-assignment guard; date or policy errors are not collision evidence');
+
+// Approval notification must share the winning domain transaction; the stale loser emits nothing.
+if (availabilityWriteMode === 'approve_current_week') {
+  // Raw notification SELECT is revoked from service_role. Use the same local
+  // owner-only observer as the assignment replay checks above, without new ACLs.
+  const availabilityNotices = JSON.parse(execFileSync('docker', [
+    'exec', '-i', 'supabase_db_room-management-system-backend',
+    'psql', '-X', '-qAt', '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', 'postgres',
+    '-c', `begin read only; set local statement_timeout='5s';
+      select coalesce(jsonb_agg(jsonb_build_object(
+        'recipient_profile_id',recipient_profile_id,'event_family',event_family,
+        'deep_link_kind',deep_link_kind,'deep_link_entity_id',deep_link_entity_id)), '[]'::jsonb)
+      from public.notifications where event_family='availability.change_approved'
+        and source_entity_id='${changeRequestId}'; commit;`
+  ], { encoding: 'utf8', timeout: 10_000, stdio: ['ignore', 'pipe', 'inherit'] }).trim());
+  assertAvailabilityRaceNotifications(availabilityNotices, {
+    approvalSucceeded: !availabilityRace[1].error,
+    maidProfileId: logicalAccountId,
+    changeRequestId
+  });
+}
 
 // Future checkout planning races use public commands, not synthetic materialization.
 const { data: planningRooms, error: planningRoomsError } = await client.from('rooms')

@@ -30,6 +30,15 @@ describe('RFC Web Push provider',()=>{
     const result=await new RfcWebPushProvider(config,fetcher as typeof fetch,()=>1_000).send(subscription,payload,notificationId,5_000,'v1');
     expect(result.outcome).toBe(outcome);expect(fetcher).toHaveBeenCalledOnce();
   });
+  it('delivers availability request links through the same privacy-preserving push envelope',async()=>{
+    const fetcher=vi.fn(async(_url:string|URL|Request,_init?:RequestInit)=>new Response(null,{status:201}));
+    const availability=JSON.stringify({...JSON.parse(payload),deepLink:{kind:'availabilityRequest',entityId:notificationId}});
+    expect((await new RfcWebPushProvider(config,fetcher as typeof fetch,()=>1_000).send(subscription,availability,notificationId,5_000,'v1')).outcome).toBe('accepted');
+    expect(fetcher).toHaveBeenCalledOnce();
+    const encrypted=Buffer.from(fetcher.mock.calls[0]?.[1]?.body as Uint8Array).toString('utf8');
+    expect(encrypted).not.toContain('1234');
+    expect(encrypted).not.toContain('raw secret');
+  });
   it('normalizes Retry-After and keeps endpoint/title/PIN out of encrypted request bytes',async()=>{
     let request:RequestInit|undefined;
     const provider=new RfcWebPushProvider(config,async(_url,init)=>{request=init;return new Response(null,{status:429,headers:{'retry-after':'99999'}});},()=>1_000);

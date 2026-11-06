@@ -1,8 +1,8 @@
 begin;
 
-select plan(65);
+select plan(66);
 
-select is((select count(*) from private.notification_event_catalog),60::bigint,
+select is((select count(*) from private.notification_event_catalog),63::bigint,
   'source-controlled catalog contains every approved event family');
 select is((select to_jsonb(c) from private.notification_event_catalog c
   where event_family='post_approval_room_issue.reported_admin'),
@@ -11,10 +11,10 @@ select is((select to_jsonb(c) from private.notification_event_catalog c
     "requires_action":false,"push_eligible":true,"resolver_kind":"none","deep_link_kind":"submission",
     "group_family":"post_approval_room_issue_reported","group_scope_kind":"room","contract_version":1}'::jsonb,
   'post-approval family has exactly the approved eleven metadata fields');
-select is((select count(distinct category) from private.notification_event_catalog),42::bigint,
-  'event families map to exactly 42 public categories');
-select ok(bool_and(deep_link_kind in ('cleaningTarget','assignmentRequest','submission','complaintCase','payrollCycle','payrollProfile')),
-  'catalog deep links use only the six approved kinds') from private.notification_event_catalog;
+select is((select count(distinct category) from private.notification_event_catalog),45::bigint,
+  'event families map to exactly 45 public categories');
+select ok(bool_and(deep_link_kind in ('cleaningTarget','assignmentRequest','submission','complaintCase','payrollCycle','payrollProfile','availabilityRequest')),
+  'catalog deep links use only the seven approved kinds') from private.notification_event_catalog;
 select ok((select bool_and(push_eligible and not requires_action)
   from private.notification_event_catalog where event_family in (
     'reservation.extension_revoked','reservation.cancelled_revoked',
@@ -23,6 +23,9 @@ select ok((select bool_and(push_eligible and not requires_action)
     'assignment.cancellation_approved','assignment.cancellation_rejected',
     'assignment.scheduled_rolled_over','cleaning.field_completed_admin')),
   'approved informational events are push eligible without becoming actionable');
+
+select ok((select bool_and(push_eligible) from private.notification_event_catalog),
+  'all 63 notification families are eligible for PC and phone push');
 
 insert into auth.users(id) values
   ('10900000-0000-4000-8000-000000000001'),

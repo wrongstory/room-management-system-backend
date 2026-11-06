@@ -125,9 +125,9 @@ const serviceAcl = { ...ownerAcl, grantee: 'service_role' };
 
 export function validatePostApprovalUpgradeSource(manifest, entries) {
   assert.equal(manifest.schemaVersion, 1); assert.equal(manifest.release, 'dev');
-  assert.equal(manifest.hashAlgorithm, 'sha256-lf-utf8'); assert([111,112,113,114,115,116,117,118,119,120,121,122,123,124,125,126,127,128,129,130,131,132,133,134,135,136,137,138,139,140,141,142,143,144,145,146,147,148,149,150].includes(manifest.totalCount));
+  assert.equal(manifest.hashAlgorithm, 'sha256-lf-utf8'); assert([111,112,113,114,115,116,117,118,119,120,121,122,123,124,125,126,127,128,129,130,131,132,133,134,135,136,137,138,139,140,141,142,143,144,145,146,147,148,149,150,151,152].includes(manifest.totalCount));
   assert.equal(manifest.migrations.length, manifest.totalCount); assert.equal(entries.length, manifest.totalCount);
-  assert.equal(manifest.head, { 111: 'post_approval_room_issue_ledger', 112: 'room_event_effective_lookup_indexes', 113: 'common_auth_context_read', 114: 'room_board_issue_counts_single_scan', 115: 'assignment_tomorrow_backlog', 116: 'payroll_remittance_basis_materialized', 117: 'payroll_projection_materialization', 118: 'assignment_midnight_rollover', 119: 'room_pin_transfer', 120: 'photo_upload_pre_provider_retry', 121: 'photo_finalize_snapshot', 122: 'post_approval_memo_only', 123: 'cleaning_overdue_delivery_clock', 124: 'assignment_card_hydration', 125: 'developer_reset_preview', 126: 'photo_collection_upload_batch', 127: 'developer_reset_row_impact', 128: 'developer_operational_safety_gates', 129: 'developer_reset_template_inventory', 130: 'operation_admission_authority', 131: 'operation_atomic_audit_admission', 132: 'operation_worker_admission', 133: 'operation_scheduler_admission', 134: 'operation_pin_worker_admission', 135: 'developer_reset_receipt_store', 136: 'developer_template_handover_effect', 137: 'operation_lifecycle_admission', 138: 'room_ready_correction', 139: 'password_change_prepare_effect_marker', 140: 'assignment_instruction_memo', 141: 'operation_offline_resolution_admission', 142: 'password_effect_completion', 143: 'room_arrival_readiness_projection', 144: 'room_fixed_memo', 145: 'current_week_availability_approval', 146: 'db_lint_source_corrections', 147: 'availability_guard_unused_parameter', 148: 'room_type_cleaning_fee', 149: 'assignment_change_request_history_acl', 150: 'finite_service_role_authority' }[manifest.totalCount]);
+  assert.equal(manifest.head, { 111: 'post_approval_room_issue_ledger', 112: 'room_event_effective_lookup_indexes', 113: 'common_auth_context_read', 114: 'room_board_issue_counts_single_scan', 115: 'assignment_tomorrow_backlog', 116: 'payroll_remittance_basis_materialized', 117: 'payroll_projection_materialization', 118: 'assignment_midnight_rollover', 119: 'room_pin_transfer', 120: 'photo_upload_pre_provider_retry', 121: 'photo_finalize_snapshot', 122: 'post_approval_memo_only', 123: 'cleaning_overdue_delivery_clock', 124: 'assignment_card_hydration', 125: 'developer_reset_preview', 126: 'photo_collection_upload_batch', 127: 'developer_reset_row_impact', 128: 'developer_operational_safety_gates', 129: 'developer_reset_template_inventory', 130: 'operation_admission_authority', 131: 'operation_atomic_audit_admission', 132: 'operation_worker_admission', 133: 'operation_scheduler_admission', 134: 'operation_pin_worker_admission', 135: 'developer_reset_receipt_store', 136: 'developer_template_handover_effect', 137: 'operation_lifecycle_admission', 138: 'room_ready_correction', 139: 'password_change_prepare_effect_marker', 140: 'assignment_instruction_memo', 141: 'operation_offline_resolution_admission', 142: 'password_effect_completion', 143: 'room_arrival_readiness_projection', 144: 'room_fixed_memo', 145: 'current_week_availability_approval', 146: 'db_lint_source_corrections', 147: 'availability_guard_unused_parameter', 148: 'room_type_cleaning_fee', 149: 'assignment_change_request_history_acl', 150: 'finite_service_role_authority', 151: 'availability_change_notifications', 152: 'all_notification_device_push' }[manifest.totalCount]);
   assert.equal(manifest.pending.head, manifest.head); assert.equal(manifest.pending.count, manifest.totalCount - 78);
   assert.deepEqual(manifest.baseline, { count: 78, head: 'reservation_bookability_optional_guest_count' });
   assert.equal(sha(JSON.stringify(manifest.migrations.slice(0, 110))), POST_APPROVAL_UPGRADE_PREFIX_SHA256);
@@ -333,6 +333,14 @@ export function validatePostApprovalUpgradeSource(manifest, entries) {
     assert.equal(validated[149].file, '20261104211056_finite_service_role_authority.sql');
     assert.equal(validated[149].sha256, 'fc2005d02a4318e1ee76bd54c6bc6d645529cc5e409b35726021201468275586', 'Only reviewed finite-authority150 tail permitted');
   }
+  if (validated.length >= 152) {
+    assert.equal(validated[151].file, '20261106010813_all_notification_device_push.sql');
+    assert.equal(validated[151].sha256, '83d7c946f14b58c30b788daa64d807b3a55a454ba66a3d51d1451b10b19307f7', 'Only reviewed all-push152 tail permitted');
+  }
+  if (validated.length >= 151) {
+    assert.equal(validated[150].file, '20261106002729_availability_change_notifications.sql');
+    assert.equal(validated[150].sha256, '949a3eda43e59c156b9430106ea0e5b9f1ab49176c480912403fb89db1ded8cb', 'Only reviewed availability-notifications151 tail permitted');
+  }
   return { entries: validated, ledger: validated[110].canonical };
 }
 export function validatePostApprovalUpgradeLocal({ args, env, config, endpoint, status, container, cliVersion }) {
@@ -350,7 +358,7 @@ export function validatePostApprovalUpgradeLocal({ args, env, config, endpoint, 
   return { ...local, endpoint: localEndpoint };
 }
 export function assertPostApprovalUpgradeHistory(actual, source, installed = source.entries.length) {
-  assert([110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142, 143, 144, 145, 146, 147, 148, 149, 150].includes(installed) && installed <= source.entries.length);
+  assert([110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142, 143, 144, 145, 146, 147, 148, 149, 150, 151, 152].includes(installed) && installed <= source.entries.length);
   assert.deepEqual(actual, source.entries.slice(0, installed).map(({ version, name }) => ({ version, name })),
     'Exact version/name history is required, not count/head only');
 }

@@ -8,6 +8,34 @@ export const APPROVED_UPGRADE_NOTIFICATION_CATALOG_ROW = Object.freeze({
   requires_action: false, push_eligible: true, resolver_kind: 'none', deep_link_kind: 'submission',
   group_family: 'post_approval_room_issue_reported', group_scope_kind: 'room', contract_version: 1,
 });
+export const APPROVED_AVAILABILITY_NOTIFICATION_ROWS = Object.freeze(['requested','approved','rejected'].map(phase => Object.freeze({
+  event_family: `availability.change_${phase}`, category: `availability_change_${phase}`,
+  source_entity_kind: 'availability_change_request',
+  recipient_capability: phase === 'requested' ? 'admin.availability_decider' : 'maid.availability_owner',
+  requires_action: phase === 'requested', push_eligible: true,
+  resolver_kind: phase === 'requested' ? 'availability_decision' : 'none', deep_link_kind: 'availabilityRequest',
+  group_family: `availability_change_${phase}`, group_scope_kind: 'availabilityRequest', contract_version: 1,
+})));
+export const APPROVED_ALL_PUSH_FAMILIES = Object.freeze([
+  'inspection.original_approved',
+  'inspection.reclean_approved',
+  'inspection.complaint_rework_approved',
+  'inspection.complaint_rework_rejected',
+  'complaint.received',
+  'complaint.corrected',
+  'complaint.acknowledged',
+  'complaint.closed',
+  'payroll.adjustment_recorded',
+  'payroll.adjustment_reversed',
+  'payroll.late_earning_carried',
+  'payroll.payment_started',
+  'payroll.offset_settled',
+  'payroll.payment_check_recorded',
+  'payroll.payment_paid',
+  'payroll.payment_reopened'
+]);
+const approvedAdditions = expectedCount => [APPROVED_UPGRADE_NOTIFICATION_CATALOG_ROW,
+  ...(expectedCount >= 151 ? APPROVED_AVAILABILITY_NOTIFICATION_ROWS : [])];
 const catalogTable = 'private.notification_event_catalog';
 const literal = value => `'${value.replaceAll("'", "''")}'`;
 
@@ -26,8 +54,8 @@ function checkExpectedCount(expectedCount) {
   // 147 removes one unused private helper argument without notification catalog changes.
   // 150 narrows exactly 33 service privileges without catalog row changes.
   // 149 only revokes destructive request-history grants; notification rows remain exact.
-  assert(Number.isSafeInteger(expectedCount) && expectedCount >= 95 && expectedCount <= 150,
-    'Only the audited95..150 upgrade range is supported; 112..150 add no catalog rows');
+  assert(Number.isSafeInteger(expectedCount) && expectedCount >= 95 && expectedCount <= 152,
+    'Only the audited95..152 upgrade range is supported; 151 adds exactly three availability families');
 }
 function catalogRows(value) {
   assert(Array.isArray(value), 'An existing baseline notification catalog is required');
@@ -44,6 +72,26 @@ function catalogRows(value) {
   return [...value].sort((a, b) => a.event_family.localeCompare(b.event_family));
 }
 
+/** The 56/73 cumulative probes allow later additions but preserve every old whole row. */
+export function assertCumulativeNotificationCatalog(before, after, expectedCount) {
+  assert(Number.isSafeInteger(expectedCount) && expectedCount >= 78 && expectedCount <= 152,
+    'Only the audited 78..152 cumulative upgrade range is supported');
+  const previous = catalogRows(before), installed = catalogRows(after);
+  assert(previous.length > 0, 'The existing cumulative baseline catalog cannot be empty');
+  if (expectedCount === 152) {
+    assert.equal(previous.filter(row => APPROVED_ALL_PUSH_FAMILIES.includes(row.event_family)
+      && row.push_eligible === false).length, APPROVED_ALL_PUSH_FAMILIES.length,
+    'Exactly sixteen existing false-to-true flags are reviewed');
+  }
+  const byFamily = new Map(installed.map(row => [row.event_family, row]));
+  for (const row of previous) {
+    const expected = expectedCount === 152 && APPROVED_ALL_PUSH_FAMILIES.includes(row.event_family)
+      ? { ...row, push_eligible: true } : row;
+    assert.deepEqual(byFamily.get(row.event_family), expected,
+      'Every cumulative baseline catalog row must remain exact except the approved sixteen push flags');
+  }
+}
+
 /** Compare every whole old catalog row; permit only the exact new111 metadata. */
 export function assertUpgradeNotificationCatalog(before, after, expectedCount) {
   checkExpectedCount(expectedCount);
@@ -56,14 +104,18 @@ export function assertUpgradeNotificationCatalog(before, after, expectedCount) {
     return;
   }
   const previous = catalogRows(before), installed = catalogRows(after);
-  const family = APPROVED_UPGRADE_NOTIFICATION_CATALOG_ROW.event_family;
-  assert(!previous.some(row => row.event_family === family), 'The111 family cannot pre-exist the baseline');
-  const added = installed.filter(row => row.event_family === family);
-  assert.equal(added.length, 1, 'Exactly one approved111 notification catalog row is required');
-  assert.deepEqual(added[0], APPROVED_UPGRADE_NOTIFICATION_CATALOG_ROW,
-    'Every one of the11 approved typed metadata fields must match, with no extra fields');
-  assert.equal(installed.length, previous.length + 1, 'No other catalog addition is permitted');
-  assert.deepEqual(installed.filter(row => row.event_family !== family), previous,
+  const additions = approvedAdditions(expectedCount), families = new Set(additions.map(row => row.event_family));
+  assert(!previous.some(row => families.has(row.event_family)), 'Approved additions cannot pre-exist the baseline');
+  assert.deepEqual(catalogRows(installed.filter(row => families.has(row.event_family))), catalogRows(additions),
+    'Every approved typed metadata field must match, with no missing or extra family or field');
+  assert.equal(installed.length, previous.length + additions.length, 'No other catalog addition is permitted');
+  const expectedPrevious = previous.map(row => expectedCount >= 152 && APPROVED_ALL_PUSH_FAMILIES.includes(row.event_family)
+    ? {...row, push_eligible: true} : row);
+  if (expectedCount >= 152) {
+    assert.equal(previous.filter(row => APPROVED_ALL_PUSH_FAMILIES.includes(row.event_family) && row.push_eligible === false).length,
+      APPROVED_ALL_PUSH_FAMILIES.length, 'Exactly sixteen existing false-to-true flags are reviewed');
+  }
+  assert.deepEqual(installed.filter(row => !families.has(row.event_family)), expectedPrevious,
     'Every baseline catalog whole row remains exact; no mutation, removal or extra family');
 }
 
@@ -86,9 +138,12 @@ export function upgradeHistorySnapshotSql(shape, expectedCount, excludeApprovedA
     assert(Array.isArray(columns) && columns.length > 0 && new Set(columns).size === columns.length
       && columns.every(column => typeof column === 'string' && /^[a-z_][a-z_0-9]*$/.test(column)),
     'Original baseline column identifiers');
+    const projection = exclude && expectedCount >= 152 && table === catalogTable
+      ? `case when t.event_family in (${APPROVED_ALL_PUSH_FAMILIES.map(literal).join(',')}) then to_jsonb(t)||jsonb_build_object('push_eligible',false) else to_jsonb(t) end`
+      : 'to_jsonb(t)';
     const where = exclude && table === catalogTable
-      ? ` where t.event_family<>${literal(APPROVED_UPGRADE_NOTIFICATION_CATALOG_ROW.event_family)}` : '';
-    return `select ${literal(table)} tag,(select jsonb_object_agg(key,value) from jsonb_each(to_jsonb(t))
+      ? ` where ${approvedAdditions(expectedCount).map(row => `t.event_family<>${literal(row.event_family)}`).join(' and ')}` : '';
+    return `select ${literal(table)} tag,(select jsonb_object_agg(key,value) from jsonb_each(${projection})
       where key=any(array[${columns.map(literal).join(',')}]::text[]))::text data from ${table} t${where}`;
   });
   const wholeCatalog = catalog

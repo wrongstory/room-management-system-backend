@@ -10,6 +10,13 @@ export const APPROVED_UPGRADE_NOTIFICATION_CATALOG_ROW: Readonly<Record<string, 
 export function assertUpgradeNotificationCatalog(
   before: unknown, after: unknown, expectedCount: number
 ): void;
+export function assertCumulativeNotificationCatalog(
+  before: unknown, after: unknown, expectedCount: number
+): void;
 export function upgradeHistorySnapshotSql(
   shape: UpgradeHistoryShape[], expectedCount: number, excludeApprovedAddition?: boolean
 ): string;
+
+export const APPROVED_AVAILABILITY_NOTIFICATION_ROWS: ReadonlyArray<Readonly<Record<string, string | number | boolean>>>;
+
+export const APPROVED_ALL_PUSH_FAMILIES: ReadonlyArray<string>;

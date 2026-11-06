@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
-  availabilityRaceWriteMode, isExpectedAvailabilityCommitCollision, pastAvailableDatesForApproval,
+  assertAvailabilityRaceNotifications, availabilityRaceWriteMode, isExpectedAvailabilityCommitCollision, pastAvailableDatesForApproval,
 } from '../scripts/lib/availability-race-fixture.mjs';
 
 const read = path => readFileSync(path, 'utf8').replaceAll('\r\n', '\n');
@@ -68,6 +68,36 @@ describe('#559 current-week availability fixtures (no DB)', () => {
     ['XX000', 'ASSIGNMENT_AVAILABILITY_STALE'],
   ])('never counts unrelated error %s / %s as the race loser', (code, message) => {
     expect(isExpectedAvailabilityCommitCollision([success, { error: { code, message } }])).toBe(false);
+  });
+
+  const noticeContext = { approvalSucceeded: true, maidProfileId: 'maid-owner', changeRequestId: 'winning-request' };
+  const approvalNotice = {
+    recipient_profile_id: noticeContext.maidProfileId,
+    event_family: 'availability.change_approved',
+    deep_link_kind: 'availabilityRequest',
+    deep_link_entity_id: noticeContext.changeRequestId,
+  };
+  it('requires one correctly routed approval notice for a winner and rejects missing or duplicate notices', () => {
+    expect(() => assertAvailabilityRaceNotifications([approvalNotice], noticeContext)).not.toThrow();
+    expect(() => assertAvailabilityRaceNotifications([], noticeContext)).toThrow('exactly');
+    expect(() => assertAvailabilityRaceNotifications([approvalNotice, approvalNotice], noticeContext)).toThrow('exactly');
+  });
+  it('requires the losing approval transaction to emit no notice', () => {
+    const loser = { ...noticeContext, approvalSucceeded: false };
+    expect(() => assertAvailabilityRaceNotifications([], loser)).not.toThrow();
+    expect(() => assertAvailabilityRaceNotifications([approvalNotice], loser)).toThrow('exactly');
+  });
+  it.each([
+    ['recipient_profile_id', 'another-maid'], ['event_family', 'availability.change_rejected'],
+    ['deep_link_kind', 'cleaningTarget'], ['deep_link_entity_id', 'another-request'],
+  ])('rejects a winner notice with incorrect %s', (field, value) => {
+    expect(() => assertAvailabilityRaceNotifications([{ ...approvalNotice, [field]: value }], noticeContext)).toThrow();
+  });
+  it('rejects missing query results and unknown race outcomes instead of assuming zero notices', () => {
+    for (const value of [null, undefined, {}]) {
+      expect(() => assertAvailabilityRaceNotifications(value, noticeContext)).toThrow('array');
+    }
+    expect(() => assertAvailabilityRaceNotifications([], { ...noticeContext, approvalSucceeded: undefined })).toThrow('outcome');
   });
 
   it('keeps ended-assignment SQL on the approved request path with the same actor/date/version oracle', () => {
