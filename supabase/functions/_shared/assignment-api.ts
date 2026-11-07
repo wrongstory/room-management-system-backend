@@ -1386,6 +1386,38 @@ export async function listAssignments(
   const tomorrowPlanning = actor.role === "admin" && serviceDate === tomorrow;
   const includeOverdue = !includeHistory &&
     (serviceDate === today || serviceDate === tomorrow);
+  if (!includeOverdue) {
+    const { data, error } = await clients.admin.rpc(
+      "list_assignment_rows_for_planning_date",
+      {
+        p_actor_profile_id: actor.profileId,
+        p_session_id: verifiedRequestSessionId(request),
+        p_expected_actor_role: actor.role,
+        p_date: serviceDate,
+        p_maid_profile_id: maidProfileId ?? null,
+        p_include_history: includeHistory,
+      },
+    );
+    const rows = visibleAssignmentRows(
+      completeAssignmentRows({
+        data,
+        error,
+        count: Array.isArray(data) ? data.length : null,
+      }),
+      actor,
+    );
+    const cards = await hydrateAssignments(
+      clients,
+      rows,
+      actor,
+      request,
+      !includeHistory,
+    );
+    return cards.filter((row) => {
+      const card = snapshotObject(row);
+      return (card.planningDate ?? card.serviceDate) === serviceDate;
+    });
+  }
   let query = accessTokenClient(request, clients)
     .from("cleaning_assignments")
     .select(assignmentColumns, { count: "exact" })
@@ -1453,9 +1485,6 @@ export async function listAssignments(
     request,
     !includeHistory,
   );
-  if (includeHistory || !includeOverdue) {
-    return hydrated;
-  }
   return hydrated.filter((row) => {
     const card = snapshotObject(row);
     const planningDate = card.planningDate ?? card.serviceDate;
