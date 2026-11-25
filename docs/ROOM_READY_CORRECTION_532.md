@@ -1,5 +1,15 @@
 # #532 예약 가능 상태 정정과 청소 취소 확인
 
+## #619 관리자 점검 목록 (개발 소스)
+
+관리자는 `GET /v1/rooms/recovery-candidates`로 현재 점검할 객실을 조회한다. 조회 조건은 없다.
+오늘의 객실 현황을 한 번 읽고 명시적 READY 표시와 현재 입실 준비 사유 CLEANING_REQUIRED가 함께 있는 객실만 반환한다.
+응답의 `evaluatedAt`은 현황 판정 시각이며, 전체 객실 자체가 없으면 조회 시각이다. `candidates`의 각 항목에는
+roomId, roomNumber, displayStatus, readinessStatus, reasonCodes, recommendedAction이 있다.
+빈 배열은 조회 성공을 뜻한다. 오류 응답 시 조회 실패로 안내한다. 예약 기간 가용성은 별도로 조회한다.
+항목 선택 시 해당 객실의 기존 복구 미리보기를 다시 조회하고, 사용자 확인 후 확정한다.
+목록을 열거나 닫는 것만으로는 업무 상태가 바뀌지 않는다.
+
 ## 2026-11-03 최종 경합 검사 계약 보완
 
 FINAL-148-R2/run41472392339는 전체 SQL119파일/6,517건 및 앞선 직접 경합2개를 통과했으나 세 번째 READY 검사에서 실패했다. 기록된 위치는 공통 거절 assertion이며 실제 실패한 race·반환 코드·SQLSTATE는 미관측이다. 이를 실제 DB 권한 오류나 특정 race의 실패로 단정하지 않는다.

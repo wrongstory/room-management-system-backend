@@ -175,6 +175,7 @@ import {
   correctRoomOccupancy,
   createRoomOperationBlock,
   getRoom,
+  listRecoveryCandidates,
   listRoomCandles,
   listRoomEvents,
   listRoomIssues,
@@ -2105,6 +2106,15 @@ async function handleApiRequestCore(
     if (request.method === "GET" && path === "/v1/rooms/candles") {
       const response = jsonResponse(
         await listRoomCandles(request, clients, actor),
+        200,
+        corsHeaders,
+      );
+      response.headers.set("Cache-Control", "no-store");
+      return response;
+    }
+    if (request.method === "GET" && path === "/v1/rooms/recovery-candidates") {
+      const response = jsonResponse(
+        await listRecoveryCandidates(request, clients, actor),
         200,
         corsHeaders,
       );

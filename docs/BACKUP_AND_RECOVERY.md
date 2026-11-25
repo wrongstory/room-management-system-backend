@@ -73,7 +73,7 @@ psql \
 
 ## 로컬 합성 dry-run
 
-Issue #171의 로컬 dry-run은 운영·recovery ref나 연결 문자열을 입력받지 않는다. `public`, `private`만 dump하고 같은 로컬 Supabase Postgres 컨테이너 안에 임의 이름의 일회용 DB를 만든 뒤 schema/data를 복원해 검사하고 삭제한다. `roles.sql`은 허용된 로컬 role timeout 설정만 검증하며 일회용 DB에 실행하지 않는다.
+Issue #171의 로컬 dry-run은 운영·recovery ref나 연결 문자열을 입력받지 않는다. `public`, `private`만 dump하고 같은 로컬 Supabase Postgres 컨테이너 안에 임의 이름의 일회용 DB를 만든 뒤 schema/data를 복원해 검사하고 삭제한다. `roles.sql`은 허용된 로컬 역할 설정과 관리형 Realtime의 `supabase_realtime_admin`에 대한 `log_min_messages` 설정 권한을 검증한다. 일회용 DB에는 앱의 schema/data를 복원한다.
 
 실행 전 로컬 DB는 반드시 fresh migration 상태여야 한다. 단일 명령으로 reset부터 수행하려면 다음을 사용한다.
 

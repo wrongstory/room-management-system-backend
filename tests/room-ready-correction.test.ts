@@ -191,6 +191,20 @@ describe('room-ready Fastify HTTP and Swagger contract', () => {
       .send({ error: { code: error instanceof AppError ? error.code : 'VALIDATION_ERROR' } }));
     await app.register(createRoomRoutes(test.service), { prefix: '/v1/rooms' });
     try {
+      const listUrl = '/v1/rooms/recovery-candidates';
+      const failed = await app.inject({ method: 'GET', url: listUrl });
+      expect(failed.statusCode).toBe(500);
+      const invalid = await app.inject({ method: 'GET', url: listUrl + '?serviceDate=2026-10-30' });
+      expect(invalid.statusCode).toBe(400);
+      test.rpc.mockResolvedValue({ data: [], error: null });
+      const list = await app.inject({ method: 'GET', url: listUrl });
+      expect(list.statusCode).toBe(200);
+      expect(list.headers['cache-control']).toBe('no-store');
+      expect(list.json()).toEqual({ evaluatedAt: expect.any(String), candidates: [] });
+      expect(test.rpc).toHaveBeenLastCalledWith('get_room_board_arrival_projection', {
+        p_actor_profile_id: actor.profileId, p_session_id: sessionId, p_service_date: null, p_room_id: null
+      });
+      test.rpc.mockResolvedValue({ data: preview, error: null });
       const url = `/v1/rooms/${roomId}/ready-correction`;
       const read = await app.inject({ method: 'POST', url: `${url}/preview`, payload: previewBody });
       expect(read.statusCode).toBe(200); expect(read.headers['cache-control']).toBe('no-store'); expect(read.json()).toEqual({ preview });

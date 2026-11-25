@@ -1157,6 +1157,7 @@ Google Drive 운영 계정과 OAuth 자격증명은 아직 외부 배포 전제�
 ### `[확정]` 알림
 
 - 앱 알림함은 영속 데이터다. 푸시는 그중 즉시 행동이 필요한 사건의 전달 수단이다.
+- #620 개발 후보는 열린 앱에 배정·알림 변경 신호를 전달해 현재 데이터를 다시 읽도록 한다. 메이드는 본인의 유효한 세션에서만 구독하고 재배정은 이전·새 담당 양쪽 화면에 반영한다. 기기 푸시 권한과 별개로 동작한다. [구독 계약과 검증 기준](./ASSIGNMENT_LIVE_UPDATES.md)
 - 관리자와 메이드의 수신 대상을 분리한다.
 - 사용자가 자기 행동으로 만든 변화는 자신에게 푸시하지 않는다.
 - #308 3차의 dev 통합 계약(PR #340)은 메이드의 정상 청소 시작을 business admin에게 typed `cleaning.started_admin` / `cleaning_started` informational 알림으로 보완한다. 원 attempt·현재 담당·assignment revision·시작 시각과 immutable `cleaning.attempt_started` 감사를 검증하며, 시작 상태/CAS/receipt/inbox/outbox는 같은 transaction이다. 모든 business admin의 inbox는 보존하고 push는 아래 active/password-complete/nonself 조건을 따른다. 새 idempotency key·완료 receipt replay로 과거 시작 알림이나 늦게 등록된 관리자 알림을 재생성하지 않는다. 기존 완료·제출·검수·담당 변경의 family/push 정책은 유지한다. 이 시작 알림은 PR #340에 포함돼 source/dev 완료했으며 운영 반영은 별도다.

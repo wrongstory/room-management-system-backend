@@ -197,6 +197,10 @@ export function validateRolesDump(source) {
     if (!statement) continue;
     if (/^(?:SET|RESET)\b/iu.test(statement)) continue;
     if (/^CREATE ROLE\s+"rms_diagnostic"$/iu.test(statement)) continue;
+
+    // pg_dumpall includes the managed Realtime parameter ACL in roles-only output.
+    // This local dry-run validates roles.sql and restores schema.sql and data.sql.
+    if (statement === 'GRANT SET ON PARAMETER "log_min_messages" TO "supabase_realtime_admin"') continue;
     if (
       /^ALTER ROLE\s+"rms_diagnostic"\s+WITH\s+NOINHERIT\s+NOCREATEROLE\s+NOCREATEDB\s+LOGIN\s+NOBYPASSRLS$/iu.test(
         statement,

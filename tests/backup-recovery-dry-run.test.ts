@@ -88,6 +88,20 @@ describe('backup recovery dry-run safety', () => {
     );
   });
 
+  it('accepts only the managed Realtime log parameter grant in the local role dump', () => {
+    const grant = 'GRANT SET ON PARAMETER "log_min_messages" TO "supabase_realtime_admin"';
+    const dump = 'SET SESSION AUTHORIZATION "supabase_admin";\n' + grant + ';\nRESET SESSION AUTHORIZATION;';
+    expect(() => validateRolesDump(dump)).not.toThrow();
+    for (const statement of [
+      grant.replace('log_min_messages', 'session_replication_role'),
+      grant.replace('supabase_realtime_admin', 'authenticated'),
+      grant.replace('GRANT SET', 'GRANT ALTER SYSTEM'),
+      grant + ' WITH GRANT OPTION',
+    ]) {
+      expect(() => validateRolesDump(statement + ';')).toThrow('BACKUP_ROLES_COMMAND_NOT_ALLOWED');
+    }
+  });
+
   it('fails closed when an artifact is changed after the manifest is written', async () => {
     const directory = await mkdtemp(resolve(tmpdir(), 'rms-backup-hash-'));
     const filePath = resolve(directory, 'schema.sql');

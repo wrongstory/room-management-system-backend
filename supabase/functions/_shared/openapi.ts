@@ -5913,6 +5913,73 @@ export const openApiDocument = {
         },
       },
     },
+    "/v1/rooms/recovery-candidates": {
+      get: {
+        tags: ["Rooms"],
+        operationId: "listRoomRecoveryCandidates",
+        description:
+          "업무 관리자가 조회 조건 없이 호출합니다. 점검할 객실을 선택하면 해당 객실의 복구 미리보기를 새로 조회하세요. 빈 목록은 조회 성공을 뜻하며 실패 응답은 별도로 안내합니다.",
+        summary: "예약 가능 표시와 현재 청소 의무가 충돌하는 객실 조회",
+        security: [{ bearerAuth: [] }],
+        "x-required-roles": ["admin"],
+        responses: {
+          "200": {
+            description:
+              "현재 시점의 점검 목록. 복구 전 개별 미리보기가 필요합니다.",
+            headers: { "Cache-Control": noStoreHeader },
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["evaluatedAt", "candidates"],
+                  properties: {
+                    evaluatedAt: { type: "string", format: "date-time" },
+                    candidates: {
+                      type: "array",
+                      items: {
+                        type: "object",
+                        required: [
+                          "roomId",
+                          "roomNumber",
+                          "displayStatus",
+                          "readinessStatus",
+                          "reasonCodes",
+                          "recommendedAction",
+                        ],
+                        properties: {
+                          roomId: { type: "string", format: "uuid" },
+                          roomNumber: { type: "string" },
+                          displayStatus: { type: "string", const: "READY" },
+                          readinessStatus: {
+                            type: "string",
+                            enum: ["CLEANING_REQUIRED", "CHECKIN_BLOCKED"],
+                          },
+                          reasonCodes: {
+                            type: "array",
+                            items: {
+                              type: "string",
+                              const: "CLEANING_REQUIRED",
+                            },
+                          },
+                          recommendedAction: {
+                            type: "string",
+                            const: "PREVIEW_READY_CORRECTION",
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          "400": errorResponse,
+          "401": errorResponse,
+          "403": errorResponse,
+          "500": errorResponse,
+        },
+      },
+    },
     "/v1/rooms": {
       get: {
         tags: ["Rooms"],
