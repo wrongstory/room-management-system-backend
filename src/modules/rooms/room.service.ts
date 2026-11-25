@@ -1405,7 +1405,8 @@ export class SupabaseRoomService implements RoomService {
     if (error) {
       throw roomError(error);
     }
-    return ((data ?? []) as RoomProjectionRow[]).map(toRoom);
+    if (!Array.isArray(data)) throw roomProjectionError();
+    return (data as RoomProjectionRow[]).map(toRoom);
   }
 
   async get(actor: Actor, roomId: string): Promise<RoomSummary> {

@@ -1,3 +1,4 @@
+import { roomRecoveryCandidates } from "../../../src/modules/rooms/room-recovery-candidates.ts";
 import {
   feeRoomTypeId,
   parseRoomTypeFeeInput,
@@ -836,6 +837,18 @@ export function roomListServiceDate(request: Request): string | null {
   return value;
 }
 
+export async function listRecoveryCandidates(
+  request: Request,
+  clients: EdgeClients,
+  actor: EdgeActor,
+) {
+  requireRoomAdmin(actor);
+  if (new URL(request.url).searchParams.size) {
+    validationError("조회 조건을 확인해 주세요.");
+  }
+  return roomRecoveryCandidates(await listRooms(request, clients, actor));
+}
+
 export async function listRooms(
   request: Request,
   clients: EdgeClients,
@@ -853,6 +866,13 @@ export async function listRooms(
     },
   );
   if (error) throw roomDatabaseError(error);
+  if (!Array.isArray(data)) {
+    throw new EdgeError(
+      500,
+      "ROOM_COMMAND_FAILED",
+      "객실 현황을 확인하지 못했습니다.",
+    );
+  }
   return toRoomProjections(data);
 }
 
