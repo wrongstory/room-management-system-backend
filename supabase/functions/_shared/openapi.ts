@@ -5917,6 +5917,8 @@ export const openApiDocument = {
       get: {
         tags: ["Rooms"],
         operationId: "listRoomRecoveryCandidates",
+        description:
+          "업무 관리자가 조회 조건 없이 호출합니다. 점검할 객실을 선택하면 해당 객실의 복구 미리보기를 새로 조회하세요. 빈 목록은 조회 성공을 뜻하며 실패 응답은 별도로 안내합니다.",
         summary: "예약 가능 표시와 현재 청소 의무가 충돌하는 객실 조회",
         security: [{ bearerAuth: [] }],
         "x-required-roles": ["admin"],
