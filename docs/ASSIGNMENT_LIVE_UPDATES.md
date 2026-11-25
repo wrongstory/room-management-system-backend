@@ -18,8 +18,8 @@ DB는 채널 가입 시 로그인한 사용자, 정확한 세션, 비밀번호 �
 
 ## 검증과 운영 적용
 
-1. 일반 개발 PR은 앱 검사, manifest, 소스 QA로 검증한다. 승인된 최종 격리 DB 검증에서 `assignment_live_updates.sql`의 통보·메모·재배정·회수·읽음·세션 검사를 실행한다. SQL 테스트는 DB 발송 경계를 관찰하며 실제 WebSocket 연결도 후속으로 확인한다.
-2. 연결 시험 전 Supabase의 관리형 `realtime.messages`, `realtime.send`, `realtime.topic`, 테이블 RLS와 155번의 세 정책 설치 여부를 확인한다. 운영에서는 현재 사용 중인 다른 기능 영향을 확인한 뒤 비공개 채널 설정으로 열고, 계정 A·B와 익명으로 실제 수신과 송신 차단을 검증한다. Realtime이 없는 격리 DB에서는 권한 도우미와 이벤트 생성은 검증할 수 있으며, 정책·WAL 송신 검증은 Realtime이 준비된 환경에서 수행한다.
+1. 일반 개발 PR은 앱 검사, manifest, 소스 QA로 검증한다. 승인된 최종 격리 DB 검증에서 `assignment_live_updates.sql`의 통보·메모·재배정·회수·읽음·세션 검사를 실행한다. 격리 환경은 Supabase CLI의 Realtime 초기화로 시작과 재구축 때 관리형 Broadcast 스키마를 설치한다. SQL 검사에서 155번 정책과 실제 Broadcast 저장 및 수신자별 RLS를 확인한 뒤 배정 명령을 검사한다. CI의 `--exclude realtime`은 상시 실행 컨테이너를 제외한다. 실제 WebSocket 연결은 통합 검증에서 확인한다.
+2. 연결 시험 전 Supabase의 관리형 `realtime.messages`, `realtime.send`, `realtime.topic`, 테이블 RLS와 155번의 세 정책 설치 여부를 확인한다. 운영에서는 현재 사용 중인 다른 기능 영향을 확인한 뒤 비공개 채널 설정으로 열고, 계정 A·B와 익명으로 실제 수신과 송신 차단을 검증한다.
 3. iPhone·Android에서 새 배정, 잠금 알림, 권한 거부, 회수, 재연결과 중복 소리를 확인한다. 정상 네트워크의 열린 화면 반영은 p95 3초를 목표로 한다. close/rejoin과 관계없이 세션 폐기 뒤 생긴 새 신호가 이전 채널에 도착하는지 함께 검사한다.
 4. 운영 마이그레이션은 실행 전 별도 승인. 프런트는 해당 운영 환경의 Realtime 검증 결과를 확인한 뒤 연결을 활성화한다. 신호 오류가 관찰되면 프런트는 재조회 경로로 복귀할 수 있다.
 

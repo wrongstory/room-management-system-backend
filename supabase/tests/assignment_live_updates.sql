@@ -1,17 +1,7 @@
--- #620. Use the actual business commands and capture the transaction-local
--- publish boundary. The separately approved live socket check covers WAL
--- delivery and the managed Realtime service.
+-- #620. Verify managed Broadcast and its RLS, then capture the publish
+-- boundary while testing the business commands. Live socket delivery is separate.
 begin;
 select no_plan();
-
-create temp table captured_live_updates(topic text not null, payload jsonb not null);
-create or replace function private.publish_live_update(p_payload jsonb, p_topic text)
-returns void language plpgsql set search_path = ''
-as $$
-begin
-  insert into pg_temp.captured_live_updates(topic, payload) values (p_topic, p_payload);
-end;
-$$;
 
 create function pg_temp.live_id(n integer) returns uuid language sql immutable as $$
   select ('62000000-0000-4000-8000-' || lpad(n::text, 12, '0'))::uuid
@@ -58,9 +48,37 @@ from unnest(array['anon','authenticated','service_role']) role;
 select ok(not has_table_privilege('authenticated', 'public.notifications', 'SELECT'),
   'raw notification contents stay behind the existing API');
 
+select ok(
+  (select relrowsecurity from pg_catalog.pg_class where oid = 'realtime.messages'::regclass)
+  and 3 = (select count(*) from pg_catalog.pg_policy
+    where polrelid = 'realtime.messages'::regclass
+      and polname in ('rms_live_updates_receive', 'rms_live_updates_scope', 'rms_live_updates_server_only')),
+  'migration installed all three Broadcast policies with RLS enabled'
+);
+do $$
+begin
+  perform private.send_live_update(pg_temp.live_id(2), 'assignments');
+end;
+$$;
+select is(
+  (select count(distinct topic) from realtime.messages
+   where event = 'changed' and extension = 'broadcast' and private
+     and payload @> '{"version":1,"changed":["assignments"]}'::jsonb
+     and topic in (pg_temp.topic(202), pg_temp.topic(207))),
+  2::bigint,
+  'the real publisher stores a private Broadcast for both current sessions'
+);
+
 set local role authenticated;
 select pg_temp.live_claim(102, pg_temp.live_id(202)::text);
 select ok(private.can_receive_live_updates(pg_temp.topic(202)), 'A can join the exact current session topic');
+select set_config('realtime.topic', pg_temp.topic(202), true);
+select is((select count(*) from realtime.messages where topic = pg_temp.topic(202)), 1::bigint,
+  'the intended session can read its private Broadcast through installed RLS');
+select pg_temp.live_claim(103, pg_temp.live_id(203)::text);
+select is((select count(*) from realtime.messages where topic = pg_temp.topic(202)), 0::bigint,
+  'the other maid cannot read the same Broadcast through installed RLS');
+select pg_temp.live_claim(102, pg_temp.live_id(202)::text);
 select ok(not private.can_receive_live_updates(pg_temp.topic(203)), 'A cannot join the B topic');
 select ok(not private.can_receive_live_updates(pg_temp.topic(207)), 'a different session for A gets its own topic');
 select pg_temp.live_claim(103, pg_temp.live_id(202)::text);
@@ -77,6 +95,16 @@ select pg_temp.live_claim(101, pg_temp.live_id(201)::text);
 select ok(private.can_receive_live_updates(pg_temp.topic(201)), 'admin can join their own inbox topic');
 reset role;
 select set_config('request.jwt.claims', '{}', true);
+select set_config('realtime.topic', '', true);
+
+create temp table captured_live_updates(topic text not null, payload jsonb not null);
+create or replace function private.publish_live_update(p_payload jsonb, p_topic text)
+returns void language plpgsql set search_path = ''
+as $$
+begin
+  insert into pg_temp.captured_live_updates(topic, payload) values (p_topic, p_payload);
+end;
+$$;
 
 insert into public.availability_versions(maid_profile_id, week_start, version, submitted_at)
 select pg_temp.live_id(n), pg_temp.live_day()-(extract(isodow from pg_temp.live_day())::integer-1), 1, now()
