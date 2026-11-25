@@ -12,6 +12,7 @@ const sourcePaths = [
   'src/modules/auth/auth-context.ts',
   'src/modules/rooms/room-ready-correction-contract.ts',
   'src/modules/rooms/room-arrival-contract.ts',
+  'src/modules/rooms/room-recovery-candidates.ts',
   'src/modules/rooms/room-fixed-memo-contract.ts',
   'src/modules/assignments/force-recall.ts',
   'src/modules/rooms/room-type-fee-contract.ts',

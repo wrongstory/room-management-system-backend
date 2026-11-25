@@ -5,6 +5,7 @@ import {
   correctRoomOccupancy,
   createRoomOperationBlock,
   getRoom,
+  listRecoveryCandidates,
   listRoomCandles,
   listRoomEvents,
   listRoomIssues,
@@ -626,6 +627,61 @@ Deno.test("room type catalog rejects non-admin and temporary-password actors", a
     })
   );
   assert(passwordError.code === "PASSWORD_CHANGE_REQUIRED", "password gate");
+});
+
+Deno.test("recovery candidates use one current board read after authorization", async () => {
+  const request = readRequest("/v1/rooms/recovery-candidates");
+  let calls = 0;
+  const clients = {
+    admin: {
+      rpc: (name: string, args: Record<string, unknown>) => {
+        calls++;
+        assert(
+          name === "get_room_board_arrival_projection" &&
+            args.p_room_id === null &&
+            args.p_service_date === null,
+          "current room set only",
+        );
+        return Promise.resolve({
+          data: [{
+            ...roomRow,
+            display_status_override: "READY",
+            readiness_status: "CHECKIN_BLOCKED",
+            readiness_reason_codes: ["CLEANING_REQUIRED"],
+          }],
+          error: null,
+        });
+      },
+    },
+  } as unknown as EdgeClients;
+  const denied = await captureEdgeError(() =>
+    listRecoveryCandidates(request, clients, { ...admin, role: "maid" })
+  );
+  assert(denied.status === 403 && calls === 0, "deny before loading rooms");
+  const invalid = await captureEdgeError(() =>
+    listRecoveryCandidates(
+      readRequest("/v1/rooms/recovery-candidates?serviceDate=2026-11-01"),
+      clients,
+      admin,
+    )
+  );
+  assert(invalid.status === 400, "past or future dates are not supported");
+  const result = await listRecoveryCandidates(request, clients, admin);
+  assert(
+    result.candidates.length === 1 && result.candidates[0].roomId === roomId &&
+      Number(calls) === 1,
+    "one candidate",
+  );
+  const broken = {
+    admin: { rpc: () => Promise.resolve({ data: null, error: null }) },
+  } as unknown as EdgeClients;
+  const failure = await captureEdgeError(() =>
+    listRecoveryCandidates(request, broken, admin)
+  );
+  assert(
+    failure.status === 500,
+    "failed read cannot return a healthy empty list",
+  );
 });
 
 Deno.test("room list and detail use one exact camelCase projection", async () => {

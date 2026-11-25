@@ -12,6 +12,8 @@ import type { RoomService } from './room.service.js';
 import { roomReadyContractAppError } from './room.service.js';
 import { parseRoomReadyPreviewRequest, parseRoomReadyCorrectionRequest } from './room-ready-correction-contract.js';
 
+import { roomRecoveryCandidates } from './room-recovery-candidates.js';
+
 const roomIdSchema = z.object({ roomId: z.uuid() });
 const blockIdSchema = z.object({ roomId: z.uuid(), blockId: z.uuid() });
 const issueIdSchema = z.object({ roomId: z.uuid(), issueId: z.uuid() });
@@ -197,6 +199,12 @@ export function createRoomRoutes(roomService: RoomService): FastifyPluginAsync {
       if(Object.keys(request.query as object).length) throw new AppError(400,'ROOM_FIXED_MEMO_INVALID','조회 조건을 확인해 주세요.');
       const {roomId}=roomIdSchema.parse(request.params);
       return reply.header('Cache-Control','no-store').send({fixedMemo:await roomService.setFixedMemo(request.actor,{roomId,body:request.body,idempotencyKey:idempotencyKey(request)})});
+    });
+
+    app.get('/recovery-candidates', { preHandler: admin }, async (request, reply) => {
+      reply.header('Cache-Control', 'no-store');
+      z.object({}).strict().parse(request.query);
+      return roomRecoveryCandidates(await roomService.list(request.actor));
     });
 
     app.get('/', { preHandler: admin }, async (request, reply) => {
