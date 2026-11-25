@@ -199,7 +199,7 @@ Deno.test("developer runtime separates the bundled release from schema and engin
 
 Deno.test("developer source migration head uses a stable migration name", () => {
   assert(
-    expectedMigrationName === "assignment_planned_work_date",
+    expectedMigrationName === "assignment_live_updates",
     "expected migration must not depend on a remote execution timestamp",
   );
   const get = Deno.env.get;
